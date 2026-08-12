@@ -5,6 +5,8 @@
 
 Flattener utilities for DB2.
 
+Requires Python 3.10 or newer.
+
 ## Install (dev)
 
 ```bash
@@ -22,6 +24,12 @@ With coverage:
 ```bash
 pytest --cov=db2_flattener --cov-report=term-missing
 ```
+
+CI runs the suite on Python 3.10 and 3.14 — the floor declared by
+`requires-python` and the newest release. This is a zero-dependency pure-Python
+library, so the versions in between have nothing to break that those two ends
+would not also catch. Coverage is uploaded to Coveralls once per commit, from
+the 3.10 job.
 
 ## Lint and format
 
