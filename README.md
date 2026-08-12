@@ -23,6 +23,24 @@ With coverage:
 pytest --cov=db2_flattener --cov-report=term-missing
 ```
 
+## Lint and format
+
+Ruff handles both, configured in `pyproject.toml`. Install the pre-commit hook
+once and it runs on every commit:
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+The hook formats in place and then lints. To run it over the whole tree without
+committing:
+
+```bash
+pre-commit run --all-files
+```
+
+CI runs the same checks as `ruff check .` and `ruff format --check .`.
+
 ## License
 
 MIT. Copyright (c) 2026 Lattice Data Coordination. See [LICENSE](LICENSE).

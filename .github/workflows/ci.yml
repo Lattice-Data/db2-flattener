@@ -36,6 +36,11 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      # --check so CI fails rather than reformatting; the pre-commit hook is
+      # what writes the fixes locally.
+      - name: Format check
+        run: ruff format --check .
+
       - name: Test with coverage
         run: |
           pytest \

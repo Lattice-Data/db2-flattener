@@ -1,0 +1,45 @@
+# Pre-commit: runs before each commit (auto-format + lint).
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# Ruff reads its config from pyproject.toml (target-version, line-length,
+# lint.select), so these hooks enforce exactly what CI enforces.
+#
+# The format hook *writes* fixes (`ruff format`); CI runs `ruff format --check`
+# so unformatted code cannot merge even from a contributor without the hook
+# installed. Lint is check-only here; run `ruff check --fix` locally if you want
+# the same auto-fix behavior for fixable rules.
+#
+# The hooks pin their own ruff via additional_dependencies rather than using
+# whatever is on PATH, so every developer lints with the same binary CI does.
+# pre-commit cannot read the pin out of pyproject.toml, so the version lives in
+# both places - keep it in sync with the `ruff==` pin in pyproject.toml's dev
+# extra, which is what CI installs.
+#
+# No pytest hook: the suite runs in CI across py3.10-3.12, and a commit-time
+# hook would only duplicate that against whichever interpreter is local.
+
+# Floor rather than an exact pin: pre-commit 2.x/3.x differ on default hook
+# stages, so an old client can silently skip or misfire hooks that pass here.
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  # 1) Ruff format - auto-fix on commit (not --check; that would only fail)
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format .
+        language: python
+        additional_dependencies: ["ruff==0.16.1"]
+        pass_filenames: false
+
+  # 2) Ruff lint (same command as CI: ruff check .)
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check .
+        language: python
+        additional_dependencies: ["ruff==0.16.1"]
+        pass_filenames: false
