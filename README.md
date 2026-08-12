@@ -3,9 +3,9 @@
 [![CI](https://github.com/Lattice-Data/db2-flattener/actions/workflows/ci.yml/badge.svg)](https://github.com/Lattice-Data/db2-flattener/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/db2-flattener/badge.svg?branch=main)](https://coveralls.io/github/Lattice-Data/db2-flattener?branch=main)
 
-Flattener utilities for DB2.
+Flattener utility for the [Lattice Database](https://data.lattice-data.org/).
 
-Requires Python 3.10 through 3.14.
+Runs on Python 3.10 and up, through 3.14 (`requires-python = ">=3.10,<3.15"`).
 
 ## Install (dev)
 
