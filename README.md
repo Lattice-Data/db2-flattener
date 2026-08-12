@@ -5,7 +5,7 @@
 
 Flattener utilities for DB2.
 
-Requires Python 3.10 or newer.
+Requires Python 3.10 through 3.14.
 
 ## Install (dev)
 

@@ -19,9 +19,10 @@ jobs:
       matrix:
         # Floor and newest, not every version in between. This is a
         # zero-dependency pure-Python library, so the versions between the two
-        # ends have nothing to break that the ends would not also catch. 3.10 is
-        # the floor declared by requires-python in pyproject.toml -- keep the two
-        # in step.
+        # ends have nothing to break that the ends would not also catch. These
+        # two are the exact ends of the range requires-python declares in
+        # pyproject.toml (">=3.10,<3.15") -- raise them together or the package
+        # starts claiming a version nothing tests.
         python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v4
