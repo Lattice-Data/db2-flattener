@@ -5,6 +5,8 @@
 
 Flattener utilities for DB2.
 
+Requires Python 3.10 through 3.14.
+
 ## Install (dev)
 
 ```bash
@@ -22,6 +24,30 @@ With coverage:
 ```bash
 pytest --cov=db2_flattener --cov-report=term-missing
 ```
+
+CI runs the suite on Python 3.10 and 3.14 — the floor declared by
+`requires-python` and the newest release. This is a zero-dependency pure-Python
+library, so the versions in between have nothing to break that those two ends
+would not also catch. Coverage is uploaded to Coveralls once per commit, from
+the 3.10 job.
+
+## Lint and format
+
+Ruff handles both, configured in `pyproject.toml`. Install the pre-commit hook
+once and it runs on every commit:
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+The hook formats in place and then lints. To run it over the whole tree without
+committing:
+
+```bash
+pre-commit run --all-files
+```
+
+CI runs the same checks as `ruff check .` and `ruff format --check .`.
 
 ## License
 

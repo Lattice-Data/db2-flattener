@@ -17,7 +17,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # Floor and newest, not every version in between. This is a
+        # zero-dependency pure-Python library, so the versions between the two
+        # ends have nothing to break that the ends would not also catch. These
+        # two are the exact ends of the range requires-python declares in
+        # pyproject.toml (">=3.10,<3.15") -- raise them together or the package
+        # starts claiming a version nothing tests.
+        python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v7
 
@@ -36,30 +42,36 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      # --check so CI fails rather than reformatting; the pre-commit hook is
+      # what writes the fixes locally.
+      - name: Format check
+        run: ruff format --check .
+
       - name: Test with coverage
         run: |
           pytest \
             --cov=db2_flattener \
             --cov-branch \
-            --cov-report=lcov:coverage-py${{ matrix.python-version }}.lcov \
+            --cov-report=lcov \
             --cov-report=term
 
-      - name: Upload coverage to Coveralls (parallel)
+      # Uploaded from one interpreter only. Coverage is a property of the suite,
+      # not of the Python version, so one upload per matrix leg would buy no
+      # extra signal and would mean coordinating Coveralls' parallel-build
+      # protocol to merge them back into a single number. Authenticates with the
+      # built-in GITHUB_TOKEN -- no external secret.
+      #
+      # Pinned to the floor rather than the newest leg so that raising the top of
+      # the matrix does not silently move which job reports coverage.
+      #
+      # fail-on-error: the reporter downloads a binary at run time, and that
+      # download does fail from time to time. Coverage reporting going down is
+      # not a reason to call a passing test suite broken.
+      - name: Upload coverage to Coveralls
+        if: matrix.python-version == '3.10'
         uses: coverallsapp/github-action@v2
         with:
-          file: coverage-py${{ matrix.python-version }}.lcov
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: coverage.lcov
           format: lcov
-          flag-name: py${{ matrix.python-version }}
-          parallel: true
-
-  coveralls-finish:
-    name: Finalize Coveralls
-    needs: test
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Coveralls finished
-        uses: coverallsapp/github-action@v2
-        with:
-          parallel-finished: true
-          carryforward: "py3.10,py3.11,py3.12"
+          fail-on-error: false

@@ -8,7 +8,10 @@ version = "0.0.1"
 description = "Flattener utilities for DB2."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+# Bounded at both ends so the declared range is exactly the range CI tests: the
+# floor and the ceiling are the two legs of the matrix in .github/workflows/ci.yml.
+# When 3.15 ships, raise the ceiling and the matrix together.
+requires-python = ">=3.10,<3.15"
 authors = [{ name = "Lattice Data Coordination" }]
 dependencies = []
 
@@ -16,7 +19,10 @@ dependencies = []
 dev = [
   "pytest>=8",
   "pytest-cov>=5",
-  "ruff>=0.6",
+  # Pinned, not a floor: `lint.select` below names rule *families*, so a ruff
+  # release that adds rules to one silently changes what CI enforces. Keep in
+  # sync with the ruff pin in .pre-commit-config.yaml.
+  "ruff==0.16.1",
 ]
 
 [project.urls]
