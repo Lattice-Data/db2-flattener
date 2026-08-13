@@ -13,7 +13,12 @@ license = { file = "LICENSE" }
 # When 3.15 ships, raise the ceiling and the matrix together.
 requires-python = ">=3.10,<3.15"
 authors = [{ name = "Lattice Data Coordination" }]
-dependencies = []
+dependencies = [
+  "numpy",
+  "pandas",
+  "pyyaml",
+  "requests",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -29,8 +34,14 @@ dev = [
 Homepage = "https://github.com/Lattice-Data/db2-flattener"
 Issues = "https://github.com/Lattice-Data/db2-flattener/issues"
 
+[project.scripts]
+db2-flattener = "db2_flattener.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/db2_flattener"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/db2_flattener/schema/data/constants.yaml" = "db2_flattener/schema/data/constants.yaml"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -50,3 +61,12 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# Ported modules still have long lines from lattice-tools; wrap them in a
+# follow-up rather than mixing a reformat into this move.
+[tool.ruff.lint.per-file-ignores]
+"src/db2_flattener/flatten/**" = ["E501", "SIM103"]
+"src/db2_flattener/gather/**" = ["E501", "SIM108"]
+"src/db2_flattener/schema/**" = ["E501"]
+"src/db2_flattener/utils.py" = ["E501"]
+"tests/**" = ["E501"]

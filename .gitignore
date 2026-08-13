@@ -24,3 +24,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Flatten outputs
+MatrixFileSet_*.csv

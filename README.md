@@ -4,14 +4,40 @@
 [![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/db2-flattener/badge.svg?branch=main)](https://coveralls.io/github/Lattice-Data/db2-flattener?branch=main)
 
 Flattener utility for the [Lattice Database](https://data.lattice-data.org/).
+It gathers a MatrixFileSet from DB2 and writes MAIN, BIOHUB, GEO, and SAMPLES CSVs.
 
 Runs on Python 3.10 and up, through 3.14 (`requires-python = ">=3.10,<3.15"`).
 
 ## Install (dev)
 
+From the repository root:
+
 ```bash
 pip install -e ".[dev]"
 ```
+
+Set Lattice API credentials as environment variables. Names follow the `--mode`
+value, which must start with `db2_` (for example `db2_demo`):
+
+```bash
+export DB2_DEMO_KEY=...
+export DB2_DEMO_SECRET=...
+export DB2_DEMO_SERVER=https://lattice-api-dev.demo.lattice-data.org/
+```
+
+## Flatten from this directory
+
+After the editable install, any of these work from the repository root. CSVs
+are written to the current working directory.
+
+```bash
+python flatten.py -u <matrix-file-set-uuid> -m db2_demo
+db2-flattener -u <matrix-file-set-uuid> -m db2_demo
+python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo
+```
+
+Optional `-o` sets the MAIN CSV path; BIOHUB/GEO/SAMPLES names still use the
+MatrixFileSet UUID and a timestamp.
 
 ## Test
 
@@ -26,10 +52,8 @@ pytest --cov=db2_flattener --cov-report=term-missing
 ```
 
 CI runs the suite on Python 3.10 and 3.14 — the floor declared by
-`requires-python` and the newest release. This is a zero-dependency pure-Python
-library, so the versions in between have nothing to break that those two ends
-would not also catch. Coverage is uploaded to Coveralls once per commit, from
-the 3.10 job.
+`requires-python` and the newest release. Coverage is uploaded to Coveralls
+once per commit, from the 3.10 job.
 
 ## Lint and format
 
