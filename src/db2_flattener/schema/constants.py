@@ -84,6 +84,7 @@ PROP_MAP_BIOHUB = {
     "tissues_lower_bound_age": "tissues_lower_bound_age",
     "tissues_age_units": "tissues_age_units",
     "tissues_diseases_term_name": "disease",
+    "tissues_enriched_cell_types_term_name": "suspension_enriched_cell_types",
     "tissues_sample_terms_term_name": "tissue",
     "tissues_developmental_stages_term_name": "development_stage",
     "tissues_multiplexing_barcodes": "sample_probe_barcode",
