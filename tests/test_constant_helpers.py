@@ -121,5 +121,5 @@ def test_parser_rejects_unknown_args():
         build_parser().parse_args(["--nope"])
 
 
-def test_instances_end_with_slash():
+def test_configs_to_save_end_with_slash():
     assert all(url.endswith("/") for url in CONFIGS_TO_SAVE)
