@@ -31,7 +31,7 @@ DEFAULT_PROD_MODE = "db2_prod"
 CONFIGS_TO_SAVE = {
     "https://api.data.lattice-data.org/",
     "https://lattice-api-dev.demo.lattice-data.org/",
-    "https://api.sandbox.lattice-data.org",
+    "https://api.sandbox.lattice-data.org/",
 }
 
 
