@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 from db2_flattener.schema.generate import (
+    CONFIGS_TO_SAVE,
     DEFAULT_DEMO_MODE,
     DEFAULT_PROD_MODE,
     SchemaIDs,
@@ -118,3 +119,7 @@ def test_parser_defaults_are_none_until_resolved():
 def test_parser_rejects_unknown_args():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--nope"])
+
+
+def test_instances_end_with_slash():
+    assert all(url.endswith("/") for url in CONFIGS_TO_SAVE)

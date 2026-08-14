@@ -44,6 +44,23 @@ Optional `-o` sets a shared path prefix. The four CSVs are written as
 `{prefix}_SAMPLES.csv`. Without `-o`, the prefix is
 `MatrixFileSet_{uuid}_{timestamp}`.
 
+## Fetch latest schema from Lattice
+
+After the editable install, the following can be used to fetch and check the latest
+Lattice schema as found in src/db2-flattener/schema/generate.py
+
+
+```bash
+db2-flattener-generate-constants [OPTIONAL COMMANDS]
+```
+
+Use the --help flag for further info on args.
+
+By default this fetchs the schema profiles from prod and demo, prints status
+and general diffs to the terminal, and updates
+src/db2-flattener/schemas/data/constants.yaml if changes are
+found.
+
 ## Test
 
 ```bash
