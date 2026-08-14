@@ -67,21 +67,13 @@ def get_report(obj_type, filter_url, field_lst, connection):
     urls.append(url1)
     graph = []
     for url in urls:
+        obj = requests.get(url, auth=connection.auth)
         try:
-            obj = requests.get(url, auth=connection.auth)
             obj.raise_for_status()
-        except requests.exceptions.HTTPError as err:
+        except requests.exceptions.HTTPError:
             if obj.status_code == 404 and "@graph" in obj.json():
                 graph.extend(obj.json()["@graph"])
-            else:
-                print("HTTP Error: ", err)
-                sys.exit()
-        except requests.exceptions.Timeout as err:
-            print("Timeout Error: ", err)
-            sys.exit()
-        except requests.exceptions.RequestException as err:
-            print("Requests error: ", err)
-            sys.exit()
-        else:
-            graph.extend(obj.json().get("@graph"))
+                continue
+            raise
+        graph.extend(obj.json().get("@graph"))
     return graph

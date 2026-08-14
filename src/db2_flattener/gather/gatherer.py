@@ -58,17 +58,13 @@ class DB2Gatherer:
 
         # Single request if under limit
         if len(filter_url) <= MAX_URL_LENGTH:
-            try:
-                results = DB2lattice.get_report(
-                    obj_type=obj_type,
-                    filter_url=filter_url,
-                    field_lst=field_lst,
-                    connection=self.connection,
-                )
-                return results or []
-            except Exception as e:
-                print(f"Error fetching {obj_type}: {e}")
-                return []
+            results = DB2lattice.get_report(
+                obj_type=obj_type,
+                filter_url=filter_url,
+                field_lst=field_lst,
+                connection=self.connection,
+            )
+            return results or []
 
         # Chunked requests
         print("URL too long, chunking...")
@@ -79,20 +75,15 @@ class DB2Gatherer:
             chunk_ids = unique_ids[i : i + chunk_size]
             chunk_filter = build_filter(chunk_ids)
 
-            try:
-                chunk_results = DB2lattice.get_report(
-                    obj_type=obj_type,
-                    filter_url=chunk_filter,
-                    field_lst=field_lst,
-                    connection=self.connection,
-                )
+            chunk_results = DB2lattice.get_report(
+                obj_type=obj_type,
+                filter_url=chunk_filter,
+                field_lst=field_lst,
+                connection=self.connection,
+            )
 
-                if chunk_results:
-                    all_results.extend(chunk_results)
-
-            except Exception as e:
-                print(f"Chunk error: {e}")
-                continue
+            if chunk_results:
+                all_results.extend(chunk_results)
 
         return all_results
 
