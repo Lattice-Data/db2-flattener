@@ -37,7 +37,7 @@ class DB2Flattener:
         # Initialize gatherer
         self.gatherer = DB2Gatherer(self.connection, configs)
 
-    def flatten_matrix_file_set(self, matrix_file_set_uuid, output_file=None):
+    def flatten_matrix_file_set(self, matrix_file_set_uuid, output_prefix=None):
         """
         Flatten a MatrixFileSet into library-indexed data and save as CSV file
         """
@@ -52,10 +52,12 @@ class DB2Flattener:
 
         print("Creating DataFrames...")
 
-        # Generate output filename if not provided
-        if output_file is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}_MAIN.csv"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = output_prefix or f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}"
+        main_output = f"{prefix}_MAIN.csv"
+        biohub_output = f"{prefix}_BIOHUB.csv"
+        geo_output = f"{prefix}_GEO.csv"
+        sample_output = f"{prefix}_SAMPLES.csv"
 
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
@@ -68,22 +70,20 @@ class DB2Flattener:
             sample_df = split_controlled_term_columns(sample_df)
 
         # Save main DataFrame to CSV
-        print(f"Saving main DataFrame to {output_file}...")
-        main_df.to_csv(output_file, index=False)
+        print(f"Saving main DataFrame to {main_output}...")
+        main_df.to_csv(main_output, index=False)
 
-        print(f"✅ Main CSV file created: {output_file}")
+        print(f"✅ Main CSV file created: {main_output}")
         print(f"   Rows: {len(main_df)}")
         print(f"   Columns: {len(main_df.columns)}")
 
         # Create Biohub DataFrame from main and sample df
-        biohub_output = f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}_BIOHUB.csv"
         biohub_df = self.create_biohub_dataframe(main_df)
         print(f"Saving biohub DataFrame to {biohub_output}...")
         biohub_df.to_csv(biohub_output, index=False)
         print(f"✅ Biohub CSV file created: {biohub_output}")
 
         # Create GEO DataFrame from main DataFrame
-        geo_output = f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}_GEO.csv"
         geo_df = self.create_geo_dataframe(main_df)
         print(f"Saving geo DataFrame to {geo_output}...")
         geo_df.to_csv(geo_output, index=False)
@@ -91,8 +91,6 @@ class DB2Flattener:
 
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
-            sample_output = f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}_SAMPLES.csv"
-
             print(f"Saving sample DataFrame to {sample_output}...")
             sample_df.to_csv(sample_output, index=True)
 
@@ -100,7 +98,7 @@ class DB2Flattener:
             print(f"   Rows: {len(sample_df)}")
             print(f"   Columns: {len(sample_df.columns)}")
 
-        return output_file
+        return main_output
 
     def create_dataframe(self, complete_data):
         """Create main library/raw-file DataFrame and sample DataFrame keyed by raw matrix file"""

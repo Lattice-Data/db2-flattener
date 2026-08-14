@@ -28,7 +28,9 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        help="Output CSV filename (optional, auto-generates if not provided)",
+        help="Output path prefix (optional). Writes {prefix}_MAIN.csv, "
+        "{prefix}_BIOHUB.csv, {prefix}_GEO.csv, and {prefix}_SAMPLES.csv. "
+        "Defaults to MatrixFileSet_{uuid}_{timestamp}",
     )
     args = parser.parse_args()
 

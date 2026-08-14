@@ -36,8 +36,10 @@ db2-flattener -u <matrix-file-set-uuid> -m db2_demo
 python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo
 ```
 
-Optional `-o` sets the MAIN CSV path; BIOHUB/GEO/SAMPLES names still use the
-MatrixFileSet UUID and a timestamp.
+Optional `-o` sets a shared path prefix. The four CSVs are written as
+`{prefix}_MAIN.csv`, `{prefix}_BIOHUB.csv`, `{prefix}_GEO.csv`, and
+`{prefix}_SAMPLES.csv`. Without `-o`, the prefix is
+`MatrixFileSet_{uuid}_{timestamp}`.
 
 ## Test
 
