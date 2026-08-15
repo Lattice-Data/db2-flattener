@@ -61,3 +61,27 @@ def test_empty_sample_df_skips_samples_csv(tmp_path):
     assert (tmp_path / "myrun_BIOHUB.csv").is_file()
     assert (tmp_path / "myrun_GEO.csv").is_file()
     assert not (tmp_path / "myrun_SAMPLES.csv").exists()
+    assert not (tmp_path / "myrun_GUIDE_METADATA.csv").exists()
+
+
+def test_guide_metadata_csv_written_when_present(tmp_path):
+    flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
+    flattener.create_guide_metadata_dataframe = lambda complete_data: pd.DataFrame(
+        {"guide_id": ["g1"]}
+    )
+    prefix = str(tmp_path / "myrun")
+
+    result = flattener.flatten_matrix_file_set(UUID, output_prefix=prefix)
+
+    assert result == f"{prefix}_MAIN.csv"
+    assert (tmp_path / "myrun_GUIDE_METADATA.csv").is_file()
+
+
+def test_empty_guide_df_skips_guide_metadata_csv(tmp_path):
+    flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
+    flattener.create_guide_metadata_dataframe = lambda complete_data: pd.DataFrame()
+    prefix = str(tmp_path / "myrun")
+
+    flattener.flatten_matrix_file_set(UUID, output_prefix=prefix)
+
+    assert not (tmp_path / "myrun_GUIDE_METADATA.csv").exists()

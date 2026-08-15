@@ -1,7 +1,9 @@
+import io
 import os
 import sys
 from urllib.parse import urljoin
 
+import pandas as pd
 import requests
 
 
@@ -77,3 +79,52 @@ def get_report(obj_type, filter_url, field_lst, connection):
             raise
         graph.extend(obj.json().get("@graph"))
     return graph
+
+
+def _separator_for_file(file_info):
+    """Return the pandas read_csv separator for a TabularFile-like dict."""
+    file_format = (file_info.get("file_format") or "").lower()
+    if file_format == "tsv":
+        return "\t"
+    s3_uri = file_info.get("s3_uri") or ""
+    if s3_uri.endswith(".tsv"):
+        return "\t"
+    return ","
+
+
+def download_file(object_id, connection):
+    """
+    Download a Lattice file object's bytes via @@download.
+
+    object_id is a path like /tabular_files/<uuid>/.
+    """
+    url = urljoin(connection.server, object_id) + "@@download"
+    response = requests.get(url, auth=connection.auth)
+    response.raise_for_status()
+    return response.content
+
+
+def read_tabular_file(file_info, connection):
+    """
+    Read a TabularFile-like dict into a DataFrame without writing to disk.
+
+    Tries fsspec/s3fs on s3_uri first, then Lattice @@download into memory.
+    """
+    sep = _separator_for_file(file_info)
+    s3_uri = file_info.get("s3_uri")
+    object_id = file_info.get("@id")
+
+    if s3_uri:
+        try:
+            return pd.read_csv(s3_uri, sep=sep)
+        except Exception as exc:
+            print(
+                f"Warning: fsspec read of {s3_uri} failed ({exc}); "
+                "falling back to Lattice @@download"
+            )
+
+    if not object_id:
+        raise ValueError("guide RNA file has neither a readable s3_uri nor an @id")
+
+    content = download_file(object_id, connection)
+    return pd.read_csv(io.BytesIO(content), sep=sep)

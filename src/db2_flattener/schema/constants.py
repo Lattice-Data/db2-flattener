@@ -55,6 +55,17 @@ BASE_URL_OVERHEAD = 700
 # rest is dead weight on every request.
 CONTROLLED_TERM_FIELDS = ["@id", "term_name"]
 
+# Columns kept from a GeneticModification guide RNA tabular file, in output order.
+# Only columns that exist in the source file are written.
+GUIDE_METADATA_COLUMNS = [
+    "guide_id",
+    "guide_protospacer",
+    "guide_role",
+    "guide_PAM",
+    "guide_target_gene_id",
+    "guide_target_gene_name",
+]
+
 # Keys use _term_name suffix for columns produced by DB2_utils.split_controlled_term_columns
 PROP_MAP_GEO = {
     "droplet_based_libraries_CRO_group_identifier": "*library name",

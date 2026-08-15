@@ -9,6 +9,7 @@ from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
     GENETIC_PERTURBATION_MAP,
+    GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
     REFORMAT_LIST,
@@ -58,6 +59,7 @@ class DB2Flattener:
         biohub_output = f"{prefix}_BIOHUB.csv"
         geo_output = f"{prefix}_GEO.csv"
         sample_output = f"{prefix}_SAMPLES.csv"
+        guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
@@ -88,6 +90,15 @@ class DB2Flattener:
         print(f"Saving geo DataFrame to {geo_output}...")
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
+
+        # Create guide metadata DataFrame from gathered GeneticModification files
+        guide_df = self.create_guide_metadata_dataframe(complete_data)
+        if guide_df is not None and not guide_df.empty:
+            print(f"Saving guide metadata DataFrame to {guide_output}...")
+            guide_df.to_csv(guide_output, index=False)
+            print(f"✅ Guide metadata CSV file created: {guide_output}")
+            print(f"   Rows: {len(guide_df)}")
+            print(f"   Columns: {len(guide_df.columns)}")
 
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
@@ -295,6 +306,63 @@ class DB2Flattener:
 
         group_col = "*library name"
         return collapse_dataframe(geo_df, group_col=group_col)
+
+    def create_guide_metadata_dataframe(self, complete_data):
+        """
+        Build a guide-metadata DataFrame from the single shared guide RNA TabularFile.
+
+        Missing GeneticModifications or missing guide_rna_files are normal and
+        return None. More than one unique TabularFile warns and returns None.
+        """
+        files = self._unique_guide_rna_files(complete_data)
+        if not files:
+            return None
+        if len(files) > 1:
+            labels = [
+                file_info.get("@id") or file_info.get("s3_uri") or str(file_info)
+                for file_info in files
+            ]
+            print(
+                f"Warning: found {len(files)} unique guide RNA TabularFiles; "
+                f"expected one. Skipping GUIDE_METADATA. Files: {labels}"
+            )
+            return None
+
+        guide_df = DB2lattice.read_tabular_file(files[0], self.connection)
+        present = [col for col in GUIDE_METADATA_COLUMNS if col in guide_df.columns]
+        if not present:
+            print("Warning: guide RNA file has none of the expected GUIDE_METADATA columns")
+            return None
+        return guide_df[present].copy()
+
+    @staticmethod
+    def _normalize_guide_rna_file_refs(value):
+        """Turn guide_rna_files (dict, list of dicts, or list of @id strings) into dicts."""
+        if value is None or value == "" or value == []:
+            return []
+        items = value if isinstance(value, list) else [value]
+        refs = []
+        for item in items:
+            if isinstance(item, dict):
+                refs.append(item)
+            elif isinstance(item, str) and item.strip():
+                refs.append({"@id": item})
+        return refs
+
+    @staticmethod
+    def _unique_guide_rna_files(complete_data):
+        """Collect unique TabularFile refs from gathered GeneticModification objects."""
+        genetic_modifications = complete_data.get("resolved_objects", {}).get(
+            "GeneticModification", {}
+        )
+        unique = {}
+        for gm in genetic_modifications.values():
+            for file_info in DB2Flattener._normalize_guide_rna_file_refs(gm.get("guide_rna_files")):
+                key = file_info.get("@id") or file_info.get("s3_uri")
+                if not key:
+                    continue
+                unique.setdefault(key, file_info)
+        return list(unique.values())
 
     def create_biohub_dataframe(self, main_df) -> pd.DataFrame:
         """
