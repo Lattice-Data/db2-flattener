@@ -9,6 +9,7 @@ from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
     GENETIC_PERTURBATION_MAP,
+    GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
     REFORMAT_LIST,
@@ -22,6 +23,7 @@ from db2_flattener.utils import (
     extract_references_from_field,
     get_config_obj_type,
     get_url_prefix_from_id,
+    normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
@@ -58,6 +60,7 @@ class DB2Flattener:
         biohub_output = f"{prefix}_BIOHUB.csv"
         geo_output = f"{prefix}_GEO.csv"
         sample_output = f"{prefix}_SAMPLES.csv"
+        guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
@@ -88,6 +91,15 @@ class DB2Flattener:
         print(f"Saving geo DataFrame to {geo_output}...")
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
+
+        guide_file = self._resolve_guide_rna_file(complete_data)
+        guide_df = self.create_guide_metadata_dataframe(guide_file)
+        if guide_df is not None and not guide_df.empty:
+            print(f"Saving guide metadata DataFrame to {guide_output}...")
+            guide_df.to_csv(guide_output, index=False)
+            print(f"✅ Guide metadata CSV file created: {guide_output}")
+            print(f"   Rows: {len(guide_df)}")
+            print(f"   Columns: {len(guide_df.columns)}")
 
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
@@ -202,7 +214,7 @@ class DB2Flattener:
                 for field in self.configs.OBJECT_CONFIG[lib_type].get("fields", []):
                     row[f"{lib_type}_{field}"] = lib.get(field)
 
-                for obj_type in ("sequence_files", "sequence_file_sets"):
+                for obj_type in ("sequence_files", "sequence_file_sets", "tabular_files"):
                     obj_config = self.configs.OBJECT_CONFIG.get(obj_type, {})
                     for obj_field in obj_config.get("fields", []):
                         values = [
@@ -295,6 +307,55 @@ class DB2Flattener:
 
         group_col = "*library name"
         return collapse_dataframe(geo_df, group_col=group_col)
+
+    def create_guide_metadata_dataframe(self, file_info):
+        """
+        Build a guide-metadata DataFrame from the single shared guide RNA TabularFile.
+
+        file_info comes from _resolve_guide_rna_file. None (no file, or more than
+        one unique TabularFile) returns None.
+        """
+        if not file_info:
+            return None
+
+        guide_df = DB2lattice.read_tabular_file(file_info, self.connection)
+        present = [col for col in GUIDE_METADATA_COLUMNS if col in guide_df.columns]
+        if not present:
+            print("Warning: guide RNA file has none of the expected GUIDE_METADATA columns")
+            return None
+        return guide_df[present].copy()
+
+    def _resolve_guide_rna_file(self, complete_data):
+        """Return the single gathered guide TabularFile, or None."""
+        files = self._unique_guide_rna_files(complete_data)
+        if not files:
+            return None
+        if len(files) > 1:
+            labels = [
+                file_info.get("@id") or file_info.get("s3_uri") or str(file_info)
+                for file_info in files
+            ]
+            print(
+                f"Warning: found {len(files)} unique guide RNA TabularFiles; "
+                f"expected one. Skipping GUIDE_METADATA. Files: {labels}"
+            )
+            return None
+        return files[0]
+
+    @staticmethod
+    def _unique_guide_rna_files(complete_data):
+        """Collect unique TabularFile refs, preferring objects already gathered."""
+        resolved = complete_data.get("resolved_objects", {})
+        genetic_modifications = resolved.get("GeneticModification", {})
+        gathered = resolved.get("TabularFile", {})
+        unique = {}
+        for gm in genetic_modifications.values():
+            for file_info in normalize_guide_rna_file_refs(gm.get("guide_rna_files")):
+                key = file_info.get("@id") or file_info.get("s3_uri")
+                if not key:
+                    continue
+                unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
+        return list(unique.values())
 
     def create_biohub_dataframe(self, main_df) -> pd.DataFrame:
         """
