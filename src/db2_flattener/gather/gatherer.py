@@ -10,6 +10,7 @@ from db2_flattener.utils import (
     extract_uuid_from_id,
     get_api_type_from_id,
     get_url_prefix_from_id,
+    normalize_guide_rna_file_refs,
 )
 
 
@@ -141,6 +142,8 @@ class DB2Gatherer:
             for obj in ref_objects:
                 self.resolved_objects[api_type][obj["@id"]] = obj
 
+        self._fetch_tabular_files_from_genetic_modifications()
+
         # Second pass: collect controlled term references from non-sample objects
         for api_type, ref_dict in self.resolved_objects.items():
             if api_type == "ControlledTerm":  # Skip the controlled terms dict
@@ -243,6 +246,53 @@ class DB2Gatherer:
                         if bucket:
                             library_data.setdefault(bucket, []).append(resolved_obj)
                             added_refs.add(ref)
+
+        self._add_tabular_files_to_library(library_data, added_refs)
+
+    def _tabular_file_ref_fields(self):
+        """OBJECT_CONFIG fields on GeneticModification that point at tabular_files."""
+        gm_config = self.configs.OBJECT_CONFIG.get("genetic_modifications", {})
+        fields = []
+        for field_name, ref_types in gm_config.get("references", {}).items():
+            ref_type_list = [ref_types] if isinstance(ref_types, str) else ref_types
+            if "tabular_files" in ref_type_list:
+                fields.append(field_name)
+        return fields
+
+    def _fetch_tabular_files_from_genetic_modifications(self):
+        """Fetch TabularFiles referenced by gathered GeneticModification objects."""
+        gm_objects = self.resolved_objects.get("GeneticModification", {})
+        if not gm_objects:
+            return
+
+        tabular_ids = []
+        for gm in gm_objects.values():
+            for field_name in self._tabular_file_ref_fields():
+                for file_info in normalize_guide_rna_file_refs(gm.get(field_name)):
+                    object_id = file_info.get("@id")
+                    if object_id:
+                        tabular_ids.append(extract_uuid_from_id(object_id))
+
+        if not tabular_ids:
+            return
+
+        fetched = self.chunk_and_fetch("TabularFile", tabular_ids)
+        self.resolved_objects.setdefault("TabularFile", {})
+        for obj in fetched:
+            object_id = obj.get("@id")
+            if object_id:
+                self.resolved_objects["TabularFile"][object_id] = obj
+
+    def _add_tabular_files_to_library(self, library_data, added_refs):
+        """Attach resolved TabularFiles referenced by this library's GeneticModifications."""
+        for gm in library_data.get("genetic_modifications", []):
+            for field_name in self._tabular_file_ref_fields():
+                for file_info in normalize_guide_rna_file_refs(gm.get(field_name)):
+                    ref = file_info.get("@id")
+                    obj = self.resolved_objects.get("TabularFile", {}).get(ref)
+                    if obj and ref not in added_refs:
+                        library_data.setdefault("tabular_files", []).append(obj)
+                        added_refs.add(ref)
 
     def gather_complete_library_data(self, matrix_file_set_uuid):
         """Main method: gather all data grouped by library"""
@@ -498,4 +548,7 @@ class DB2Gatherer:
                 raw_file_copy = dict(raw_file)
                 raw_file_copy["sequence_files"] = list(bucket["sequence_files"].values())
                 raw_file_copy["sequence_file_sets"] = list(bucket["sequence_file_sets"].values())
+                raw_file_copy["tabular_files"] = list(
+                    libraries_data[lib_uuid].get("tabular_files", [])
+                )
                 libraries_data[lib_uuid]["raw_matrix_files"].append(raw_file_copy)

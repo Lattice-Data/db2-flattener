@@ -371,3 +371,17 @@ def extract_references_from_field(field_value, field_name, configs: Configs) -> 
         elif isinstance(field_value, str):
             refs.append(field_value)
     return refs
+
+
+def normalize_guide_rna_file_refs(value):
+    """Turn guide_rna_files (dict, list of dicts, or list of @id strings) into dicts."""
+    if value is None or value == "" or value == []:
+        return []
+    items = value if isinstance(value, list) else [value]
+    refs = []
+    for item in items:
+        if isinstance(item, dict):
+            refs.append(item)
+        elif isinstance(item, str) and item.strip():
+            refs.append({"@id": item})
+    return refs

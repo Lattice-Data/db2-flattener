@@ -7,6 +7,7 @@ from db2_flattener.utils import (
     collapse_duplicate_columns,
     combine_bound_columns,
     extract_controlled_term_id,
+    normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_term_cell,
     strip_author_metadata_column_prefix,
@@ -264,6 +265,24 @@ def test_split_term_cell_missing_values_are_none(value):
 
 def test_extract_controlled_term_id_empty_ref_is_none():
     assert extract_controlled_term_id("") is None
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (None, []),
+        ("", []),
+        ([], []),
+        ("/tabular_files/abc/", [{"@id": "/tabular_files/abc/"}]),
+        (["/tabular_files/abc/"], [{"@id": "/tabular_files/abc/"}]),
+        (
+            {"@id": "/tabular_files/abc/", "file_format": "tsv"},
+            [{"@id": "/tabular_files/abc/", "file_format": "tsv"}],
+        ),
+    ],
+)
+def test_normalize_guide_rna_file_refs(value, expected):
+    assert normalize_guide_rna_file_refs(value) == expected
 
 
 def test_collapse_dataframe_tolerates_missing_term_values():

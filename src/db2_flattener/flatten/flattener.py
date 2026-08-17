@@ -23,6 +23,7 @@ from db2_flattener.utils import (
     extract_references_from_field,
     get_config_obj_type,
     get_url_prefix_from_id,
+    normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
@@ -91,8 +92,8 @@ class DB2Flattener:
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
 
-        # Create guide metadata DataFrame from gathered GeneticModification files
-        guide_df = self.create_guide_metadata_dataframe(complete_data)
+        guide_file = self._resolve_guide_rna_file(complete_data)
+        guide_df = self.create_guide_metadata_dataframe(guide_file)
         if guide_df is not None and not guide_df.empty:
             print(f"Saving guide metadata DataFrame to {guide_output}...")
             guide_df.to_csv(guide_output, index=False)
@@ -213,7 +214,7 @@ class DB2Flattener:
                 for field in self.configs.OBJECT_CONFIG[lib_type].get("fields", []):
                     row[f"{lib_type}_{field}"] = lib.get(field)
 
-                for obj_type in ("sequence_files", "sequence_file_sets"):
+                for obj_type in ("sequence_files", "sequence_file_sets", "tabular_files"):
                     obj_config = self.configs.OBJECT_CONFIG.get(obj_type, {})
                     for obj_field in obj_config.get("fields", []):
                         values = [
@@ -307,13 +308,25 @@ class DB2Flattener:
         group_col = "*library name"
         return collapse_dataframe(geo_df, group_col=group_col)
 
-    def create_guide_metadata_dataframe(self, complete_data):
+    def create_guide_metadata_dataframe(self, file_info):
         """
         Build a guide-metadata DataFrame from the single shared guide RNA TabularFile.
 
-        Missing GeneticModifications or missing guide_rna_files are normal and
-        return None. More than one unique TabularFile warns and returns None.
+        file_info comes from _resolve_guide_rna_file. None (no file, or more than
+        one unique TabularFile) returns None.
         """
+        if not file_info:
+            return None
+
+        guide_df = DB2lattice.read_tabular_file(file_info, self.connection)
+        present = [col for col in GUIDE_METADATA_COLUMNS if col in guide_df.columns]
+        if not present:
+            print("Warning: guide RNA file has none of the expected GUIDE_METADATA columns")
+            return None
+        return guide_df[present].copy()
+
+    def _resolve_guide_rna_file(self, complete_data):
+        """Return the single gathered guide TabularFile, or None."""
         files = self._unique_guide_rna_files(complete_data)
         if not files:
             return None
@@ -327,41 +340,21 @@ class DB2Flattener:
                 f"expected one. Skipping GUIDE_METADATA. Files: {labels}"
             )
             return None
-
-        guide_df = DB2lattice.read_tabular_file(files[0], self.connection)
-        present = [col for col in GUIDE_METADATA_COLUMNS if col in guide_df.columns]
-        if not present:
-            print("Warning: guide RNA file has none of the expected GUIDE_METADATA columns")
-            return None
-        return guide_df[present].copy()
-
-    @staticmethod
-    def _normalize_guide_rna_file_refs(value):
-        """Turn guide_rna_files (dict, list of dicts, or list of @id strings) into dicts."""
-        if value is None or value == "" or value == []:
-            return []
-        items = value if isinstance(value, list) else [value]
-        refs = []
-        for item in items:
-            if isinstance(item, dict):
-                refs.append(item)
-            elif isinstance(item, str) and item.strip():
-                refs.append({"@id": item})
-        return refs
+        return files[0]
 
     @staticmethod
     def _unique_guide_rna_files(complete_data):
-        """Collect unique TabularFile refs from gathered GeneticModification objects."""
-        genetic_modifications = complete_data.get("resolved_objects", {}).get(
-            "GeneticModification", {}
-        )
+        """Collect unique TabularFile refs, preferring objects already gathered."""
+        resolved = complete_data.get("resolved_objects", {})
+        genetic_modifications = resolved.get("GeneticModification", {})
+        gathered = resolved.get("TabularFile", {})
         unique = {}
         for gm in genetic_modifications.values():
-            for file_info in DB2Flattener._normalize_guide_rna_file_refs(gm.get("guide_rna_files")):
+            for file_info in normalize_guide_rna_file_refs(gm.get("guide_rna_files")):
                 key = file_info.get("@id") or file_info.get("s3_uri")
                 if not key:
                     continue
-                unique.setdefault(key, file_info)
+                unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
         return list(unique.values())
 
     def create_biohub_dataframe(self, main_df) -> pd.DataFrame:

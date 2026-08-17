@@ -1,3 +1,3 @@
-from db2_flattener.gather.lattice import Connection, download_file, get_report, read_tabular_file
+from db2_flattener.gather.lattice import Connection, get_report
 
-__all__ = ["Connection", "download_file", "get_report", "read_tabular_file"]
+__all__ = ["Connection", "get_report"]

@@ -38,6 +38,7 @@ def make_flattener(monkeypatch, read_df=None):
         return read_df.copy() if read_df is not None else pd.DataFrame()
 
     monkeypatch.setattr("db2_flattener.flatten.flattener.DB2lattice.read_tabular_file", fake_read)
+    flattener.gatherer = SimpleNamespace()
     return flattener, calls
 
 
@@ -49,10 +50,15 @@ def complete_data_with_gms(*gms):
     }
 
 
+def guide_df_from_data(flattener, data):
+    return flattener.create_guide_metadata_dataframe(flattener._resolve_guide_rna_file(data))
+
+
 def test_no_genetic_modifications_returns_none(monkeypatch):
     flattener, calls = make_flattener(monkeypatch)
-    assert flattener.create_guide_metadata_dataframe({"libraries": {}}) is None
-    assert flattener.create_guide_metadata_dataframe({"resolved_objects": {}}) is None
+    assert flattener._resolve_guide_rna_file({"libraries": {}}) is None
+    assert flattener._resolve_guide_rna_file({"resolved_objects": {}}) is None
+    assert flattener.create_guide_metadata_dataframe(None) is None
     assert calls == []
 
 
@@ -61,7 +67,7 @@ def test_gm_without_guide_rna_files_returns_none(monkeypatch):
     data = complete_data_with_gms(
         {"@id": "/genetic_modifications/aaa/", "strategy": "interference screen"}
     )
-    assert flattener.create_guide_metadata_dataframe(data) is None
+    assert guide_df_from_data(flattener, data) is None
     assert calls == []
 
 
@@ -73,7 +79,7 @@ def test_one_unique_file_subsets_columns(monkeypatch):
             "guide_rna_files": GUIDE_FILE,
         }
     )
-    result = flattener.create_guide_metadata_dataframe(data)
+    result = guide_df_from_data(flattener, data)
     assert list(result.columns) == [
         "guide_id",
         "guide_protospacer",
@@ -92,7 +98,7 @@ def test_same_file_on_two_gms_is_read_once(monkeypatch):
         {"@id": "/genetic_modifications/aaa/", "guide_rna_files": [GUIDE_FILE]},
         {"@id": "/genetic_modifications/bbb/", "guide_rna_files": [GUIDE_FILE]},
     )
-    result = flattener.create_guide_metadata_dataframe(data)
+    result = guide_df_from_data(flattener, data)
     assert result is not None
     assert len(calls) == 1
 
@@ -108,7 +114,7 @@ def test_two_distinct_files_warns_and_skips(monkeypatch, capsys):
         {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE},
         {"@id": "/genetic_modifications/bbb/", "guide_rna_files": other},
     )
-    assert flattener.create_guide_metadata_dataframe(data) is None
+    assert guide_df_from_data(flattener, data) is None
     assert calls == []
     captured = capsys.readouterr()
     assert "found 2 unique guide RNA TabularFiles" in captured.out
@@ -116,7 +122,7 @@ def test_two_distinct_files_warns_and_skips(monkeypatch, capsys):
     assert other["@id"] in captured.out
 
 
-def test_guide_rna_files_as_id_strings(monkeypatch):
+def test_guide_rna_files_as_id_strings_use_gathered_tabular_file(monkeypatch):
     flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
     data = complete_data_with_gms(
         {
@@ -124,9 +130,10 @@ def test_guide_rna_files_as_id_strings(monkeypatch):
             "guide_rna_files": [GUIDE_FILE["@id"]],
         }
     )
-    result = flattener.create_guide_metadata_dataframe(data)
+    data["resolved_objects"]["TabularFile"] = {GUIDE_FILE["@id"]: GUIDE_FILE}
+    result = guide_df_from_data(flattener, data)
     assert result is not None
-    assert calls == [{"@id": GUIDE_FILE["@id"]}]
+    assert calls == [GUIDE_FILE]
 
 
 def test_missing_expected_columns_returns_none(monkeypatch, capsys):
@@ -134,7 +141,7 @@ def test_missing_expected_columns_returns_none(monkeypatch, capsys):
     data = complete_data_with_gms(
         {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
     )
-    assert flattener.create_guide_metadata_dataframe(data) is None
+    assert guide_df_from_data(flattener, data) is None
     assert "none of the expected GUIDE_METADATA columns" in capsys.readouterr().out
 
 
@@ -146,7 +153,7 @@ def test_keeps_only_present_guide_columns(monkeypatch):
     data = complete_data_with_gms(
         {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
     )
-    result = flattener.create_guide_metadata_dataframe(data)
+    result = guide_df_from_data(flattener, data)
     assert list(result.columns) == ["guide_id", "guide_role"]
 
 
@@ -156,7 +163,9 @@ def test_keeps_only_present_guide_columns(monkeypatch):
         ({"file_format": "tsv"}, "\t"),
         ({"file_format": "csv"}, ","),
         ({"s3_uri": "s3://bucket/file.tsv"}, "\t"),
-        ({}, ","),
+        ({"s3_uri": "s3://bucket/file.csv"}, ","),
+        ({}, None),
+        ({"@id": "/tabular_files/abc/"}, None),
     ],
 )
 def test_separator_for_file(file_info, expected):
@@ -213,6 +222,54 @@ def test_read_tabular_file_falls_back_to_lattice(monkeypatch, capsys):
     assert list(result.columns) == ["guide_id", "guide_role"]
     assert list(result["guide_id"]) == ["g1"]
     assert "falling back to Lattice @@download" in capsys.readouterr().out
+
+
+def test_read_tabular_file_sniffs_tsv_without_format_hints(monkeypatch):
+    monkeypatch.setattr(
+        "db2_flattener.gather.lattice.download_file",
+        lambda object_id, connection: b"guide_id\tguide_role\ng1\ttargeting\n",
+    )
+    result = read_tabular_file({"@id": "/tabular_files/abc/"}, connection=SimpleNamespace())
+    assert list(result.columns) == ["guide_id", "guide_role"]
+    assert list(result["guide_id"]) == ["g1"]
+
+
+def test_resolve_guide_rna_file_returns_complete_embed(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
+    )
+    assert flattener._resolve_guide_rna_file(data) == GUIDE_FILE
+
+
+def test_resolve_guide_rna_file_id_only_without_gathered_object(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": [GUIDE_FILE["@id"]]}
+    )
+    assert flattener._resolve_guide_rna_file(data) == {"@id": GUIDE_FILE["@id"]}
+
+
+def test_resolve_guide_rna_file_prefers_gathered_tabular_file(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": [GUIDE_FILE["@id"]]}
+    )
+    data["resolved_objects"]["TabularFile"] = {GUIDE_FILE["@id"]: GUIDE_FILE}
+    assert flattener._resolve_guide_rna_file(data) == GUIDE_FILE
+
+
+def test_resolve_guide_rna_file_none_without_warning(monkeypatch, capsys):
+    flattener, _calls = make_flattener(monkeypatch)
+    assert flattener._resolve_guide_rna_file({"libraries": {}}) is None
+    assert "Warning" not in capsys.readouterr().out
+
+
+def test_create_guide_metadata_reuses_resolved_file_info(monkeypatch):
+    flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
+    result = flattener.create_guide_metadata_dataframe(GUIDE_FILE)
+    assert result is not None
+    assert calls == [GUIDE_FILE]
 
 
 def test_read_tabular_file_requires_id_when_s3_fails(monkeypatch):

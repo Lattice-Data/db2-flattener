@@ -82,14 +82,25 @@ def get_report(obj_type, filter_url, field_lst, connection):
 
 
 def _separator_for_file(file_info):
-    """Return the pandas read_csv separator for a TabularFile-like dict."""
+    """Return the pandas read_csv separator, or None to sniff."""
     file_format = (file_info.get("file_format") or "").lower()
     if file_format == "tsv":
         return "\t"
+    if file_format == "csv":
+        return ","
     s3_uri = file_info.get("s3_uri") or ""
     if s3_uri.endswith(".tsv"):
         return "\t"
-    return ","
+    if s3_uri.endswith(".csv"):
+        return ","
+    return None
+
+
+def _read_csv_kwargs(file_info):
+    sep = _separator_for_file(file_info)
+    if sep is None:
+        return {"sep": None, "engine": "python"}
+    return {"sep": sep}
 
 
 def download_file(object_id, connection):
@@ -110,13 +121,13 @@ def read_tabular_file(file_info, connection):
 
     Tries fsspec/s3fs on s3_uri first, then Lattice @@download into memory.
     """
-    sep = _separator_for_file(file_info)
+    read_kwargs = _read_csv_kwargs(file_info)
     s3_uri = file_info.get("s3_uri")
     object_id = file_info.get("@id")
 
     if s3_uri:
         try:
-            return pd.read_csv(s3_uri, sep=sep)
+            return pd.read_csv(s3_uri, **read_kwargs)
         except Exception as exc:
             print(
                 f"Warning: fsspec read of {s3_uri} failed ({exc}); "
@@ -127,4 +138,4 @@ def read_tabular_file(file_info, connection):
         raise ValueError("guide RNA file has neither a readable s3_uri nor an @id")
 
     content = download_file(object_id, connection)
-    return pd.read_csv(io.BytesIO(content), sep=sep)
+    return pd.read_csv(io.BytesIO(content), **read_kwargs)

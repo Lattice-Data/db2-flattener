@@ -66,9 +66,7 @@ def test_empty_sample_df_skips_samples_csv(tmp_path):
 
 def test_guide_metadata_csv_written_when_present(tmp_path):
     flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
-    flattener.create_guide_metadata_dataframe = lambda complete_data: pd.DataFrame(
-        {"guide_id": ["g1"]}
-    )
+    flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"guide_id": ["g1"]})
     prefix = str(tmp_path / "myrun")
 
     result = flattener.flatten_matrix_file_set(UUID, output_prefix=prefix)
@@ -79,7 +77,7 @@ def test_guide_metadata_csv_written_when_present(tmp_path):
 
 def test_empty_guide_df_skips_guide_metadata_csv(tmp_path):
     flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
-    flattener.create_guide_metadata_dataframe = lambda complete_data: pd.DataFrame()
+    flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame()
     prefix = str(tmp_path / "myrun")
 
     flattener.flatten_matrix_file_set(UUID, output_prefix=prefix)
