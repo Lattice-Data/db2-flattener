@@ -115,6 +115,17 @@ PROP_MAP_BIOHUB = {
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
 }
 
+# Only renames belong here. The derived columns - isolate, age, and the probe
+# barcode map - have no MAIN column behind them and are named in the flattener.
+PROP_MAP_SRA_BIOSAMPLE = {
+    "droplet_based_libraries_aliases": "sample_name",
+    "plate_based_libraries_aliases": "sample_name",
+    "non_human_donors_taxa": "*organism",
+    "human_donors_taxa": "*organism",
+    "tissues_sample_terms_term_name": "*tissue",
+    "organoids_sample_terms_term_name": "**tissue",
+}
+
 BIOHUB_SORT_ONTOLOGY_IDS = [
     "experimental_condition_ontology_term_id",
     "self_reported_ethnicity_ontology_term_id",

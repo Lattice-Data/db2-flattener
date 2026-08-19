@@ -1,0 +1,565 @@
+"""
+SRA/BioSample sheet: one row per library, keyed on the library alias under the
+name 'sample_name' because the submitted 'sample' is the sequencing library.
+
+The alias-to-barcode map is read straight off the library's embedded 'samples'
+field, which the report endpoint returns with 'aliases' and
+'multiplexing_barcodes' already on each item, so nothing here needs the gatherer
+and nothing here depends on the create_dataframe() per-sample merge.
+"""
+
+import pandas as pd
+import pytest
+
+from db2_flattener.flatten.flattener import DB2Flattener
+from db2_flattener.schema.constants import PROP_MAP_SRA_BIOSAMPLE, Configs
+
+# Derived columns, named in the flattener rather than in PROP_MAP_SRA_BIOSAMPLE.
+BARCODE_COLUMN = "sample_name: sample_probe_barcode"
+ISOLATE_COLUMN = "*isolate"
+AGE_COLUMN = "*age"
+SEX_COLUMN = "*sex"
+# Read off the map so a rename there, e.g. dropping the SRA '*' required marker,
+# does not have to be chased through every assertion below.
+ORGANISM_COLUMN = PROP_MAP_SRA_BIOSAMPLE["human_donors_taxa"]
+
+
+def make_flattener():
+    flattener = DB2Flattener.__new__(DB2Flattener)
+    flattener.connection = None
+    flattener.configs = Configs(FIELD_TYPES={}, OBJECT_CONFIG={})
+    return flattener
+
+
+def sample(alias, barcodes, lab="alex-marson"):
+    return {
+        "@id": f"/tissues/{alias}/",
+        "aliases": [f"{lab}:{alias}"],
+        "multiplexing_barcodes": barcodes,
+    }
+
+
+# Deliberately not in alphabetical order: the builder is expected to sort.
+FOUR_SAMPLES = [
+    sample("TregD5_Rest", ["BC001+CR001", "BC002+CR002"]),
+    sample("TregD6_Rest", ["BC009+CR009", "BC010+CR010"]),
+    sample("TregD5_Stim8hr", ["BC005+CR005", "BC006+CR006"]),
+    sample("TregD6_Stim8hr", ["BC013+CR013", "BC014+CR014"]),
+]
+
+FOUR_SAMPLES_MAP = (
+    "TregD5_Rest : BC001+CR001|BC002+CR002, "
+    "TregD5_Stim8hr : BC005+CR005|BC006+CR006, "
+    "TregD6_Rest : BC009+CR009|BC010+CR010, "
+    "TregD6_Stim8hr : BC013+CR013|BC014+CR014"
+)
+
+
+# _sample_probe_barcode_map
+
+
+def test_barcode_map_sorts_by_alias_and_strips_lab_prefix():
+    assert make_flattener()._sample_probe_barcode_map(FOUR_SAMPLES) == FOUR_SAMPLES_MAP
+
+
+def test_barcode_map_is_independent_of_source_order():
+    flattener = make_flattener()
+    forward = flattener._sample_probe_barcode_map(FOUR_SAMPLES)
+    reversed_ = flattener._sample_probe_barcode_map(list(reversed(FOUR_SAMPLES)))
+    assert forward == reversed_
+
+
+def test_barcode_map_single_sample():
+    samples = [sample("s1", ["BC001+CR001", "BC002+CR002"])]
+    assert make_flattener()._sample_probe_barcode_map(samples) == "s1 : BC001+CR001|BC002+CR002"
+
+
+def test_barcode_map_keeps_sample_with_no_barcodes_when_another_has_some():
+    samples = [sample("s2", []), sample("s1", ["BC001+CR001"])]
+    assert make_flattener()._sample_probe_barcode_map(samples) == "s1 : BC001+CR001, s2 : "
+
+
+@pytest.mark.parametrize(
+    "library_samples",
+    [
+        pytest.param([], id="empty-list"),
+        pytest.param(None, id="none"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param([sample("s1", []), sample("s2", None)], id="no-sample-has-barcodes"),
+        pytest.param(["/tissues/s1/", "/tissues/s2/"], id="bare-id-strings"),
+        pytest.param([{"multiplexing_barcodes": ["BC001+CR001"]}], id="no-alias"),
+    ],
+)
+def test_barcode_map_returns_none(library_samples):
+    assert make_flattener()._sample_probe_barcode_map(library_samples) is None
+
+
+def test_barcode_map_accepts_a_bare_barcode_string():
+    samples = [sample("s1", "BC001+CR001")]
+    assert make_flattener()._sample_probe_barcode_map(samples) == "s1 : BC001+CR001"
+
+
+# create_sra_biosample_dataframe
+
+
+def droplet_main_df():
+    """Four samples pooled into one droplet library, one MAIN row per sample."""
+    aliases = [s["aliases"][0].split(":", 1)[1] for s in FOUR_SAMPLES]
+    return pd.DataFrame(
+        {
+            "sample_alias": aliases,
+            "droplet_based_libraries_aliases": [["alex-marson:TregR3_L13_L05_GEX"]] * 4,
+            "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
+            "human_donors_taxa": ["Homo sapiens"] * 4,
+        }
+    )
+
+
+def test_droplet_run_is_one_row_per_library(capsys):
+    sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
+
+    # sample_alias is in MAIN but is not carried onto the sheet. This fixture has
+    # no donor id column, so isolate and age are absent too.
+    assert list(sra_df.columns) == ["sample_name", ORGANISM_COLUMN, BARCODE_COLUMN]
+    assert "no donor id column" in capsys.readouterr().out
+    assert len(sra_df) == 1
+    assert sra_df.loc[0, "sample_name"] == "TregR3_L13_L05_GEX"
+    assert sra_df.loc[0, ORGANISM_COLUMN] == "Homo sapiens"
+    assert sra_df.loc[0, BARCODE_COLUMN] == FOUR_SAMPLES_MAP
+
+
+def test_plate_library_columns_are_used_when_droplet_is_absent():
+    main_df = pd.DataFrame(
+        {
+            "plate_based_libraries_aliases": [["alex-marson:PLATE_1"]],
+            "plate_based_libraries_samples": [[sample("s1", ["BC001+CR001"])]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["sample_name"]) == ["PLATE_1"]
+    assert list(sra_df[BARCODE_COLUMN]) == ["s1 : BC001+CR001"]
+
+
+def test_paired_libraries_get_their_own_rows_sharing_the_same_map():
+    """A GEX and a CRISPR library over the same pool are two rows."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_A_CRI"]] * 2,
+            "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
+            "human_donors_taxa": ["Homo sapiens"] * 4,
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sorted(sra_df.index) == ["LIB_A_CRI", "LIB_A_GEX"]
+    assert sra_df.loc["LIB_A_GEX", BARCODE_COLUMN] == FOUR_SAMPLES_MAP
+    assert sra_df.loc["LIB_A_CRI", BARCODE_COLUMN] == FOUR_SAMPLES_MAP
+
+
+def test_library_rows_disagreeing_on_the_map_collapse_to_a_list():
+    other_samples = [sample("s1", ["BC099+CR099"])]
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "droplet_based_libraries_samples": [FOUR_SAMPLES, other_samples],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert len(sra_df) == 1
+    assert sra_df.loc[0, BARCODE_COLUMN] == [FOUR_SAMPLES_MAP, "s1 : BC099+CR099"]
+
+
+def test_rows_with_no_library_alias_are_dropped(capsys):
+    main_df = droplet_main_df()
+    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["sample_name"]) == ["TregR3_L13_L05_GEX"]
+    assert "dropping 1 of 4 MAIN row(s) with no library alias" in capsys.readouterr().out
+
+
+def test_null_sample_alias_does_not_affect_the_sheet():
+    """Nothing on this sheet comes from the per-sample merge."""
+    expected = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
+
+    main_df = droplet_main_df()
+    main_df["sample_alias"] = None
+
+    actual = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_missing_library_aliases_column_returns_empty_frame(capsys):
+    main_df = pd.DataFrame({"sample_alias": ["s1"]})
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.empty
+    assert "no library aliases column" in capsys.readouterr().out
+
+
+def test_alias_only_main_df_collapses_without_aggregating():
+    """groupby().agg({}) raises, so a key-only frame has to dedupe instead."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [
+                ["alex-marson:LIB_A_GEX"],
+                ["alex-marson:LIB_A_GEX"],
+                ["alex-marson:LIB_B_GEX"],
+            ]
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df.columns) == ["sample_name"]
+    assert list(sra_df["sample_name"]) == ["LIB_A_GEX", "LIB_B_GEX"]
+
+
+def test_library_without_barcodes_leaves_the_column_empty():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]],
+            "droplet_based_libraries_samples": [[sample("s1", [])]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert pd.isna(sra_df.loc[0, BARCODE_COLUMN])
+
+
+def test_empty_main_df_returns_empty_frame():
+    main_df = pd.DataFrame({"droplet_based_libraries_aliases": pd.Series(dtype=object)})
+
+    assert make_flattener().create_sra_biosample_dataframe(main_df).empty
+
+
+# _clean_alias_cell
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(["alex-marson:LIB_A_GEX"], "LIB_A_GEX", id="list"),
+        pytest.param("alex-marson:LIB_A_GEX", "LIB_A_GEX", id="bare-string"),
+        pytest.param("LIB_A_GEX", "LIB_A_GEX", id="string-without-prefix"),
+        pytest.param([], None, id="empty-list"),
+        pytest.param("", "", id="empty-string"),
+        pytest.param(None, None, id="none"),
+    ],
+)
+def test_clean_alias_cell(value, expected):
+    assert make_flattener()._clean_alias_cell(value) == expected
+
+
+# isolate and age
+
+
+def test_age_from_developmental_stage_parses_years():
+    assert make_flattener()._age_from_developmental_stage("29-year-old stage") == "29 years"
+
+
+@pytest.mark.parametrize(
+    ("term_name", "expected"),
+    [
+        pytest.param("29-year-old stage", "29 years", id="years"),
+        pytest.param("1-year-old stage", "1 year", id="singular-year"),
+        pytest.param("6-month-old stage", "6 months", id="months"),
+        pytest.param("1-week-old stage", "1 week", id="singular-week"),
+        pytest.param(
+            ["adult stage", "42-year-old stage"], "42 years", id="numeric-wins-over-qualitative"
+        ),
+        pytest.param("adult stage", "adult", id="qualitative"),
+        pytest.param("newborn stage", "newborn", id="newborn"),
+        pytest.param("adult", "adult", id="no-stage-suffix"),
+        pytest.param(
+            "10th week post-fertilization human stage",
+            "10th week post-fertilization",
+            id="qualitative-containing-a-number",
+        ),
+        pytest.param("adult human stage", "adult", id="human-stage-suffix"),
+        pytest.param("mouse adult stage", "mouse adult", id="only-human-is-trimmed"),
+        pytest.param(["adult stage", "newborn stage"], "adult", id="first-qualitative-in-list"),
+        pytest.param(None, None, id="none"),
+        pytest.param(float("nan"), None, id="nan"),
+        pytest.param([], None, id="empty-list"),
+        pytest.param("   ", None, id="blank"),
+    ],
+)
+def test_age_from_developmental_stage(term_name, expected):
+    assert make_flattener()._age_from_developmental_stage(term_name) == expected
+
+
+def donor_main_df():
+    """
+    One library, four samples, two donors - two samples each.
+
+    Mirrors the real Treg run: donor 889023040 is the 32-year-old female (D1,
+    the lower id) and 889081306 the 29-year-old male (D2).
+    """
+    return pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 4,
+            "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
+            "human_donors_cxg_donor_id": [889081306, 889023040, 889081306, 889023040],
+            "human_donors_sex": ["male", "female", "male", "female"],
+            "tissues_developmental_stages_term_name": [
+                "29-year-old stage",
+                "32-year-old stage",
+                "29-year-old stage",
+                "32-year-old stage",
+            ],
+        }
+    )
+
+
+def test_two_donors_are_pooled_and_numbered_by_donor_id():
+    sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
+
+    # D1 is the lower id, 889023040, whose samples are the 32-year-old ones.
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years, D2 - 29 years"
+
+
+def test_single_donor_has_no_pooled_prefix():
+    main_df = donor_main_df()
+    main_df["human_donors_cxg_donor_id"] = 889023040
+    main_df["tissues_developmental_stages_term_name"] = "32-year-old stage"
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "889023040"
+    assert sra_df.loc[0, AGE_COLUMN] == "32 years"
+
+
+def test_numeric_donor_ids_sort_numerically_not_lexically():
+    main_df = donor_main_df()
+    main_df["human_donors_cxg_donor_id"] = [9, 10, 9, 10]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    # Lexical order would put 10 before 9.
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 9, D2 - 10"
+
+
+def test_non_numeric_donor_ids_sort_lexically():
+    main_df = donor_main_df()
+    main_df["human_donors_cxg_donor_id"] = ["CE0010866", "CE0008162", "CE0010866", "CE0008162"]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - CE0008162, D2 - CE0010866"
+
+
+def test_donor_id_is_not_rendered_as_a_float():
+    """A null in the column makes pandas store the ids as float64."""
+    main_df = donor_main_df()
+    main_df.loc[3, "human_donors_cxg_donor_id"] = None
+    assert main_df["human_donors_cxg_donor_id"].dtype == "float64"
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+
+
+def test_qualitative_stage_lands_in_age_alongside_a_numeric_one():
+    main_df = donor_main_df()
+    # The 889081306 rows, D2, have no numeric stage.
+    main_df.loc[[0, 2], "tissues_developmental_stages_term_name"] = "adult stage"
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years, D2 - adult"
+
+
+def test_donor_without_an_age_keeps_its_label_in_the_other_column():
+    main_df = donor_main_df()
+    # Blank the 889081306 rows, which are D2.
+    main_df.loc[[0, 2], "tissues_developmental_stages_term_name"] = None
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+    # D2 drops out of age, but D1 keeps its number so the labels still agree.
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years"
+
+
+def test_no_stage_at_all_leaves_the_age_column_empty():
+    main_df = donor_main_df()
+    main_df["tissues_developmental_stages_term_name"] = None
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert pd.isna(sra_df.loc[0, AGE_COLUMN])
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+
+
+def test_missing_stage_column_still_gives_isolate():
+    main_df = donor_main_df().drop(columns=["tissues_developmental_stages_term_name"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+    assert pd.isna(sra_df.loc[0, AGE_COLUMN])
+
+
+def test_no_donor_column_omits_all_donor_columns(capsys):
+    main_df = donor_main_df().drop(columns=["human_donors_cxg_donor_id"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert ISOLATE_COLUMN not in sra_df.columns
+    assert AGE_COLUMN not in sra_df.columns
+    assert SEX_COLUMN not in sra_df.columns
+    assert "no donor id column" in capsys.readouterr().out
+
+
+# *sex
+
+
+@pytest.mark.parametrize(
+    ("sexes", "expected"),
+    [
+        pytest.param(["male"], "male", id="male-only"),
+        pytest.param(["female"], "female", id="female-only"),
+        pytest.param(["female", "male"], "pooled male and female", id="male-listed-first"),
+        pytest.param(["male", "female"], "pooled male and female", id="order-independent"),
+        pytest.param(["male", "male", "female"], "pooled male and female", id="deduplicated"),
+        pytest.param(["unknown", "male"], "pooled male and unknown", id="male-then-unknown"),
+        pytest.param(["unknown", "female"], "pooled female and unknown", id="female-then-unknown"),
+        pytest.param(
+            ["unknown", "female", "male"],
+            "pooled male, female and unknown",
+            id="three-values",
+        ),
+        pytest.param(["unknown"], "unknown", id="unknown-alone-passes-through"),
+        pytest.param(["  male  "], "male", id="whitespace-stripped"),
+        pytest.param([None, "male"], "male", id="nulls-ignored"),
+        pytest.param([], None, id="empty"),
+        pytest.param([None, float("nan"), ""], None, id="all-empty"),
+    ],
+)
+def test_format_pooled_sex(sexes, expected):
+    assert make_flattener()._format_pooled_sex(sexes) == expected
+
+
+def test_mixed_sex_pool_reads_male_first():
+    sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
+
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
+
+
+def test_single_sex_library_is_the_bare_value():
+    main_df = donor_main_df()
+    main_df["human_donors_sex"] = "female"
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, SEX_COLUMN] == "female"
+
+
+def test_sex_is_summarised_over_donors_not_rows():
+    """Two samples per donor must not make a single-sex library look pooled."""
+    main_df = donor_main_df()
+    main_df["human_donors_cxg_donor_id"] = 889023040
+    main_df["human_donors_sex"] = ["female", "female", "female", "female"]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, SEX_COLUMN] == "female"
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "889023040"
+
+
+def test_missing_sex_column_leaves_the_sex_column_empty():
+    main_df = donor_main_df().drop(columns=["human_donors_sex"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert pd.isna(sra_df.loc[0, SEX_COLUMN])
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+
+
+def test_non_human_sex_column_is_used_when_human_is_absent():
+    main_df = donor_main_df().rename(columns={"human_donors_sex": "non_human_donors_sex"})
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
+
+
+def test_sex_is_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "human_donors_cxg_donor_id": [11, 22, 33],
+            "human_donors_sex": ["male", "female", "male"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", SEX_COLUMN] == "pooled male and female"
+    assert sra_df.loc["LIB_B_GEX", SEX_COLUMN] == "male"
+
+
+def test_non_human_donor_column_is_used_when_human_is_absent():
+    main_df = donor_main_df().rename(
+        columns={"human_donors_cxg_donor_id": "non_human_donors_cxg_donor_id"}
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+
+
+def test_donor_cells_are_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "human_donors_cxg_donor_id": [11, 22, 33],
+            "tissues_developmental_stages_term_name": [
+                "40-year-old stage",
+                "50-year-old stage",
+                "60-year-old stage",
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", ISOLATE_COLUMN] == "pooled: D1 - 11, D2 - 22"
+    assert sra_df.loc["LIB_A_GEX", AGE_COLUMN] == "pooled: D1 - 40 years, D2 - 50 years"
+    # A single-donor library gets the bare form even when a sibling is pooled.
+    assert sra_df.loc["LIB_B_GEX", ISOLATE_COLUMN] == "33"
+    assert sra_df.loc["LIB_B_GEX", AGE_COLUMN] == "60 years"
+
+
+def test_prop_map_sends_both_library_types_to_sample_name():
+    """The rename relies on both library keys sharing one output name."""
+    assert PROP_MAP_SRA_BIOSAMPLE["droplet_based_libraries_aliases"] == "sample_name"
+    assert PROP_MAP_SRA_BIOSAMPLE["plate_based_libraries_aliases"] == "sample_name"
+    # The per-sample alias is deliberately absent: the key is the library.
+    assert "sample_alias" not in PROP_MAP_SRA_BIOSAMPLE
+    # sample_name is the one output column without the SRA required marker.
+    assert not PROP_MAP_SRA_BIOSAMPLE["droplet_based_libraries_aliases"].startswith("*")
+    assert ORGANISM_COLUMN.startswith("*")
+
+
+def test_prop_map_holds_only_renames():
+    """The derived columns are named in the flattener, not mapped from MAIN."""
+    assert "isolate" not in PROP_MAP_SRA_BIOSAMPLE
+    assert "age" not in PROP_MAP_SRA_BIOSAMPLE
+    assert ISOLATE_COLUMN not in PROP_MAP_SRA_BIOSAMPLE.values()
+    assert AGE_COLUMN not in PROP_MAP_SRA_BIOSAMPLE.values()
+    assert BARCODE_COLUMN not in PROP_MAP_SRA_BIOSAMPLE.values()

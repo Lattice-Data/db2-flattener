@@ -12,6 +12,7 @@ from db2_flattener.schema.constants import (
     GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
+    PROP_MAP_SRA_BIOSAMPLE,
     REFORMAT_LIST,
     TISSUE_TYPE_MAP,
     Configs,
@@ -23,6 +24,7 @@ from db2_flattener.utils import (
     extract_references_from_field,
     get_config_obj_type,
     get_url_prefix_from_id,
+    is_empty,
     normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
@@ -59,6 +61,7 @@ class DB2Flattener:
         main_output = f"{prefix}_MAIN.csv"
         biohub_output = f"{prefix}_BIOHUB.csv"
         geo_output = f"{prefix}_GEO.csv"
+        sra_biosample_output = f"{prefix}_SRA_BIOSAMPLE.csv"
         sample_output = f"{prefix}_SAMPLES.csv"
         guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
@@ -91,6 +94,14 @@ class DB2Flattener:
         print(f"Saving geo DataFrame to {geo_output}...")
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
+
+        # Create SRA/BioSample DataFrame from main DataFrame
+        sra_biosample_df = self.create_sra_biosample_dataframe(main_df)
+        print(f"Saving SRA/BioSample DataFrame to {sra_biosample_output}...")
+        sra_biosample_df.to_csv(sra_biosample_output, index=False)
+        print(f"✅ SRA/BioSample CSV file created: {sra_biosample_output}")
+        print(f"   Rows: {len(sra_biosample_df)}")
+        print(f"   Columns: {len(sra_biosample_df.columns)}")
 
         guide_file = self._resolve_guide_rna_file(complete_data)
         guide_df = self.create_guide_metadata_dataframe(guide_file)
@@ -307,6 +318,270 @@ class DB2Flattener:
 
         group_col = "*library name"
         return collapse_dataframe(geo_df, group_col=group_col)
+
+    def _sample_probe_barcode_map(self, library_samples):
+        """
+        Build one library's 'sample_name : barcode|barcode' map.
+
+        library_samples is a library's embedded 'samples' field: a list of dicts
+        carrying 'aliases' and 'multiplexing_barcodes'. Entries are sorted by
+        cleaned alias so the string does not depend on the order the API
+        happened to return the samples in.
+
+        Returns None when no sample carries barcodes, so a library that is not
+        multiplexed gets an empty cell rather than 'sample_a : , sample_b : '.
+        Also returns None for a 'samples' field of bare @id strings, which have
+        no barcodes to read.
+        """
+        if not isinstance(library_samples, list):
+            return None
+
+        entries = []
+        for sample in library_samples:
+            if not isinstance(sample, dict):
+                continue
+            alias = self._get_clean_alias(sample)
+            if not alias:
+                continue
+            barcodes = sample.get("multiplexing_barcodes") or []
+            if isinstance(barcodes, str):
+                barcodes = [barcodes]
+            entries.append((alias, "|".join(str(barcode) for barcode in barcodes)))
+
+        if not any(barcodes for _, barcodes in entries):
+            return None
+
+        entries.sort(key=lambda entry: entry[0])
+        return ", ".join(f"{alias} : {barcodes}" for alias, barcodes in entries)
+
+    def create_sra_biosample_dataframe(self, main_df) -> pd.DataFrame:
+        """
+        Build the SRA/BioSample dataframe from main_df: one row per library.
+
+        Grouped on the library alias, which PROP_MAP_SRA_BIOSAMPLE renames to
+        'sample_name' - the submitted 'sample' is the sequencing library. Nothing
+        on this sheet comes from the create_dataframe() per-sample merge: the
+        barcode map is read from the library's own embedded 'samples' field, so a
+        raw matrix file whose samples did not merge costs nothing here.
+        """
+        alias_cols = [
+            col
+            for col in ("droplet_based_libraries_aliases", "plate_based_libraries_aliases")
+            if col in main_df.columns
+        ]
+        if not alias_cols:
+            print("Warning: MAIN has no library aliases column; SRA_BIOSAMPLE will be empty")
+            return pd.DataFrame()
+
+        columns_to_keep = [k for k in PROP_MAP_SRA_BIOSAMPLE if k in main_df.columns]
+        sra_df = main_df[columns_to_keep].copy()
+
+        # Strip the lab prefix while droplet and plate still have distinct names -
+        # after the rename they are both 'sample_name'
+        for alias_col in alias_cols:
+            sra_df[alias_col] = sra_df[alias_col].map(self._clean_alias_cell)
+
+        sra_df.rename(columns=PROP_MAP_SRA_BIOSAMPLE, inplace=True)
+        sra_df = collapse_duplicate_columns(sra_df)
+
+        # Per-library donor cells, keyed by the library alias sample_name now holds
+        isolate, age, sex = self._donor_cells_by_library(main_df, sra_df["sample_name"])
+        if isolate:
+            sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
+        if age:
+            sra_df["*age"] = sra_df["sample_name"].map(age)
+        if sex:
+            sra_df["*sex"] = sra_df["sample_name"].map(sex)
+
+        # Barcodes come from whichever library type this run has
+        barcode_map = None
+        for samples_col in ("droplet_based_libraries_samples", "plate_based_libraries_samples"):
+            if samples_col not in main_df.columns:
+                continue
+            mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
+            barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
+        if barcode_map is not None:
+            sra_df["sample_name: sample_probe_barcode"] = barcode_map
+
+        unnamed = int(sra_df["sample_name"].isna().sum())
+        if unnamed:
+            print(
+                f"Warning: dropping {unnamed} of {len(sra_df)} MAIN row(s) with no library "
+                "alias from SRA_BIOSAMPLE"
+            )
+            sra_df = sra_df[sra_df["sample_name"].notna()]
+
+        if sra_df.empty:
+            return sra_df
+
+        if len(sra_df.columns) == 1:
+            return sra_df.drop_duplicates().reset_index(drop=True)
+
+        return collapse_dataframe(sra_df, group_col="sample_name")
+
+    # HsapDv/other developmental stage terms that state a numeric age, such as
+    # '29-year-old stage'. Terms like 'adult stage' carry no number.
+    DEVELOPMENTAL_STAGE_AGE = re.compile(r"(\d+)-(year|month|week|day)-old")
+    # Trailing boilerplate on a stage term name: 'adult stage', and the
+    # species-qualified form '10th week post-fertilization human stage'.
+    DEVELOPMENTAL_STAGE_SUFFIX = re.compile(r"\s+(?:human\s+)?stage$")
+
+    @classmethod
+    def _age_from_developmental_stage(cls, term_name):
+        """
+        '29-year-old stage' -> '29 years'; 'adult stage' -> 'adult'.
+
+        A stage that states a numeric age renders as a number and unit. A
+        qualitative one keeps its term name with the trailing ' stage' or
+        ' human stage' removed, so it still lands in the age column rather than
+        being dropped. A numeric stage anywhere in a multi-stage cell wins over a
+        qualitative one.
+        """
+        names = term_name if isinstance(term_name, list) else [term_name]
+        texts = [name.strip() for name in names if isinstance(name, str) and name.strip()]
+
+        for text in texts:
+            match = cls.DEVELOPMENTAL_STAGE_AGE.search(text)
+            if match:
+                count, unit = match.group(1), match.group(2)
+                return f"{count} {unit}" if count == "1" else f"{count} {unit}s"
+
+        return cls.DEVELOPMENTAL_STAGE_SUFFIX.sub("", texts[0]) if texts else None
+
+    @staticmethod
+    def _donor_id_text(value) -> str:
+        """Render a donor id as text without pandas' int-to-float artifacts."""
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    @staticmethod
+    def _donor_sort_key(donor_id: str):
+        """Numeric ids sort numerically, so D10 does not land between D1 and D2."""
+        return (0, int(donor_id), "") if donor_id.isdigit() else (1, 0, donor_id)
+
+    @staticmethod
+    def _format_pooled_donor_cell(labelled_values) -> str | None:
+        """
+        'pooled: D1 - x, D2 - y' across donors, or the bare value for a lone donor.
+
+        labelled_values is [(label, value)] already in donor order. Entries with
+        no value drop out, but the surviving labels keep their numbers so they
+        still name the same donor as in the other donor column.
+        """
+        entries = [(label, value) for label, value in labelled_values if not is_empty(value)]
+        if not entries:
+            return None
+        if len(labelled_values) == 1:
+            return str(entries[0][1])
+        return "pooled: " + ", ".join(f"{label} - {value}" for label, value in entries)
+
+    # Ordered so a mixed pool always reads 'pooled male and female'. Anything not
+    # listed sorts alphabetically after these.
+    SEX_POOL_ORDER = ("male", "female")
+
+    @classmethod
+    def _format_pooled_sex(cls, sexes) -> str | None:
+        """
+        'male' for one sex, 'pooled male and female' across a mixed pool.
+
+        Deduplicates, then orders male, female, and anything else alphabetically
+        after those, so the cell does not depend on gather order. Values outside
+        the pair are pooled the same way: 'pooled male and unknown'.
+        """
+        unique = {str(sex).strip() for sex in sexes if not is_empty(sex)}
+        if not unique:
+            return None
+
+        def sort_key(sex):
+            if sex in cls.SEX_POOL_ORDER:
+                return (0, cls.SEX_POOL_ORDER.index(sex), "")
+            return (1, 0, sex)
+
+        ordered = sorted(unique, key=sort_key)
+        if len(ordered) == 1:
+            return ordered[0]
+        return "pooled " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
+
+    @staticmethod
+    def _coalesce_columns(main_df, columns):
+        """First non-null value across columns, or None when none of them exist."""
+        out = None
+        for col in columns:
+            if col not in main_df.columns:
+                continue
+            out = main_df[col] if out is None else out.fillna(main_df[col])
+        return out
+
+    def _donor_cells_by_library(self, main_df, library_key):
+        """
+        Build the 'isolate', 'age' and 'sex' cells per library, keyed by library alias.
+
+        Neither age nor sex is read off a donor object - age lives on the sample and
+        sex is only reachable through it - so all three are assembled by walking the
+        library's MAIN rows, each of which is one sample with one donor. Donors are
+        enumerated D1..Dn in donor id order and that one enumeration feeds isolate
+        and age, so Dn names the same donor in both. Sex is a summary over the same
+        donors rather than a per-donor list, so it carries no labels.
+
+        Returns ({library: isolate}, {library: age}, {library: sex}), all empty when
+        MAIN carries no donor id column to key on.
+        """
+        donor_ids = self._coalesce_columns(
+            main_df, ("human_donors_cxg_donor_id", "non_human_donors_cxg_donor_id")
+        )
+        if donor_ids is None:
+            print("Warning: MAIN has no donor id column; SRA_BIOSAMPLE omits isolate, age and sex")
+            return {}, {}, {}
+
+        sexes = self._coalesce_columns(main_df, ("human_donors_sex", "non_human_donors_sex"))
+        if sexes is None:
+            sexes = pd.Series(None, index=main_df.index, dtype=object)
+
+        # developmental_stages exists on every sample type, so take whichever
+        # sample column this run produced.
+        stages = self._coalesce_columns(
+            main_df, [c for c in main_df.columns if c.endswith("_developmental_stages_term_name")]
+        )
+        ages = (
+            stages.map(self._age_from_developmental_stage)
+            if stages is not None
+            else pd.Series(None, index=main_df.index, dtype=object)
+        )
+
+        # {library: {donor_id: {'age': ..., 'sex': ...}}} - first non-empty wins
+        by_library: dict[str, dict[str, dict[str, str | None]]] = {}
+        for library, donor_id, age, sex in zip(library_key, donor_ids, ages, sexes, strict=True):
+            if not isinstance(library, str) or is_empty(donor_id):
+                continue
+            donors = by_library.setdefault(library, {})
+            donor = donors.setdefault(self._donor_id_text(donor_id), {"age": None, "sex": None})
+            if donor["age"] is None:
+                donor["age"] = age
+            if donor["sex"] is None:
+                donor["sex"] = sex
+
+        isolate_cells = {}
+        age_cells = {}
+        sex_cells = {}
+        for library, donors in by_library.items():
+            ordered = sorted(donors, key=self._donor_sort_key)
+            labelled = [(f"D{number}", donor) for number, donor in enumerate(ordered, start=1)]
+            isolate_cells[library] = self._format_pooled_donor_cell(labelled)
+            age_cells[library] = self._format_pooled_donor_cell(
+                [(label, donors[donor]["age"]) for label, donor in labelled]
+            )
+            sex_cells[library] = self._format_pooled_sex(donors[donor]["sex"] for donor in ordered)
+
+        return isolate_cells, age_cells, sex_cells
+
+    def _clean_alias_cell(self, value):
+        """Strip the lab prefix from a raw aliases cell, which may be a list or a str."""
+        if isinstance(value, list):
+            return self._get_clean_alias({"aliases": value})
+        if isinstance(value, str) and value:
+            return self._get_clean_alias({"aliases": [value]})
+        return value
 
     def create_guide_metadata_dataframe(self, file_info):
         """
