@@ -115,8 +115,7 @@ PROP_MAP_BIOHUB = {
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
 }
 
-# Only renames belong here. The derived columns - isolate, age, and the probe
-# barcode map - have no MAIN column behind them and are named in the flattener.
+# Only renames belong here; the derived columns are named in the flattener.
 PROP_MAP_SRA_BIOSAMPLE = {
     "droplet_based_libraries_aliases": "sample_name",
     "plate_based_libraries_aliases": "sample_name",

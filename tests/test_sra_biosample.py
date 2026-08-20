@@ -1,33 +1,57 @@
 """
 SRA/BioSample sheet: one row per library, keyed on the library alias under the
 name 'sample_name' because the submitted 'sample' is the sequencing library.
-
-The alias-to-barcode map is read straight off the library's embedded 'samples'
-field, which the report endpoint returns with 'aliases' and
-'multiplexing_barcodes' already on each item, so nothing here needs the gatherer
-and nothing here depends on the create_dataframe() per-sample merge.
 """
 
 import pandas as pd
 import pytest
 
 from db2_flattener.flatten.flattener import DB2Flattener
-from db2_flattener.schema.constants import PROP_MAP_SRA_BIOSAMPLE, Configs
+from db2_flattener.schema.constants import PROP_MAP_SRA_BIOSAMPLE, TISSUE_TYPE_MAP, Configs
 
 # Derived columns, named in the flattener rather than in PROP_MAP_SRA_BIOSAMPLE.
 BARCODE_COLUMN = "sample_name: sample_probe_barcode"
 ISOLATE_COLUMN = "*isolate"
 AGE_COLUMN = "*age"
 SEX_COLUMN = "*sex"
+PROVIDER_COLUMN = "*biomaterial_provider"
+DATE_COLUMN = "*collection_date"
+GEO_COLUMN = "*geo_loc_name"
 # Read off the map so a rename there, e.g. dropping the SRA '*' required marker,
 # does not have to be chased through every assertion below.
 ORGANISM_COLUMN = PROP_MAP_SRA_BIOSAMPLE["human_donors_taxa"]
+
+LAB = {"@id": "/labs/alex-marson/", "title": "Alex Marson, UCSF"}
+OTHER_LAB = {"@id": "/labs/other/", "title": "Other Lab"}
+SOURCE = {"@id": "/sources/abcam/", "title": "Abcam"}
+
+# _sample_url_prefixes() reads api_type off OBJECT_CONFIG, so the fixture needs
+# real entries. droplet_based_libraries is here to prove a non-sample type's lab
+# column is passed over.
+MIN_CONFIGS = Configs(
+    FIELD_TYPES={},
+    OBJECT_CONFIG={
+        "tissues": {"api_type": "Tissue", "fields": [], "references": {}},
+        "cell_lines": {"api_type": "CellLine", "fields": [], "references": {}},
+        "organoids": {"api_type": "Organoid", "fields": [], "references": {}},
+        "primary_cell_cultures": {
+            "api_type": "PrimaryCellCulture",
+            "fields": [],
+            "references": {},
+        },
+        "droplet_based_libraries": {
+            "api_type": "DropletBasedLibrary",
+            "fields": [],
+            "references": {},
+        },
+    },
+)
 
 
 def make_flattener():
     flattener = DB2Flattener.__new__(DB2Flattener)
     flattener.connection = None
-    flattener.configs = Configs(FIELD_TYPES={}, OBJECT_CONFIG={})
+    flattener.configs = MIN_CONFIGS
     return flattener
 
 
@@ -118,13 +142,19 @@ def droplet_main_df():
 def test_droplet_run_is_one_row_per_library(capsys):
     sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
 
-    # sample_alias is in MAIN but is not carried onto the sheet. This fixture has
-    # no donor id column, so isolate and age are absent too.
-    assert list(sra_df.columns) == ["sample_name", ORGANISM_COLUMN, BARCODE_COLUMN]
+    # No donor id or lab column here, so only the always-on columns are derived
+    assert list(sra_df.columns) == [
+        "sample_name",
+        ORGANISM_COLUMN,
+        BARCODE_COLUMN,
+        DATE_COLUMN,
+        GEO_COLUMN,
+    ]
     assert "no donor id column" in capsys.readouterr().out
     assert len(sra_df) == 1
     assert sra_df.loc[0, "sample_name"] == "TregR3_L13_L05_GEX"
     assert sra_df.loc[0, ORGANISM_COLUMN] == "Homo sapiens"
+    assert sra_df.loc[0, DATE_COLUMN] == "not provided"
     assert sra_df.loc[0, BARCODE_COLUMN] == FOUR_SAMPLES_MAP
 
 
@@ -143,7 +173,6 @@ def test_plate_library_columns_are_used_when_droplet_is_absent():
 
 
 def test_paired_libraries_get_their_own_rows_sharing_the_same_map():
-    """A GEX and a CRISPR library over the same pool are two rows."""
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
@@ -185,8 +214,8 @@ def test_rows_with_no_library_alias_are_dropped(capsys):
     assert "dropping 1 of 4 MAIN row(s) with no library alias" in capsys.readouterr().out
 
 
-def test_null_sample_alias_does_not_affect_the_sheet():
-    """Nothing on this sheet comes from the per-sample merge."""
+def test_sample_alias_is_not_the_grouping_key():
+    """The library alias keys the sheet, so nulling sample_alias changes nothing."""
     expected = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
 
     main_df = droplet_main_df()
@@ -207,7 +236,7 @@ def test_missing_library_aliases_column_returns_empty_frame(capsys):
 
 
 def test_alias_only_main_df_collapses_without_aggregating():
-    """groupby().agg({}) raises, so a key-only frame has to dedupe instead."""
+    """groupby().agg({}) raises, so a frame of nothing but the key dedupes instead."""
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_aliases": [
@@ -220,8 +249,10 @@ def test_alias_only_main_df_collapses_without_aggregating():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert list(sra_df.columns) == ["sample_name"]
+    assert list(sra_df.columns) == ["sample_name", DATE_COLUMN, GEO_COLUMN]
     assert list(sra_df["sample_name"]) == ["LIB_A_GEX", "LIB_B_GEX"]
+    assert list(sra_df[DATE_COLUMN]) == ["not provided", "not provided"]
+    assert list(sra_df[GEO_COLUMN]) == ["not provided", "not provided"]
 
 
 def test_library_without_barcodes_leaves_the_column_empty():
@@ -301,10 +332,8 @@ def test_age_from_developmental_stage(term_name, expected):
 
 def donor_main_df():
     """
-    One library, four samples, two donors - two samples each.
-
-    Mirrors the real Treg run: donor 889023040 is the 32-year-old female (D1,
-    the lower id) and 889081306 the 29-year-old male (D2).
+    One library, four samples, two donors. Mirrors the real Treg run: 889023040 is
+    the 32-year-old female (D1, the lower id), 889081306 the 29-year-old male (D2).
     """
     return pd.DataFrame(
         {
@@ -468,7 +497,6 @@ def test_single_sex_library_is_the_bare_value():
 
 
 def test_sex_is_summarised_over_donors_not_rows():
-    """Two samples per donor must not make a single-sex library look pooled."""
     main_df = donor_main_df()
     main_df["human_donors_cxg_donor_id"] = 889023040
     main_df["human_donors_sex"] = ["female", "female", "female", "female"]
@@ -543,6 +571,311 @@ def test_donor_cells_are_scoped_to_each_library():
     # A single-donor library gets the bare form even when a sibling is pooled.
     assert sra_df.loc["LIB_B_GEX", ISOLATE_COLUMN] == "33"
     assert sra_df.loc["LIB_B_GEX", AGE_COLUMN] == "60 years"
+
+
+# *biomaterial_provider
+
+
+def test_sample_url_prefixes_come_from_the_tissue_type_map():
+    prefixes = make_flattener()._sample_url_prefixes()
+
+    assert sorted(prefixes) == ["cell_lines", "organoids", "primary_cell_cultures", "tissues"]
+    assert "droplet_based_libraries" not in prefixes
+    # Every sample api_type in the config is accounted for by TISSUE_TYPE_MAP.
+    assert {MIN_CONFIGS.OBJECT_CONFIG[p]["api_type"] for p in prefixes} <= set(TISSUE_TYPE_MAP)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(LAB, ["Alex Marson, UCSF"], id="embedded-dict"),
+        pytest.param([SOURCE], ["Abcam"], id="list-of-one-dict"),
+        pytest.param([SOURCE, LAB], ["Abcam", "Alex Marson, UCSF"], id="list-of-dicts"),
+        pytest.param({"name": "abcam"}, ["abcam"], id="name-when-no-title"),
+        pytest.param({"title": "  Abcam  "}, ["Abcam"], id="whitespace-stripped"),
+        pytest.param({"title": ""}, [], id="blank-title"),
+        pytest.param("/labs/alex-marson/", [], id="bare-id-string-has-no-title"),
+        pytest.param(["/sources/abcam/"], [], id="list-of-bare-id-strings"),
+        pytest.param({"@id": "/labs/x/"}, [], id="dict-without-title-or-name"),
+        pytest.param(None, [], id="none"),
+        pytest.param(float("nan"), [], id="nan"),
+        pytest.param([], [], id="empty-list"),
+    ],
+)
+def test_provider_titles(value, expected):
+    assert make_flattener()._provider_titles(value) == expected
+
+
+def provider_main_df(**columns):
+    base = {
+        "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+        "tissues_lab": [LAB, LAB],
+    }
+    base.update(columns)
+    return pd.DataFrame(base)
+
+
+def test_provider_falls_back_to_sample_lab_when_sources_is_absent():
+    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
+
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "Alex Marson, UCSF"
+
+
+def test_provider_prefers_sources_over_lab():
+    main_df = provider_main_df(tissues_sources=[[SOURCE], [SOURCE]])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "Abcam"
+
+
+def test_provider_falls_back_per_row_not_per_column():
+    main_df = provider_main_df(tissues_sources=[[SOURCE], None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "Abcam; Alex Marson, UCSF"
+
+
+def test_provider_falls_back_when_sources_is_an_unresolved_id_path():
+    main_df = provider_main_df(tissues_sources=[["/sources/abcam/"], ["/sources/abcam/"]])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "Alex Marson, UCSF"
+
+
+@pytest.mark.parametrize(
+    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
+)
+def test_provider_reads_any_sample_type(sample_type):
+    main_df = provider_main_df().drop(columns=["tissues_lab"])
+    main_df[f"{sample_type}_lab"] = [LAB, LAB]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "Alex Marson, UCSF"
+
+
+def test_provider_ignores_lab_columns_on_non_sample_objects():
+    """'lab' is on 19 object types - libraries, files, donors - only samples count."""
+    main_df = provider_main_df().drop(columns=["tissues_lab"])
+    main_df["droplet_based_libraries_lab"] = [LAB, LAB]
+    main_df["human_donors_lab"] = [LAB, LAB]
+    main_df["sequence_files_lab"] = [LAB, LAB]
+    main_df["treatments_lab"] = [LAB, LAB]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert PROVIDER_COLUMN not in sra_df.columns
+
+
+def test_provider_skips_rows_with_no_library_alias():
+    main_df = provider_main_df(tissues_lab=[LAB, OTHER_LAB])
+    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    # The unkeyed row's lab must not leak into the surviving library.
+    assert list(sra_df[PROVIDER_COLUMN]) == ["Alex Marson, UCSF"]
+
+
+def test_no_sources_or_lab_column_omits_the_provider(capsys):
+    main_df = provider_main_df().drop(columns=["tissues_lab"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert PROVIDER_COLUMN not in sra_df.columns
+    assert "no sample sources or lab column" in capsys.readouterr().out
+
+
+def test_provider_is_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "tissues_lab": [LAB, LAB, OTHER_LAB],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", PROVIDER_COLUMN] == "Alex Marson, UCSF"
+    assert sra_df.loc["LIB_B_GEX", PROVIDER_COLUMN] == "Other Lab"
+
+
+# *collection_date
+
+
+def test_collection_date_uses_date_obtained():
+    main_df = provider_main_df(tissues_date_obtained=["2023-01-05", "2023-01-05"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05"
+
+
+def test_collection_date_defaults_when_the_column_is_absent():
+    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
+
+    assert sra_df.loc[0, DATE_COLUMN] == "not provided"
+
+
+def test_collection_date_defaults_when_the_column_is_all_null():
+    main_df = provider_main_df(tissues_date_obtained=[None, None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "not provided"
+
+
+def test_collection_date_mixes_a_date_with_the_default():
+    main_df = provider_main_df(tissues_date_obtained=["2023-01-05", None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05; not provided"
+
+
+def test_collection_date_joins_distinct_dates_in_order():
+    main_df = provider_main_df(tissues_date_obtained=["2023-06-01", "2023-01-05"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05; 2023-06-01"
+
+
+def test_collection_date_default_sorts_last_even_before_a_letter_date():
+    """The literal is appended, not sorted in, so a non-ISO date cannot displace it."""
+    main_df = provider_main_df(tissues_date_obtained=["osmotic-era", None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "osmotic-era; not provided"
+
+
+def test_collection_date_strips_whitespace_and_dedupes():
+    main_df = provider_main_df(tissues_date_obtained=["  2023-01-05  ", "2023-01-05"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05"
+
+
+@pytest.mark.parametrize(
+    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
+)
+def test_collection_date_reads_any_sample_type(sample_type):
+    main_df = provider_main_df()
+    main_df[f"{sample_type}_date_obtained"] = ["2023-01-05", "2023-01-05"]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05"
+
+
+def test_collection_date_ignores_date_obtained_on_non_sample_objects():
+    main_df = provider_main_df()
+    main_df["droplet_based_libraries_date_obtained"] = ["2023-01-05", "2023-01-05"]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DATE_COLUMN] == "not provided"
+
+
+def test_collection_date_is_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "tissues_lab": [LAB, LAB, LAB],
+            "tissues_date_obtained": ["2023-01-05", None, "2024-02-02"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", DATE_COLUMN] == "2023-01-05; not provided"
+    assert sra_df.loc["LIB_B_GEX", DATE_COLUMN] == "2024-02-02"
+
+
+def test_collection_date_skips_rows_with_no_library_alias():
+    main_df = provider_main_df(tissues_date_obtained=["2023-01-05", "2024-02-02"])
+    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    # The unkeyed row's date must not leak into the surviving library.
+    assert list(sra_df[DATE_COLUMN]) == ["2023-01-05"]
+
+
+# *geo_loc_name
+
+
+def test_geo_loc_name_uses_collection_geographical_location():
+    main_df = provider_main_df(tissues_collection_geographical_location=["USA", "USA"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, GEO_COLUMN] == "USA"
+
+
+def test_geo_loc_name_defaults_when_the_column_is_absent():
+    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
+
+    assert sra_df.loc[0, GEO_COLUMN] == "not provided"
+
+
+def test_geo_loc_name_mixes_a_location_with_the_default():
+    main_df = provider_main_df(tissues_collection_geographical_location=["USA", None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, GEO_COLUMN] == "USA; not provided"
+
+
+def test_geo_loc_name_joins_distinct_locations():
+    main_df = provider_main_df(tissues_collection_geographical_location=["USA", "Canada"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, GEO_COLUMN] == "Canada; USA"
+
+
+@pytest.mark.parametrize(
+    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
+)
+def test_geo_loc_name_reads_any_sample_type(sample_type):
+    main_df = provider_main_df()
+    main_df[f"{sample_type}_collection_geographical_location"] = ["USA", "USA"]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, GEO_COLUMN] == "USA"
+
+
+def test_geo_loc_name_ignores_non_sample_objects():
+    main_df = provider_main_df()
+    main_df["droplet_based_libraries_collection_geographical_location"] = ["USA", "USA"]
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, GEO_COLUMN] == "not provided"
+
+
+def test_geo_loc_name_is_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "tissues_collection_geographical_location": ["USA", None, "Canada"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", GEO_COLUMN] == "USA; not provided"
+    assert sra_df.loc["LIB_B_GEX", GEO_COLUMN] == "Canada"
 
 
 def test_prop_map_sends_both_library_types_to_sample_name():

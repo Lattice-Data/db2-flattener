@@ -323,15 +323,10 @@ class DB2Flattener:
         """
         Build one library's 'sample_name : barcode|barcode' map.
 
-        library_samples is a library's embedded 'samples' field: a list of dicts
+        library_samples is a library's embedded 'samples' field, each item
         carrying 'aliases' and 'multiplexing_barcodes'. Entries are sorted by
-        cleaned alias so the string does not depend on the order the API
-        happened to return the samples in.
-
-        Returns None when no sample carries barcodes, so a library that is not
-        multiplexed gets an empty cell rather than 'sample_a : , sample_b : '.
-        Also returns None for a 'samples' field of bare @id strings, which have
-        no barcodes to read.
+        cleaned alias, so the string does not depend on the API's ordering.
+        Returns None when no sample carries barcodes.
         """
         if not isinstance(library_samples, list):
             return None
@@ -359,10 +354,7 @@ class DB2Flattener:
         Build the SRA/BioSample dataframe from main_df: one row per library.
 
         Grouped on the library alias, which PROP_MAP_SRA_BIOSAMPLE renames to
-        'sample_name' - the submitted 'sample' is the sequencing library. Nothing
-        on this sheet comes from the create_dataframe() per-sample merge: the
-        barcode map is read from the library's own embedded 'samples' field, so a
-        raw matrix file whose samples did not merge costs nothing here.
+        'sample_name' - the submitted 'sample' is the sequencing library.
         """
         alias_cols = [
             col
@@ -376,24 +368,26 @@ class DB2Flattener:
         columns_to_keep = [k for k in PROP_MAP_SRA_BIOSAMPLE if k in main_df.columns]
         sra_df = main_df[columns_to_keep].copy()
 
-        # Strip the lab prefix while droplet and plate still have distinct names -
-        # after the rename they are both 'sample_name'
+        # Strip the lab prefix before the rename merges droplet and plate into one
         for alias_col in alias_cols:
             sra_df[alias_col] = sra_df[alias_col].map(self._clean_alias_cell)
 
         sra_df.rename(columns=PROP_MAP_SRA_BIOSAMPLE, inplace=True)
         sra_df = collapse_duplicate_columns(sra_df)
 
-        # Per-library donor cells, keyed by the library alias sample_name now holds
+        # Built while sample_name is still row-aligned with main_df, attached after
+        # the collapse - one value per library already, so nothing to aggregate
         isolate, age, sex = self._donor_cells_by_library(main_df, sra_df["sample_name"])
-        if isolate:
-            sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
-        if age:
-            sra_df["*age"] = sra_df["sample_name"].map(age)
-        if sex:
-            sra_df["*sex"] = sra_df["sample_name"].map(sex)
+        provider = self._biomaterial_provider_by_library(main_df, sra_df["sample_name"])
+        collection_date = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "date_obtained"
+        )
+        geo_loc_name = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "collection_geographical_location"
+        )
 
-        # Barcodes come from whichever library type this run has
+        # Barcodes are per row, so they do go through the collapse: that is what
+        # turns rows disagreeing on the map into a list
         barcode_map = None
         for samples_col in ("droplet_based_libraries_samples", "plate_based_libraries_samples"):
             if samples_col not in main_df.columns:
@@ -415,15 +409,27 @@ class DB2Flattener:
             return sra_df
 
         if len(sra_df.columns) == 1:
-            return sra_df.drop_duplicates().reset_index(drop=True)
+            # groupby().agg({}) raises, so a frame of nothing but the key dedupes
+            sra_df = sra_df.drop_duplicates().reset_index(drop=True)
+        else:
+            sra_df = collapse_dataframe(sra_df, group_col="sample_name")
 
-        return collapse_dataframe(sra_df, group_col="sample_name")
+        if isolate:
+            sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
+        if age:
+            sra_df["*age"] = sra_df["sample_name"].map(age)
+        if sex:
+            sra_df["*sex"] = sra_df["sample_name"].map(sex)
+        if provider:
+            sra_df["*biomaterial_provider"] = sra_df["sample_name"].map(provider)
+        sra_df["*collection_date"] = sra_df["sample_name"].map(collection_date)
+        sra_df["*geo_loc_name"] = sra_df["sample_name"].map(geo_loc_name)
 
-    # HsapDv/other developmental stage terms that state a numeric age, such as
-    # '29-year-old stage'. Terms like 'adult stage' carry no number.
+        return sra_df
+
+    # Stage terms stating a numeric age, e.g. '29-year-old stage'
     DEVELOPMENTAL_STAGE_AGE = re.compile(r"(\d+)-(year|month|week|day)-old")
-    # Trailing boilerplate on a stage term name: 'adult stage', and the
-    # species-qualified form '10th week post-fertilization human stage'.
+    # Trailing boilerplate, e.g. '10th week post-fertilization human stage'
     DEVELOPMENTAL_STAGE_SUFFIX = re.compile(r"\s+(?:human\s+)?stage$")
 
     @classmethod
@@ -431,11 +437,8 @@ class DB2Flattener:
         """
         '29-year-old stage' -> '29 years'; 'adult stage' -> 'adult'.
 
-        A stage that states a numeric age renders as a number and unit. A
-        qualitative one keeps its term name with the trailing ' stage' or
-        ' human stage' removed, so it still lands in the age column rather than
-        being dropped. A numeric stage anywhere in a multi-stage cell wins over a
-        qualitative one.
+        A qualitative stage keeps its term name minus a trailing ' stage' or
+        ' human stage'. A numeric stage anywhere in a multi-stage cell wins.
         """
         names = term_name if isinstance(term_name, list) else [term_name]
         texts = [name.strip() for name in names if isinstance(name, str) and name.strip()]
@@ -476,8 +479,7 @@ class DB2Flattener:
             return str(entries[0][1])
         return "pooled: " + ", ".join(f"{label} - {value}" for label, value in entries)
 
-    # Ordered so a mixed pool always reads 'pooled male and female'. Anything not
-    # listed sorts alphabetically after these.
+    # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")
 
     @classmethod
@@ -485,9 +487,7 @@ class DB2Flattener:
         """
         'male' for one sex, 'pooled male and female' across a mixed pool.
 
-        Deduplicates, then orders male, female, and anything else alphabetically
-        after those, so the cell does not depend on gather order. Values outside
-        the pair are pooled the same way: 'pooled male and unknown'.
+        Values outside the pair pool the same way: 'pooled male and unknown'.
         """
         unique = {str(sex).strip() for sex in sexes if not is_empty(sex)}
         if not unique:
@@ -503,6 +503,99 @@ class DB2Flattener:
             return ordered[0]
         return "pooled " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
 
+    def _sample_url_prefixes(self) -> list[str]:
+        """
+        Sample url_prefixes, e.g. 'tissues', from TISSUE_TYPE_MAP and OBJECT_CONFIG.
+
+        Needed because 'lab' sits on 19 object types - libraries, files, donors -
+        and only a sample's lab names a biomaterial provider.
+        """
+        return [
+            prefix
+            for prefix, config in self.configs.OBJECT_CONFIG.items()
+            if config.get("api_type") in TISSUE_TYPE_MAP
+        ]
+
+    @staticmethod
+    def _provider_titles(value) -> list[str]:
+        """
+        Provider titles from a 'sources' or 'lab' cell: a dict, or a list of them.
+
+        A bare '@id' path yields nothing: 'sources' declares a multi-type linkTo,
+        which extract.get_link_to() ignores, so the gatherer never resolves it to
+        an object carrying a title.
+        """
+        items = value if isinstance(value, list) else [value]
+        titles = []
+        for item in items:
+            if isinstance(item, dict):
+                title = item.get("title") or item.get("name")
+                if title and str(title).strip():
+                    titles.append(str(title).strip())
+        return titles
+
+    def _biomaterial_provider_by_library(self, main_df, library_key):
+        """
+        Build the 'biomaterial_provider' cell per library, keyed by library alias.
+
+        Falls back per row, not per column: a sample with no usable 'sources' uses
+        its own 'lab' even where a sibling has one. Distinct titles join with '; '.
+        """
+        prefixes = self._sample_url_prefixes()
+        sources = self._coalesce_columns(main_df, [f"{prefix}_sources" for prefix in prefixes])
+        labs = self._coalesce_columns(main_df, [f"{prefix}_lab" for prefix in prefixes])
+        if sources is None and labs is None:
+            print(
+                "Warning: MAIN has no sample sources or lab column; "
+                "SRA_BIOSAMPLE omits biomaterial_provider"
+            )
+            return {}
+
+        empty = pd.Series(None, index=main_df.index, dtype=object)
+        sources = empty if sources is None else sources
+        labs = empty if labs is None else labs
+
+        titles_by_library: dict[str, set[str]] = {}
+        for library, source, lab in zip(library_key, sources, labs, strict=True):
+            if not isinstance(library, str):
+                continue
+            titles = self._provider_titles(source) or self._provider_titles(lab)
+            if titles:
+                titles_by_library.setdefault(library, set()).update(titles)
+
+        return {library: "; ".join(sorted(titles)) for library, titles in titles_by_library.items()}
+
+    def _sample_field_by_library(self, main_df, library_key, field):
+        """
+        Per-library cell for a plain string sample field, keyed by library alias.
+
+        A sample with no value contributes 'not provided', appended after any real
+        ones, so a library whose samples disagree reads '2023-01-05; not provided'.
+        """
+        values = self._coalesce_columns(
+            main_df, [f"{prefix}_{field}" for prefix in self._sample_url_prefixes()]
+        )
+        if values is None:
+            values = pd.Series(None, index=main_df.index, dtype=object)
+
+        found: dict[str, set[str]] = {}
+        missing: set[str] = set()
+        for library, value in zip(library_key, values, strict=True):
+            if not isinstance(library, str):
+                continue
+            found.setdefault(library, set())
+            if is_empty(value):
+                missing.add(library)
+            else:
+                found[library].add(str(value).strip())
+
+        return {
+            library: "; ".join(
+                sorted(present) + (["not provided"] if library in missing or not present else [])
+            )
+            for library, present in found.items()
+        }
+
     @staticmethod
     def _coalesce_columns(main_df, columns):
         """First non-null value across columns, or None when none of them exist."""
@@ -517,15 +610,9 @@ class DB2Flattener:
         """
         Build the 'isolate', 'age' and 'sex' cells per library, keyed by library alias.
 
-        Neither age nor sex is read off a donor object - age lives on the sample and
-        sex is only reachable through it - so all three are assembled by walking the
-        library's MAIN rows, each of which is one sample with one donor. Donors are
-        enumerated D1..Dn in donor id order and that one enumeration feeds isolate
-        and age, so Dn names the same donor in both. Sex is a summary over the same
-        donors rather than a per-donor list, so it carries no labels.
-
-        Returns ({library: isolate}, {library: age}, {library: sex}), all empty when
-        MAIN carries no donor id column to key on.
+        Donors are enumerated D1..Dn in donor id order, one enumeration feeding
+        both isolate and age so Dn names the same donor in each. Sex summarises
+        the same donors rather than listing them, so it carries no labels.
         """
         donor_ids = self._coalesce_columns(
             main_df, ("human_donors_cxg_donor_id", "non_human_donors_cxg_donor_id")
@@ -538,8 +625,7 @@ class DB2Flattener:
         if sexes is None:
             sexes = pd.Series(None, index=main_df.index, dtype=object)
 
-        # developmental_stages exists on every sample type, so take whichever
-        # sample column this run produced.
+        # developmental_stages is on every sample type; take whichever this run has
         stages = self._coalesce_columns(
             main_df, [c for c in main_df.columns if c.endswith("_developmental_stages_term_name")]
         )

@@ -64,6 +64,18 @@ them, so it carries no labels: one sex gives `female`, a mixed pool gives
 `pooled male and female`, with male first and any other value such as `unknown`
 pooled the same way after it.
 
+`*biomaterial_provider` is the `title` of the sample's `sources`, falling back
+per row to the `title` of that sample's `lab`, so a library whose samples differ
+can carry both. Note that `sources` declares a multi-type `linkTo`, which
+`extract.get_link_to` only recognises as a single string, so `OBJECT_CONFIG` never
+lists it as a reference and the gatherer does not resolve it — when it arrives as
+a bare `@id` path there is no title to read and the `lab` fallback applies.
+
+`*collection_date` and `*geo_loc_name` are the sample's `date_obtained` and
+`collection_geographical_location`, with `not provided` standing in for any sample
+that has none — so a library whose samples disagree reads
+`2023-01-05; not provided`.
+
 Age comes from the sample's `developmental_stages` term,
 because `HumanDonor` has no age property of its own: a numeric stage renders as a
 number and unit (`29-year-old stage` → `29 years`), and a qualitative one keeps
