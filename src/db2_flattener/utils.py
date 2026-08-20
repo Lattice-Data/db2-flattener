@@ -162,6 +162,31 @@ def collapse_dataframe(
     return df.groupby(group_col, as_index=False).agg(agg)
 
 
+def expand_list_column(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    """
+    Replace a list-valued column with one column per item, all named col, on the right.
+
+    Scalar cells become a single column. Rows shorter than the widest list pad with pd.NA.
+    Missing col is a no-op.
+    """
+    if col not in df.columns:
+        return df
+
+    items = df[col].map(to_items)
+    max_n = int(items.map(len).max() or 0)
+    other = df.drop(columns=[col])
+    if max_n == 0:
+        other[col] = pd.NA
+        return other
+
+    expanded = pd.DataFrame(
+        {i: items.map(lambda xs, i=i: xs[i] if i < len(xs) else pd.NA) for i in range(max_n)},
+        index=df.index,
+    )
+    expanded.columns = [col] * max_n
+    return pd.concat([other, expanded], axis=1)
+
+
 def combine_bound_columns(
     df: pd.DataFrame,
     *,

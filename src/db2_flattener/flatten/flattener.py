@@ -9,6 +9,8 @@ from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
     GENETIC_PERTURBATION_MAP,
+    GEO_EXPERIMENTAL_CONDITION_COLS,
+    GEO_LIBRARY_CARDINALITY_MAP,
     GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
@@ -20,9 +22,11 @@ from db2_flattener.utils import (
     collapse_dataframe,
     collapse_duplicate_columns,
     combine_bound_columns,
+    expand_list_column,
     extract_references_from_field,
     get_config_obj_type,
     get_url_prefix_from_id,
+    is_empty,
     normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
@@ -302,11 +306,63 @@ class DB2Flattener:
         print(f"GEO: filtered to {len(geo_source)} GEX rows out of {len(main_df)} MAIN rows")
 
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
+        subset_keys.extend(k for k in GEO_EXPERIMENTAL_CONDITION_COLS if k in geo_source.columns)
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
+        geo_df = collapse_duplicate_columns(geo_df)
+        geo_df = self._summarize_geo_experimental_condition(geo_df)
 
         group_col = "*library name"
-        return collapse_dataframe(geo_df, group_col=group_col)
+        geo_df = collapse_dataframe(geo_df, group_col=group_col)
+        col = "single or paired-end"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].replace(GEO_LIBRARY_CARDINALITY_MAP)
+        return expand_list_column(geo_df, "raw_file")
+
+    @staticmethod
+    def _summarize_geo_experimental_condition(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build experimental_condition from source cols, then drop those sources."""
+        source_cols = [c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in geo_df.columns]
+        if not source_cols:
+            return geo_df
+
+        geo_df = combine_bound_columns(
+            geo_df,
+            lower_col="experimental_conditions_lower_bound_duration",
+            upper_col="experimental_conditions_upper_bound_duration",
+            units_col="experimental_conditions_duration_units",
+            out_col="_exp_duration",
+        )
+
+        def _cell_text(val) -> str:
+            if val is pd.NA:
+                return ""
+            try:
+                if is_empty(val):
+                    return ""
+            except (TypeError, ValueError):
+                return ""
+            return str(val).strip()
+
+        def _summarize_row(row: pd.Series):
+            condition = _cell_text(row.get("experimental_conditions_condition"))
+            text_value = _cell_text(row.get("experimental_conditions_text_value"))
+            duration = _cell_text(row.get("_exp_duration"))
+            right = " ".join(part for part in (text_value, duration) if part)
+            if condition and right:
+                return f"{condition}; {right}"
+            return condition or right or pd.NA
+
+        geo_df["experimental_condition"] = geo_df.apply(_summarize_row, axis=1)
+        drop_cols = [
+            c
+            for c in (
+                *GEO_EXPERIMENTAL_CONDITION_COLS,
+                "_exp_duration",
+            )
+            if c in geo_df.columns
+        ]
+        return geo_df.drop(columns=drop_cols)
 
     def create_guide_metadata_dataframe(self, file_info):
         """

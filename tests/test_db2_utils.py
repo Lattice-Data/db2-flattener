@@ -6,6 +6,7 @@ from db2_flattener.utils import (
     collapse_dataframe,
     collapse_duplicate_columns,
     combine_bound_columns,
+    expand_list_column,
     extract_controlled_term_id,
     normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
@@ -296,3 +297,33 @@ def test_collapse_dataframe_tolerates_missing_term_values():
     result = collapse_dataframe(df, group_col="*library name")
 
     assert result.iloc[0]["**tissue"] == "lung"
+
+
+def test_expand_list_column_scalar_stays_one_string_on_the_right():
+    df = pd.DataFrame({"raw_file": ["a.h5"], "keep": ["x"]})
+    result = expand_list_column(df, "raw_file")
+    assert list(result.columns) == ["keep", "raw_file"]
+    assert result["raw_file"].iloc[0] == "a.h5"
+
+
+def test_expand_list_column_list_becomes_one_column_per_item():
+    df = pd.DataFrame({"keep": ["x"], "raw_file": [["a.h5", "b.h5", "c.h5"]]})
+    result = expand_list_column(df, "raw_file")
+    assert list(result.columns) == ["keep", "raw_file", "raw_file", "raw_file"]
+    assert result.loc[:, result.columns == "raw_file"].iloc[0].tolist() == ["a.h5", "b.h5", "c.h5"]
+
+
+def test_expand_list_column_mixed_lengths_pad_with_na():
+    df = pd.DataFrame({"raw_file": [["a.h5", "b.h5"], ["c.h5"]]})
+    result = expand_list_column(df, "raw_file")
+    block = result.loc[:, result.columns == "raw_file"]
+    assert list(result.columns) == ["raw_file", "raw_file"]
+    assert block.iloc[0].tolist() == ["a.h5", "b.h5"]
+    assert block.iloc[1].tolist()[0] == "c.h5"
+    assert pd.isna(block.iloc[1].tolist()[1])
+
+
+def test_expand_list_column_missing_is_noop():
+    df = pd.DataFrame({"keep": ["x"]})
+    result = expand_list_column(df, "raw_file")
+    pd.testing.assert_frame_equal(result, df)
