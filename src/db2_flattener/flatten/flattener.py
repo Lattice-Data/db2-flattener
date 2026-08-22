@@ -16,6 +16,7 @@ from db2_flattener.schema.constants import (
     GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
     GEO_LIBRARY_STRATEGY_SOURCE_COLS,
     GEO_SUSPENSION_TYPE_COLS,
+    GEO_TREATMENT_COLS,
     GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
@@ -315,10 +316,12 @@ class DB2Flattener:
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
         subset_keys.extend(k for k in GEO_EXPERIMENTAL_CONDITION_COLS if k in geo_source.columns)
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
+        subset_keys.extend(k for k in GEO_TREATMENT_COLS if k in geo_source.columns)
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = collapse_duplicate_columns(geo_df)
         geo_df = self._summarize_geo_experimental_condition(geo_df)
+        geo_df = self._summarize_geo_treatment(geo_df)
         geo_df = self._add_geo_library_strategy(geo_df)
 
         group_col = "*library name"
@@ -372,6 +375,43 @@ class DB2Flattener:
             if c in geo_df.columns
         ]
         return geo_df.drop(columns=drop_cols)
+
+    @staticmethod
+    def _summarize_geo_treatment(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build treatment from source cols, then drop those sources."""
+        source_cols = [c for c in GEO_TREATMENT_COLS if c in geo_df.columns]
+        if not source_cols:
+            return geo_df
+
+        def _cell_text(val) -> str:
+            if val is pd.NA:
+                return ""
+            try:
+                if is_empty(val):
+                    return ""
+            except (TypeError, ValueError):
+                return ""
+            return str(val).strip()
+
+        def _summarize_row(row: pd.Series):
+            term = _cell_text(row.get("treatments_ontological_term_term_name"))
+            description = _cell_text(row.get("treatments_description"))
+            duration = " ".join(
+                part
+                for part in (
+                    _cell_text(row.get("treatments_lower_bound_duration")),
+                    _cell_text(row.get("treatments_duration_units")),
+                )
+                if part
+            )
+            right = " ".join(part for part in (description, duration) if part)
+            if term and right:
+                return f"{term}; {right}"
+            return term or right or None
+
+        geo_df = geo_df.copy()
+        geo_df["treatment"] = geo_df.apply(_summarize_row, axis=1)
+        return geo_df.drop(columns=source_cols)
 
     @staticmethod
     def _add_geo_library_strategy(geo_df: pd.DataFrame) -> pd.DataFrame:

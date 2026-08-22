@@ -71,7 +71,7 @@ PROP_MAP_GEO = {
     "cell_lines_sample_terms_term_name": "**cell_line",
     "droplet_based_libraries_CRO_group_identifier": "*library name",
     "droplet_based_libraries_library_cardinality": "single or paired-end",
-    "droplet_based_libraries_library_construction_technology_term_name": "*library strategy",
+    "droplet_based_libraries_library_construction_technology_term_name": "library_protocol",
     "human_donors_cxg_donor_id": "donor_ids",
     "human_donors_sex": "donor_sex",
     "human_donors_taxa": "*organism",
@@ -164,6 +164,13 @@ GEO_LIBRARY_STRATEGY_MAP = {
     ("Gene Expression", "cell"): "scRNA-seq",
     ("ATAC", None): "scATAC-seq",
 }
+
+GEO_TREATMENT_COLS = [
+    "treatments_description",
+    "treatments_lower_bound_duration",
+    "treatments_duration_units",
+    "treatments_ontological_term_term_name",
+]
 
 GENETIC_PERTURBATION_MAP = {
     "activation screen": "CRISPR activation screen",
