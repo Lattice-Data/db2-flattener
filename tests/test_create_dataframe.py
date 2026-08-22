@@ -68,13 +68,14 @@ def _complete_data(libs_with_rmfs):
     return {"libraries": libraries, "resolved_objects": {"ControlledTerm": {}}}
 
 
-# --- _row_is_gex (new method) ---
+# --- _row_is_geo_library ---
 
 
 @pytest.mark.parametrize(
     "row,expected",
     [
         ({"droplet_based_libraries_feature_types": ["Gene Expression"]}, True),
+        ({"droplet_based_libraries_feature_types": ["ATAC"]}, True),
         ({"droplet_based_libraries_feature_types": ["CRISPR Guide Capture"]}, False),
         ({"droplet_based_libraries_feature_types": "Gene Expression"}, True),
         ({"plate_based_libraries_feature_types": ["Gene Expression"]}, True),
@@ -84,9 +85,9 @@ def _complete_data(libs_with_rmfs):
         ({"droplet_based_libraries_@id": "/droplet_based_libraries/d1/"}, False),
     ],
 )
-def test_row_is_gex(row, expected):
+def test_row_is_geo_library(row, expected):
     f = make_flattener()
-    assert f._row_is_gex(pd.Series(row)) is expected
+    assert f._row_is_geo_library(pd.Series(row)) is expected
 
 
 # --- create_dataframe: one row per (RMF, library) ---

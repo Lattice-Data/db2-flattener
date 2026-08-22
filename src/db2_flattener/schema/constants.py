@@ -146,6 +146,25 @@ GEO_EXPERIMENTAL_CONDITION_COLS = [
     "experimental_conditions_duration_units",
 ]
 
+GEO_LIBRARY_STRATEGY_FEATURE_COL = "droplet_based_libraries_feature_types"
+GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL = "plate_based_libraries_feature_types"
+GEO_SUSPENSION_TYPE_COLS = [
+    "organoids_suspension_type",
+    "cell_lines_suspension_type",
+    "primary_cell_cultures_suspension_type",
+    "tissues_suspension_type",
+]
+GEO_LIBRARY_STRATEGY_SOURCE_COLS = [
+    GEO_LIBRARY_STRATEGY_FEATURE_COL,
+    GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
+    *GEO_SUSPENSION_TYPE_COLS,
+]
+GEO_LIBRARY_STRATEGY_MAP = {
+    ("Gene Expression", "nucleus"): "snRNA-seq",
+    ("Gene Expression", "cell"): "scRNA-seq",
+    ("ATAC", None): "scATAC-seq",
+}
+
 GENETIC_PERTURBATION_MAP = {
     "activation screen": "CRISPR activation screen",
     "interference screen": "CRISPR interference screen",

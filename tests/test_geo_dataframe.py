@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from db2_flattener.flatten.flattener import DB2Flattener
-from db2_flattener.schema.constants import PROP_MAP_GEO, Configs
+from db2_flattener.schema.constants import GEO_SUSPENSION_TYPE_COLS, PROP_MAP_GEO, Configs
 
 
 def make_flattener():
@@ -215,3 +215,72 @@ def test_create_geo_dataframe_experimental_condition_no_duration_columns():
     assert list(geo_df["experimental_condition"]) == ["treatment; LPS"]
     _assert_no_exp_source_cols(geo_df)
     assert list(geo_df.columns)[-1:] == ["raw_file"]
+
+
+def _assert_no_library_strategy_source_cols(geo_df):
+    for col in (
+        "droplet_based_libraries_feature_types",
+        "plate_based_libraries_feature_types",
+        *GEO_SUSPENSION_TYPE_COLS,
+    ):
+        assert col not in geo_df.columns
+
+
+def test_create_geo_dataframe_library_strategy_scrna_seq():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(tissues_suspension_type="cell")]).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
+    assert list(geo_df["*library strategy"]) == ["10x 3' v3"]
+    _assert_no_library_strategy_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_library_strategy_snrna_seq():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(tissues_suspension_type="nucleus")]).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["library_strategy"]) == ["snRNA-seq"]
+    assert list(geo_df["*library strategy"]) == ["10x 3' v3"]
+    _assert_no_library_strategy_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_library_strategy_scatac_seq_keeps_atac_row():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_feature_types="ATAC",
+                tissues_suspension_type="cell",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df) == 1
+    assert list(geo_df["library_strategy"]) == ["scATAC-seq"]
+    assert list(geo_df["*library strategy"]) == ["10x 3' v3"]
+    _assert_no_library_strategy_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_library_strategy_collapses_suspension_sources():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                organoids_suspension_type="cell",
+                cell_lines_suspension_type="cell",
+                primary_cell_cultures_suspension_type="cell",
+                tissues_suspension_type="cell",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
+    _assert_no_library_strategy_source_cols(geo_df)

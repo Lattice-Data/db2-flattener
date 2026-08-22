@@ -11,6 +11,11 @@ from db2_flattener.schema.constants import (
     GENETIC_PERTURBATION_MAP,
     GEO_EXPERIMENTAL_CONDITION_COLS,
     GEO_LIBRARY_CARDINALITY_MAP,
+    GEO_LIBRARY_STRATEGY_FEATURE_COL,
+    GEO_LIBRARY_STRATEGY_MAP,
+    GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
+    GEO_LIBRARY_STRATEGY_SOURCE_COLS,
+    GEO_SUSPENSION_TYPE_COLS,
     GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
@@ -31,6 +36,7 @@ from db2_flattener.utils import (
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
+    to_items,
 )
 
 
@@ -262,22 +268,23 @@ class DB2Flattener:
 
         return main_df, new_sample_df
 
-    def _row_is_gex(self, row) -> bool:
-        """Filter df to only GEX libraries"""
+    def _row_is_geo_library(self, row) -> bool:
+        """Filter df to GEX or ATAC libraries."""
         droplet_ft = row.get("droplet_based_libraries_feature_types")
         plate_ft = row.get("plate_based_libraries_feature_types")
 
-        def has_gex(ft):
+        def has_geo_feature(ft):
             if ft is None or (isinstance(ft, float) and pd.isna(ft)):
                 return None  # missing
             if isinstance(ft, str):
-                return "Gene Expression" in ft
+                return "Gene Expression" in ft or "ATAC" in ft
             if isinstance(ft, list):
-                return "Gene Expression" in ft
-            return "Gene Expression" in str(ft)
+                return "Gene Expression" in ft or "ATAC" in ft
+            text = str(ft)
+            return "Gene Expression" in text or "ATAC" in text
 
-        droplet = has_gex(droplet_ft)
-        plate = has_gex(plate_ft)
+        droplet = has_geo_feature(droplet_ft)
+        plate = has_geo_feature(plate_ft)
 
         if droplet is True or plate is True:
             return True
@@ -293,24 +300,26 @@ class DB2Flattener:
             row.get("droplet_based_libraries_CRO_group_identifier")
         ):
             return False
-        return True  # if no GEX found, keep all
+        return True  # if no GEX/ATAC found, keep all
 
     def create_geo_dataframe(self, main_df) -> pd.DataFrame:
         """
-        Build GEO submission dataframe from already-split main_df, taking GEX libraries only
+        Build GEO submission dataframe from already-split main_df, taking GEX and ATAC libraries.
 
         Expects _term_name columns (not raw dict columns).
         """
-        gex_mask = main_df.apply(self._row_is_gex, axis=1)
-        geo_source = main_df[gex_mask].copy()
-        print(f"GEO: filtered to {len(geo_source)} GEX rows out of {len(main_df)} MAIN rows")
+        geo_mask = main_df.apply(self._row_is_geo_library, axis=1)
+        geo_source = main_df[geo_mask].copy()
+        print(f"GEO: filtered to {len(geo_source)} GEX/ATAC rows out of {len(main_df)} MAIN rows")
 
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
         subset_keys.extend(k for k in GEO_EXPERIMENTAL_CONDITION_COLS if k in geo_source.columns)
+        subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = collapse_duplicate_columns(geo_df)
         geo_df = self._summarize_geo_experimental_condition(geo_df)
+        geo_df = self._add_geo_library_strategy(geo_df)
 
         group_col = "*library name"
         geo_df = collapse_dataframe(geo_df, group_col=group_col)
@@ -363,6 +372,53 @@ class DB2Flattener:
             if c in geo_df.columns
         ]
         return geo_df.drop(columns=drop_cols)
+
+    @staticmethod
+    def _add_geo_library_strategy(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build library_strategy from feature_types and suspension_type, then drop sources."""
+        source_cols = [c for c in GEO_LIBRARY_STRATEGY_SOURCE_COLS if c in geo_df.columns]
+        if not source_cols:
+            return geo_df
+
+        def _feature_types(row: pd.Series):
+            droplet_ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            if not is_empty(droplet_ft):
+                return droplet_ft
+            return row.get(GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL)
+
+        def _has_feature(ft, name: str) -> bool:
+            if is_empty(ft):
+                return False
+            if isinstance(ft, list):
+                return name in ft
+            return name in str(ft)
+
+        def _suspension_types(row: pd.Series) -> list:
+            items = []
+            for col in GEO_SUSPENSION_TYPE_COLS:
+                if col in row.index:
+                    items.extend(to_items(row.get(col)))
+            return list(dict.fromkeys(items))
+
+        def _map_row(row: pd.Series):
+            ft = _feature_types(row)
+            if _has_feature(ft, "Gene Expression"):
+                strategies = []
+                for susp in _suspension_types(row):
+                    mapped = GEO_LIBRARY_STRATEGY_MAP.get(("Gene Expression", susp))
+                    if mapped:
+                        strategies.append(mapped)
+                unique = list(dict.fromkeys(strategies))
+                if not unique:
+                    return None
+                return unique[0] if len(unique) == 1 else unique
+            if _has_feature(ft, "ATAC"):
+                return GEO_LIBRARY_STRATEGY_MAP[("ATAC", None)]
+            return None
+
+        geo_df = geo_df.copy()
+        geo_df["library_strategy"] = geo_df.apply(_map_row, axis=1)
+        return geo_df.drop(columns=source_cols)
 
     def create_guide_metadata_dataframe(self, file_info):
         """
