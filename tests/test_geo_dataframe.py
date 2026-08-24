@@ -55,6 +55,7 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["raw_file_samples"] == "samples"
     assert PROP_MAP_GEO["tissues_developmental_stages_term_name"] == "donor_dev_stage"
     assert PROP_MAP_GEO["sequence_file_sets_sequencing_platform"] == "*instrument model"
+    assert PROP_MAP_GEO["genetic_modifications_strategy"] == "genetic_modifications_strategy"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -423,3 +424,15 @@ def test_create_geo_dataframe_includes_stripped_author_metadata():
     assert "tissues_author_metadata_mouse_litter_batch" not in geo_df.columns
     assert "tissues_author_metadata_diet" not in geo_df.columns
     assert list(geo_df.columns)[-1:] == ["raw_file"]
+
+
+def test_create_geo_dataframe_keeps_genetic_modifications_strategy():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(genetic_modifications_strategy="knockout screen")]).dropna(
+        axis=1, how="all"
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["genetic_modifications_strategy"]) == ["knockout screen"]
+    assert "genetic_perturbation_strategy" not in geo_df.columns

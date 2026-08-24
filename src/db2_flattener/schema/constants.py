@@ -72,6 +72,7 @@ PROP_MAP_GEO = {
     "droplet_based_libraries_CRO_group_identifier": "*library name",
     "droplet_based_libraries_library_cardinality": "single or paired-end",
     "droplet_based_libraries_library_construction_technology_term_name": "library_protocol",
+    "genetic_modifications_strategy": "genetic_modifications_strategy",
     "human_donors_cxg_donor_id": "donor_ids",
     "human_donors_sex": "donor_sex",
     "human_donors_taxa": "*organism",
