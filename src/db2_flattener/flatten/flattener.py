@@ -10,6 +10,7 @@ from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
     GENETIC_PERTURBATION_MAP,
     GEO_EXPERIMENTAL_CONDITION_COLS,
+    GEO_FLEX_LIBRARY_PROTOCOLS,
     GEO_LIBRARY_CARDINALITY_MAP,
     GEO_LIBRARY_STRATEGY_FEATURE_COL,
     GEO_LIBRARY_STRATEGY_MAP,
@@ -317,11 +318,14 @@ class DB2Flattener:
         subset_keys.extend(k for k in GEO_EXPERIMENTAL_CONDITION_COLS if k in geo_source.columns)
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
         subset_keys.extend(k for k in GEO_TREATMENT_COLS if k in geo_source.columns)
+        subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
+        geo_df = strip_author_metadata_column_prefix(geo_df)
         geo_df = collapse_duplicate_columns(geo_df)
         geo_df = self._summarize_geo_experimental_condition(geo_df)
         geo_df = self._summarize_geo_treatment(geo_df)
+        geo_df = self._add_geo_molecule(geo_df)
         geo_df = self._add_geo_library_strategy(geo_df)
 
         group_col = "*library name"
@@ -412,6 +416,32 @@ class DB2Flattener:
         geo_df = geo_df.copy()
         geo_df["treatment"] = geo_df.apply(_summarize_row, axis=1)
         return geo_df.drop(columns=source_cols)
+
+    @staticmethod
+    def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build *molecule from feature_types and library_protocol."""
+
+        def _has_feature(ft, name: str) -> bool:
+            if is_empty(ft):
+                return False
+            if isinstance(ft, list):
+                return name in ft
+            return name in str(ft)
+
+        def _map_row(row: pd.Series):
+            ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            if _has_feature(ft, "ATAC"):
+                return "genomic DNA"
+            if _has_feature(ft, "Gene Expression"):
+                protocol = row.get("library_protocol")
+                if protocol in GEO_FLEX_LIBRARY_PROTOCOLS:
+                    return "total RNA"
+                return "polyA RNA"
+            return None
+
+        geo_df = geo_df.copy()
+        geo_df["*molecule"] = geo_df.apply(_map_row, axis=1)
+        return geo_df
 
     @staticmethod
     def _add_geo_library_strategy(geo_df: pd.DataFrame) -> pd.DataFrame:

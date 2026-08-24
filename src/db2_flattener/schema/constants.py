@@ -166,6 +166,14 @@ GEO_LIBRARY_STRATEGY_MAP = {
     ("ATAC", None): "scATAC-seq",
 }
 
+GEO_FLEX_LIBRARY_PROTOCOLS = {
+    "10x gene expression flex v1",
+    "10x gene expression flex",
+    "10x Flex Apex",
+    "10x GEM-X Flex v1",
+    "10x Next GEM Flex v1",
+}
+
 GEO_TREATMENT_COLS = [
     "treatments_description",
     "treatments_lower_bound_duration",

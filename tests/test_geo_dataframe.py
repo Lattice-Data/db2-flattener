@@ -364,3 +364,62 @@ def test_create_geo_dataframe_treatment_description_and_duration_only():
 
     assert list(geo_df["treatment"]) == ["LPS stimulation 4 hours"]
     _assert_no_treatment_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_molecule_genomic_dna_for_atac():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(droplet_based_libraries_feature_types="ATAC")]).dropna(
+        axis=1, how="all"
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*molecule"]) == ["genomic DNA"]
+
+
+def test_create_geo_dataframe_molecule_total_rna_for_flex_gex():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_library_construction_technology_term_name=(
+                    "10x gene expression flex v1"
+                )
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*molecule"]) == ["total RNA"]
+    assert list(geo_df["library_protocol"]) == ["10x gene expression flex v1"]
+
+
+def test_create_geo_dataframe_molecule_polya_rna_for_other_gex():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row()]).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*molecule"]) == ["polyA RNA"]
+    assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
+
+
+def test_create_geo_dataframe_includes_stripped_author_metadata():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_author_metadata_mouse_litter_batch="A1",
+                tissues_author_metadata_diet="fasted",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["mouse_litter_batch"]) == ["A1"]
+    assert list(geo_df["diet"]) == ["fasted"]
+    assert "tissues_author_metadata_mouse_litter_batch" not in geo_df.columns
+    assert "tissues_author_metadata_diet" not in geo_df.columns
+    assert list(geo_df.columns)[-1:] == ["raw_file"]
