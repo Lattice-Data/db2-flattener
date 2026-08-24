@@ -54,6 +54,7 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["human_donors_taxa"] == "*organism"
     assert PROP_MAP_GEO["raw_file_samples"] == "samples"
     assert PROP_MAP_GEO["tissues_developmental_stages_term_name"] == "donor_dev_stage"
+    assert PROP_MAP_GEO["sequence_file_sets_sequencing_platform"] == "*instrument model"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -64,6 +65,7 @@ def test_create_geo_dataframe_adds_new_columns():
                 human_donors_cxg_donor_id="H1",
                 human_donors_sex="female",
                 human_donors_taxa="Homo sapiens",
+                sequence_file_sets_sequencing_platform="Illumina NovaSeq 6000",
             )
         ]
     )
@@ -80,6 +82,7 @@ def test_create_geo_dataframe_adds_new_columns():
     assert list(geo_df["**tissue"]) == ["liver"]
     assert list(geo_df["**cell_type"]) == ["hepatocyte"]
     assert list(geo_df["single or paired-end"]) == ["paired"]
+    assert list(geo_df["*instrument model"]) == ["Illumina NovaSeq 6000"]
 
 
 def test_create_geo_dataframe_collapses_human_and_non_human_donors():

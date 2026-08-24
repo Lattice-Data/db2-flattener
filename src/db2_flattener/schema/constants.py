@@ -82,6 +82,7 @@ PROP_MAP_GEO = {
     "primary_cell_cultures_enriched_cell_types_term_name": "**cell_type",
     "raw_file_samples": "samples",
     "raw_matrix_file_alias": "raw_file",
+    "sequence_file_sets_sequencing_platform": "*instrument model",
     "tissues_developmental_stages_term_name": "donor_dev_stage",
     "tissues_enriched_cell_types_term_name": "**cell_type",
     "tissues_sample_terms_term_name": "**tissue",
