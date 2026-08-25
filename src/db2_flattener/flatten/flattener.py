@@ -405,27 +405,38 @@ class DB2Flattener:
                 return ""
             return str(val).strip()
 
+        def _duration(row: pd.Series, *, include_upper: bool) -> str:
+            lower = _cell_text(row.get("treatments_lower_bound_duration"))
+            upper = _cell_text(row.get("treatments_upper_bound_duration")) if include_upper else ""
+            if include_upper and lower and upper:
+                bounds = lower if lower == upper else f"{lower}-{upper}"
+            else:
+                bounds = lower or (upper if include_upper else "")
+            units = _cell_text(row.get("treatments_duration_units"))
+            return " ".join(part for part in (bounds, units) if part)
+
         def _summarize_row(row: pd.Series):
             term = _cell_text(row.get("treatments_ontological_term_term_name"))
             description = _cell_text(row.get("treatments_description"))
-            duration = " ".join(
-                part
-                for part in (
-                    _cell_text(row.get("treatments_lower_bound_duration")),
-                    _cell_text(row.get("treatments_duration_units")),
-                )
-                if part
-            )
+            duration = _duration(row, include_upper=False)
             right = " ".join(part for part in (description, duration) if part)
             if term and right:
                 return f"{term}; {right}"
             return term or right or None
 
+        def _title_summarize_row(row: pd.Series):
+            description = _cell_text(row.get("treatments_description"))
+            duration = _duration(row, include_upper=True)
+            return " ".join(part for part in (description, duration) if part) or None
+
         geo_df = geo_df.copy()
         geo_df["treatment"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df["_title_treatment"] = geo_df.apply(_title_summarize_row, axis=1)
         has_treatment = geo_df["treatment"].map(lambda v: bool(_cell_text(v)))
         if has_treatment.any():
-            geo_df.loc[~has_treatment, "treatment"] = "no treatment"
+            empty_treatment = ~has_treatment
+            geo_df.loc[empty_treatment, "treatment"] = "no treatment"
+            geo_df.loc[empty_treatment, "_title_treatment"] = "no treatment"
         return geo_df
 
     @staticmethod
@@ -442,16 +453,6 @@ class DB2Flattener:
                 return ""
             return str(val).strip()
 
-        def _duration(row: pd.Series) -> str:
-            lower = _cell_text(row.get("treatments_lower_bound_duration"))
-            upper = _cell_text(row.get("treatments_upper_bound_duration"))
-            if lower and upper:
-                bounds = lower if lower == upper else f"{lower}-{upper}"
-            else:
-                bounds = lower or upper
-            units = _cell_text(row.get("treatments_duration_units"))
-            return " ".join(part for part in (bounds, units) if part)
-
         def _is_pooled(samples) -> bool:
             if isinstance(samples, (list, tuple)):
                 return len([item for item in samples if not is_empty(item)]) > 1
@@ -461,21 +462,11 @@ class DB2Flattener:
             return len([part for part in text.split("; ") if part]) > 1
 
         def _treatment_segment(row: pd.Series) -> str:
-            summarized = row.get("treatment")
+            summarized = row.get("_title_treatment")
             if isinstance(summarized, (list, tuple)):
                 items = [item for item in summarized if not is_empty(item)]
                 return str(list(items)) if items else ""
-            text = _cell_text(summarized)
-            if text == "no treatment":
-                return text
-            return " ".join(
-                part
-                for part in (
-                    _cell_text(row.get("treatments_description")),
-                    _duration(row),
-                )
-                if part
-            )
+            return _cell_text(summarized)
 
         def _summarize_row(row: pd.Series):
             left = " ".join(
@@ -500,7 +491,9 @@ class DB2Flattener:
         geo_df = geo_df.copy()
         geo_df["title"] = geo_df.apply(_summarize_row, axis=1)
         drop_cols = [
-            c for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS) if c in geo_df.columns
+            c
+            for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
+            if c in geo_df.columns
         ]
         return geo_df.drop(columns=drop_cols) if drop_cols else geo_df
 

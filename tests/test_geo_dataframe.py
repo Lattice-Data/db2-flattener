@@ -297,7 +297,7 @@ def test_create_geo_dataframe_library_strategy_collapses_suspension_sources():
 
 
 def _assert_no_treatment_source_cols(geo_df):
-    for col in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS):
+    for col in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment"):
         assert col not in geo_df.columns
 
 
@@ -461,6 +461,7 @@ def test_create_geo_dataframe_title_full_set():
     assert list(geo_df["title"]) == [
         "libA scRNA-seq; LPS stimulation 4 hours; CRISPR knockout screen"
     ]
+    assert all("lipopolysaccharide" not in title for title in geo_df["title"])
     assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
     assert list(geo_df["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
     assert "treatments_schema_version" not in geo_df.columns
@@ -623,5 +624,6 @@ def test_create_geo_dataframe_title_lists_mixed_treatments_same_library():
         ["lipopolysaccharide; LPS stimulation 4 hours", "no treatment"]
     ]
     assert list(geo_df["title"]) == [
-        "libA scRNA-seq; ['lipopolysaccharide; LPS stimulation 4 hours', 'no treatment']"
+        "libA scRNA-seq; ['LPS stimulation 4 hours', 'no treatment']"
     ]
+    assert all("lipopolysaccharide" not in title for title in geo_df["title"])
