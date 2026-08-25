@@ -96,6 +96,23 @@ the library and a sample with no treatment contributes `na`, giving
 `pooled: [IL2_HUMAN, anti-CD2_HUMAN], na`. Terms sort case-sensitively, so
 uppercase leads.
 
+`preservation_method` is optional and is a direct read of the sample's
+`preservation_method`. The field is on tissues alone, so the column is scoped to
+that prefix and any other sample type reads `not applicable`.
+
+`genetic_perturbation_strategy` is optional and comes from the `strategy` of the
+sample's linked `GeneticModification`, rewritten through `GENETIC_PERTURBATION_MAP`
+so it reads `CRISPR interference screen` rather than the stored
+`interference screen` — the same wording BIOHUB reports for this field. A sample
+with no genetic modification has no strategy, so its gap reads `not applicable`.
+
+`cell_type` and `suspension_enriched_cell_types` are optional and come from the
+sample's `intended_cell_types` and `enriched_cell_types`. Both are arrays, so each
+term becomes its own `; `-separated entry. `intended_cell_types` exists only on
+cell lines and organoids, so a tissue or primary cell culture genuinely cannot have
+one and its gap reads `not applicable`; `enriched_cell_types` is on all four sample
+types, where a gap just means a missing value and reads `not provided`.
+
 `suspension_type` is optional: being optional decides only whether the column
 exists, not how it is filled. If no sample anywhere has one the column is dropped;
 otherwise it behaves exactly like `*collection_date`, joining distinct values with

@@ -411,7 +411,7 @@ class DB2Flattener:
         Build the SRA/BioSample dataframe from main_df: one row per library.
 
         Grouped on the library alias, which PROP_MAP_SRA_BIOSAMPLE renames to
-        'sample_name' - the submitted 'sample' is the sequencing library.
+        'sample_name'. The submitted 'sample' is the sequencing library.
         """
         alias_cols = [
             col
@@ -433,7 +433,7 @@ class DB2Flattener:
         sra_df = collapse_duplicate_columns(sra_df)
 
         # Built while sample_name is still row-aligned with main_df, attached after
-        # the collapse - one value per library already, so nothing to aggregate
+        # the collapse, one value per library already, so nothing to aggregate
         donor = self._donor_cells_by_library(main_df, sra_df["sample_name"])
         provider = self._biomaterial_provider_by_library(main_df, sra_df["sample_name"])
         collection_date = self._sample_field_by_library(
@@ -448,6 +448,41 @@ class DB2Flattener:
         )
         perturbation = self._perturbation_by_library(main_df, sra_df["sample_name"])
         perturbation_factors = self._perturbation_factors_by_library(main_df, sra_df["sample_name"])
+        # intended_cell_types is only on cell lines and organoids, so a tissue or
+        # primary cell culture genuinely cannot have one, hence 'not applicable'
+        cell_type = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "intended_cell_types_term_name",
+            optional=True,
+            prefixes=("cell_lines", "organoids"),
+            gap="not applicable",
+        )
+        enriched_cell_types = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "enriched_cell_types_term_name", optional=True
+        )
+        # preservation_method is on tissues alone, so any other sample type has
+        # none to report, hence 'not applicable'
+        preservation_method = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "preservation_method",
+            optional=True,
+            prefixes=("tissues",),
+            gap="not applicable",
+        )
+        # 'strategy' lives on the linked GeneticModification, whose url_prefix is
+        # itself the MAIN column prefix. A sample with no modification has no
+        # strategy to report, hence 'not applicable'.
+        genetic_strategy = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "strategy",
+            optional=True,
+            prefixes=("genetic_modifications",),
+            gap="not applicable",
+            translate=GENETIC_PERTURBATION_MAP,
+        )
 
         # Barcodes are per row, so they do go through the collapse: that is what
         # turns rows disagreeing on the map into a list
@@ -497,6 +532,16 @@ class DB2Flattener:
             sra_df["experimental_perturbation_factors"] = sra_df["sample_name"].map(
                 perturbation_factors
             )
+        if cell_type:
+            sra_df["cell_type"] = sra_df["sample_name"].map(cell_type)
+        if enriched_cell_types:
+            sra_df["suspension_enriched_cell_types"] = sra_df["sample_name"].map(
+                enriched_cell_types
+            )
+        if genetic_strategy:
+            sra_df["genetic_perturbation_strategy"] = sra_df["sample_name"].map(genetic_strategy)
+        if preservation_method:
+            sra_df["preservation_method"] = sra_df["sample_name"].map(preservation_method)
 
         return sra_df
 
@@ -738,20 +783,32 @@ class DB2Flattener:
             return None
         return "; ".join(entry if entry else "not provided" for entry in entries)
 
-    def _sample_field_by_library(self, main_df, library_key, field, optional=False):
+    def _sample_field_by_library(
+        self,
+        main_df,
+        library_key,
+        field,
+        optional=False,
+        prefixes=SAMPLE_URL_PREFIXES,
+        gap="not provided",
+        translate=None,
+    ):
         """
-        Per-library cell for a plain string sample field, keyed by library alias.
+        Per-library cell for a field on the sample or something it links to.
 
-        A sample lacking a value contributes 'not provided' after any real ones,
-        so a library whose samples disagree reads '2023-01-05; not provided'.
+        A sample lacking a value contributes 'gap' after any real ones, so a
+        library whose samples disagree reads '2023-01-05; not provided'. An array
+        field contributes each of its items separately.
 
-        'optional' decides only whether the column exists: nothing anywhere means
-        nothing is returned and the column drops. Once one library has a value,
-        every library gets a cell, filled the same way as a required column.
+        'prefixes' narrows which MAIN column prefixes are read - the sample types
+        for a field on the sample itself, or a single linked object's prefix.
+        'translate' rewrites each value through a lookup, for a field whose stored
+        term differs from the one the sheet reports. 'optional' decides only
+        whether the column exists: nothing anywhere means nothing is returned and
+        the column drops. Once one library has a value, every library gets a cell,
+        filled as a required column is.
         """
-        values = self._coalesce_columns(
-            main_df, [f"{prefix}_{field}" for prefix in SAMPLE_URL_PREFIXES]
-        )
+        values = self._coalesce_columns(main_df, [f"{prefix}_{field}" for prefix in prefixes])
         if values is None:
             values = pd.Series(None, index=main_df.index, dtype=object)
 
@@ -761,17 +818,21 @@ class DB2Flattener:
             if not isinstance(library, str):
                 continue
             found.setdefault(library, set())
-            if is_empty(value):
+            items = to_items(value)
+            if not items:
                 missing.add(library)
             else:
-                found[library].add(str(value).strip())
+                texts = [str(item).strip() for item in items]
+                if translate:
+                    texts = [translate.get(text, text) for text in texts]
+                found[library].update(texts)
 
         if optional and not any(found.values()):
             return {}
 
         return {
             library: "; ".join(
-                sorted(present) + (["not provided"] if library in missing or not present else [])
+                sorted(present) + ([gap] if library in missing or not present else [])
             )
             for library, present in found.items()
         }

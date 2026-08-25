@@ -12,6 +12,7 @@ from db2_flattener.flatten.flattener import (
     age_with_units,
 )
 from db2_flattener.schema.constants import (
+    GENETIC_PERTURBATION_MAP,
     PROP_MAP_SRA_BIOSAMPLE,
     TISSUE_TYPE_MAP,
     Configs,
@@ -34,6 +35,10 @@ ETHNICITY_COLUMN = "ethnicity"
 SUSPENSION_COLUMN = "suspension_type"
 PERTURBATION_COLUMN = "experimental_perturbation"
 FACTORS_COLUMN = "experimental_perturbation_factors"
+CELL_TYPE_COLUMN = "cell_type"
+ENRICHED_COLUMN = "suspension_enriched_cell_types"
+STRATEGY_COLUMN = "genetic_perturbation_strategy"
+PRESERVATION_COLUMN = "preservation_method"
 # Read off the map so a rename there, e.g. dropping the SRA '*' required marker,
 # does not have to be chased through every assertion below.
 ORGANISM_COLUMN = PROP_MAP_SRA_BIOSAMPLE["human_donors_taxa"]
@@ -1314,6 +1319,293 @@ def test_factors_skip_rows_with_no_library_alias():
 
     # The unkeyed row's factor must not leak into the surviving library.
     assert list(sra_df[FACTORS_COLUMN]) == ["IL2_HUMAN"]
+
+
+# preservation_method
+
+
+def test_preservation_method_reads_tissues():
+    main_df = provider_main_df(tissues_preservation_method=["fresh", "fresh"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PRESERVATION_COLUMN] == "fresh"
+
+
+@pytest.mark.parametrize("prefix", ["cell_lines", "organoids", "primary_cell_cultures"])
+def test_preservation_method_ignores_other_sample_types(prefix):
+    """The field is on tissues alone, so the column is scoped to that prefix."""
+    main_df = provider_main_df(**{f"{prefix}_preservation_method": ["fresh", "fresh"]})
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert PRESERVATION_COLUMN not in sra_df.columns
+
+
+def test_preservation_method_gap_is_not_applicable():
+    main_df = provider_main_df(tissues_preservation_method=["fresh", None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PRESERVATION_COLUMN] == "fresh; not applicable"
+
+
+def test_preservation_method_joins_distinct_values():
+    main_df = provider_main_df(tissues_preservation_method=["fresh", "fixed-frozen"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, PRESERVATION_COLUMN] == "fixed-frozen; fresh"
+
+
+def test_preservation_method_absent_when_the_column_is_missing():
+    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
+
+    assert PRESERVATION_COLUMN not in sra_df.columns
+
+
+def test_preservation_method_absent_when_no_sample_has_one():
+    main_df = provider_main_df(tissues_preservation_method=[None, None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert PRESERVATION_COLUMN not in sra_df.columns
+
+
+def test_preservation_method_is_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "tissues_preservation_method": ["fresh", None, "fixed-frozen"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", PRESERVATION_COLUMN] == "fresh; not applicable"
+    assert sra_df.loc["LIB_B_GEX", PRESERVATION_COLUMN] == "fixed-frozen"
+
+
+# genetic_perturbation_strategy
+
+
+def strategy_main_df(values=("interference screen", "interference screen")):
+    return pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * len(values),
+            "genetic_modifications_strategy": list(values),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        pytest.param("interference screen", "CRISPR interference screen", id="interference"),
+        pytest.param("activation screen", "CRISPR activation screen", id="activation"),
+        pytest.param("knockout mutation", "CRISPR knockout mutant", id="knockout-mutation"),
+        pytest.param("knockout screen", "CRISPR knockout screen", id="knockout-screen"),
+        # anything the map does not name passes through untouched
+        pytest.param("base editing", "base editing", id="unmapped-passes-through"),
+    ],
+)
+def test_genetic_strategy_is_translated(stored, expected):
+    sra_df = make_flattener().create_sra_biosample_dataframe(strategy_main_df((stored, stored)))
+
+    assert sra_df.loc[0, STRATEGY_COLUMN] == expected
+
+
+def test_genetic_strategy_matches_the_map_biohub_uses():
+    """Both sheets report this field, so they must agree on the wording."""
+    for stored, expected in GENETIC_PERTURBATION_MAP.items():
+        sra_df = make_flattener().create_sra_biosample_dataframe(strategy_main_df((stored, stored)))
+        assert sra_df.loc[0, STRATEGY_COLUMN] == expected
+
+
+def test_genetic_strategy_gap_is_not_applicable():
+    """A sample with no genetic modification has no strategy to report."""
+    main_df = strategy_main_df(("interference screen", None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, STRATEGY_COLUMN] == "CRISPR interference screen; not applicable"
+
+
+def test_genetic_strategy_joins_two_strategies():
+    main_df = strategy_main_df(("interference screen", "activation screen"))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, STRATEGY_COLUMN] == (
+        "CRISPR activation screen; CRISPR interference screen"
+    )
+
+
+def test_genetic_strategy_absent_when_the_column_is_missing():
+    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
+
+    assert STRATEGY_COLUMN not in sra_df.columns
+
+
+def test_genetic_strategy_absent_when_no_sample_has_one():
+    main_df = strategy_main_df((None, None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert STRATEGY_COLUMN not in sra_df.columns
+
+
+def test_genetic_strategy_ignores_sample_prefixed_columns():
+    """'strategy' is read off genetic_modifications, not off the sample."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "tissues_strategy": ["interference screen"] * 2,
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert STRATEGY_COLUMN not in sra_df.columns
+
+
+def test_genetic_strategy_is_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "genetic_modifications_strategy": [
+                "interference screen",
+                None,
+                "activation screen",
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", STRATEGY_COLUMN] == (
+        "CRISPR interference screen; not applicable"
+    )
+    assert sra_df.loc["LIB_B_GEX", STRATEGY_COLUMN] == "CRISPR activation screen"
+
+
+# cell_type / suspension_enriched_cell_types
+
+
+def cell_type_main_df(prefix="cell_lines", values=(["HeLa"], ["HeLa"]), field="intended"):
+    return pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * len(values),
+            f"{prefix}_{field}_cell_types_term_name": list(values),
+        }
+    )
+
+
+@pytest.mark.parametrize("prefix", ["cell_lines", "organoids"])
+def test_cell_type_reads_intended_cell_types(prefix):
+    sra_df = make_flattener().create_sra_biosample_dataframe(cell_type_main_df(prefix))
+
+    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa"
+
+
+@pytest.mark.parametrize("prefix", ["tissues", "primary_cell_cultures"])
+def test_cell_type_ignores_sample_types_without_intended_cell_types(prefix):
+    """The field is only on cell lines and organoids."""
+    sra_df = make_flattener().create_sra_biosample_dataframe(cell_type_main_df(prefix))
+
+    assert CELL_TYPE_COLUMN not in sra_df.columns
+
+
+def test_cell_type_flattens_a_multi_term_array():
+    main_df = cell_type_main_df(values=(["HeLa", "K562"], ["HeLa", "K562"]))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa; K562"
+
+
+def test_cell_type_gap_is_not_applicable():
+    """A tissue cannot have an intended cell type, so the gap is not 'not provided'."""
+    main_df = cell_type_main_df(values=(["HeLa"], None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa; not applicable"
+
+
+def test_cell_type_absent_when_no_sample_has_one():
+    """All-gap means the column drops, rather than a column of 'not applicable'."""
+    main_df = cell_type_main_df(values=(None, None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert CELL_TYPE_COLUMN not in sra_df.columns
+
+
+def test_cell_type_absent_when_the_column_is_missing():
+    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
+
+    assert CELL_TYPE_COLUMN not in sra_df.columns
+
+
+@pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
+def test_enriched_cell_types_reads_any_sample_type(prefix):
+    """Unlike intended_cell_types, enriched_cell_types is on all four."""
+    main_df = cell_type_main_df(prefix, field="enriched")
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ENRICHED_COLUMN] == "HeLa"
+
+
+def test_enriched_cell_types_gap_is_not_provided():
+    """Deliberately different from cell_type: the value is missing, not inapplicable."""
+    main_df = cell_type_main_df(values=(["T cell"], None), field="enriched")
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ENRICHED_COLUMN] == "T cell; not provided"
+
+
+def test_enriched_cell_types_absent_when_no_sample_has_one():
+    main_df = cell_type_main_df(values=(None, None), field="enriched")
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert ENRICHED_COLUMN not in sra_df.columns
+
+
+def test_both_cell_type_columns_can_coexist():
+    """A cell line run carries both, each with its own gap marker."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "cell_lines_intended_cell_types_term_name": [["HeLa"], None],
+            "cell_lines_enriched_cell_types_term_name": [["T cell"], None],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa; not applicable"
+    assert sra_df.loc[0, ENRICHED_COLUMN] == "T cell; not provided"
+
+
+def test_cell_type_columns_are_scoped_to_each_library():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
+            + [["alex-marson:LIB_B_GEX"]],
+            "cell_lines_intended_cell_types_term_name": [["HeLa"], ["K562"], ["HeLa"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+
+    assert sra_df.loc["LIB_A_GEX", CELL_TYPE_COLUMN] == "HeLa; K562"
+    assert sra_df.loc["LIB_B_GEX", CELL_TYPE_COLUMN] == "HeLa"
 
 
 # suspension_type
