@@ -5,6 +5,7 @@ import pandas as pd
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.schema.constants import (
     GEO_SUSPENSION_TYPE_COLS,
+    GEO_TITLE_TREATMENT_COLS,
     GEO_TREATMENT_COLS,
     PROP_MAP_GEO,
     Configs,
@@ -296,7 +297,7 @@ def test_create_geo_dataframe_library_strategy_collapses_suspension_sources():
 
 
 def _assert_no_treatment_source_cols(geo_df):
-    for col in GEO_TREATMENT_COLS:
+    for col in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS):
         assert col not in geo_df.columns
 
 
@@ -426,7 +427,7 @@ def test_create_geo_dataframe_includes_stripped_author_metadata():
     assert list(geo_df.columns)[-1:] == ["raw_file"]
 
 
-def test_create_geo_dataframe_keeps_genetic_modifications_strategy():
+def test_create_geo_dataframe_maps_genetic_modifications_strategy():
     flattener = make_flattener()
     main_df = pd.DataFrame([gex_row(genetic_modifications_strategy="knockout screen")]).dropna(
         axis=1, how="all"
@@ -434,5 +435,193 @@ def test_create_geo_dataframe_keeps_genetic_modifications_strategy():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["genetic_modifications_strategy"]) == ["knockout screen"]
+    assert list(geo_df["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
     assert "genetic_perturbation_strategy" not in geo_df.columns
+
+
+def test_create_geo_dataframe_title_full_set():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_suspension_type="cell",
+                treatments_description="LPS stimulation",
+                treatments_lower_bound_duration=4,
+                treatments_upper_bound_duration=4,
+                treatments_duration_units="hours",
+                treatments_schema_version="19",
+                treatments_ontological_term_term_name="lipopolysaccharide",
+                genetic_modifications_strategy="knockout screen",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["title"]) == [
+        "libA scRNA-seq; LPS stimulation 4 hours; CRISPR knockout screen"
+    ]
+    assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
+    assert list(geo_df["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
+    assert "treatments_schema_version" not in geo_df.columns
+    assert "treatments_ontological_term_term_name" not in geo_df.columns
+    _assert_no_treatment_source_cols(geo_df)
+    assert list(geo_df.columns)[-1:] == ["raw_file"]
+
+
+def test_create_geo_dataframe_title_unequal_duration():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_suspension_type="cell",
+                treatments_description="LPS stimulation",
+                treatments_lower_bound_duration=2,
+                treatments_upper_bound_duration=4,
+                treatments_duration_units="hours",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["title"]) == ["libA scRNA-seq; LPS stimulation 2-4 hours"]
+    _assert_no_treatment_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_title_skips_empty_fields():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(tissues_suspension_type="cell")]).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["title"]) == ["libA scRNA-seq"]
+    assert all("no treatment" not in title for title in geo_df["title"])
+    if "treatment" in geo_df.columns:
+        assert list(geo_df["treatment"]) != ["no treatment"]
+
+
+def test_create_geo_dataframe_title_pooled_when_samples_list():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_suspension_type="cell",
+                raw_file_samples=["sample1", "sample2"],
+                treatments_description="LPS stimulation",
+                treatments_lower_bound_duration=4,
+                treatments_duration_units="hours",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["title"]) == ["libA scRNA-seq; pooled; LPS stimulation 4 hours"]
+
+
+def test_create_geo_dataframe_title_pooled_when_joined_samples():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(tissues_suspension_type="cell", raw_file_samples="sample1; sample2")]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["title"]) == ["libA scRNA-seq; pooled"]
+    assert all("no treatment" not in title for title in geo_df["title"])
+    if "treatment" in geo_df.columns:
+        assert list(geo_df["treatment"]) != ["no treatment"]
+
+
+def test_create_geo_dataframe_treatment_stays_empty_when_no_row_has_treatment():
+    flattener = make_flattener()
+    empty_treatment = {
+        "tissues_suspension_type": "cell",
+        "treatments_description": None,
+        "treatments_ontological_term_term_name": None,
+        "treatments_lower_bound_duration": None,
+        "treatments_duration_units": None,
+    }
+    main_df = pd.DataFrame(
+        [
+            gex_row(**empty_treatment),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libB",
+                raw_matrix_file_alias="libB.h5",
+                **empty_treatment,
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert "treatment" in geo_df.columns
+    assert all(val is pd.NA or pd.isna(val) or val != "no treatment" for val in geo_df["treatment"])
+    assert list(geo_df["title"]) == ["libA scRNA-seq", "libB scRNA-seq"]
+    assert all("no treatment" not in title for title in geo_df["title"])
+
+
+def test_create_geo_dataframe_treatment_no_treatment_when_other_library_has_treatment():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_suspension_type="cell",
+                treatments_ontological_term_term_name="lipopolysaccharide",
+                treatments_description="LPS stimulation",
+                treatments_lower_bound_duration="4",
+                treatments_duration_units="hours",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libB",
+                raw_matrix_file_alias="libB.h5",
+                tissues_suspension_type="cell",
+                treatments_description=None,
+                treatments_ontological_term_term_name=None,
+                treatments_lower_bound_duration=None,
+                treatments_duration_units=None,
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+    geo_df = geo_df.set_index("*library name")
+
+    assert geo_df.loc["libA", "treatment"] == "lipopolysaccharide; LPS stimulation 4 hours"
+    assert geo_df.loc["libA", "title"] == "libA scRNA-seq; LPS stimulation 4 hours"
+    assert geo_df.loc["libB", "treatment"] == "no treatment"
+    assert geo_df.loc["libB", "title"] == "libB scRNA-seq; no treatment"
+
+
+def test_create_geo_dataframe_title_lists_mixed_treatments_same_library():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_suspension_type="cell",
+                treatments_ontological_term_term_name="lipopolysaccharide",
+                treatments_description="LPS stimulation",
+                treatments_lower_bound_duration="4",
+                treatments_duration_units="hours",
+            ),
+            gex_row(
+                tissues_suspension_type="cell",
+                raw_matrix_file_alias="libA-2.h5",
+                treatments_description=None,
+                treatments_ontological_term_term_name=None,
+                treatments_lower_bound_duration=None,
+                treatments_duration_units=None,
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df) == 1
+    assert list(geo_df["treatment"]) == [
+        ["lipopolysaccharide; LPS stimulation 4 hours", "no treatment"]
+    ]
+    assert list(geo_df["title"]) == [
+        "libA scRNA-seq; ['lipopolysaccharide; LPS stimulation 4 hours', 'no treatment']"
+    ]

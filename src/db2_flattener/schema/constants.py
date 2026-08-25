@@ -181,6 +181,12 @@ GEO_TREATMENT_COLS = [
     "treatments_duration_units",
     "treatments_ontological_term_term_name",
 ]
+GEO_TITLE_TREATMENT_COLS = [
+    "treatments_description",
+    "treatments_lower_bound_duration",
+    "treatments_upper_bound_duration",
+    "treatments_duration_units",
+]
 
 GENETIC_PERTURBATION_MAP = {
     "activation screen": "CRISPR activation screen",

@@ -23,8 +23,8 @@ ONTOLOGY_TERM_ID_SUFFIX = "_ontology_term_id"
 
 
 def is_empty(val) -> bool:
-    """Return True for None, NaN, empty string, or empty list."""
-    if val is None:
+    """Return True for None, pd.NA, NaN, empty string, or empty list."""
+    if val is None or val is pd.NA:
         return True
     if isinstance(val, float) and pd.isna(val):
         return True
