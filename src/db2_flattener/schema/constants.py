@@ -121,8 +121,6 @@ PROP_MAP_SRA_BIOSAMPLE = {
     "plate_based_libraries_aliases": "sample_name",
     "non_human_donors_taxa": "*organism",
     "human_donors_taxa": "*organism",
-    "tissues_sample_terms_term_name": "*tissue",
-    "organoids_sample_terms_term_name": "**tissue",
 }
 
 BIOHUB_SORT_ONTOLOGY_IDS = [

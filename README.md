@@ -76,6 +76,45 @@ a bare `@id` path there is no title to read and the `lab` fallback applies.
 that has none — so a library whose samples disagree reads
 `2023-01-05; not provided`.
 
+`*tissue` is the sample's `sample_terms`, one entry per term since the field is an
+array. A cell line or primary cell culture has no tissue of origin, so it reports
+`not available` instead; tissues and organoids report their term.
+
+`experimental_perturbation` is optional and comes from `treatments_*`, joining the
+treatment's duration with its description — `8 hour stimulation`, or
+`8-24 hour stimulation` when the bounds differ. Units stay verbatim rather than
+pluralised, since the phrase reads adjectivally. One perturbation across a library
+gives the bare value; several give `pooled: a, b`, and a sample with no treatment
+contributes `not provided`, so a partly perturbed library reads
+`pooled: 8 hour stimulation, not provided`.
+
+`experimental_perturbation_factors` is optional and comes from
+`treatments_ontological_term`. Each sample contributes the set of terms its
+treatments name, bracketed when there is more than one so a reader can see which
+factors went together — `[IL2_HUMAN, anti-CD2_HUMAN]`. Distinct sets pool across
+the library and a sample with no treatment contributes `na`, giving
+`pooled: [IL2_HUMAN, anti-CD2_HUMAN], na`. Terms sort case-sensitively, so
+uppercase leads.
+
+`suspension_type` is optional: being optional decides only whether the column
+exists, not how it is filled. If no sample anywhere has one the column is dropped;
+otherwise it behaves exactly like `*collection_date`, joining distinct values with
+`; ` and filling a gap with `not provided`.
+
+`ethnicity` is optional and appears only when some donor has one. It shares the
+`D1..Dn` enumeration with `*isolate` and `*age`, so the labels line up across all
+three — `pooled: D1 - European American, D2 - African American`. It comes from
+`HumanDonor` only, so a non-human run has no such column.
+
+`age_lower_bound` and `age_upper_bound` are optional: each appears only when some
+donor carries that bound. Both pair the sample's `lower_bound_age` /
+`upper_bound_age` with its `age_units`, pluralised (`29 years`, `1 year`). They
+carry no `D1..Dn` labels but hold one entry per donor in the same order, so entry
+*n* describes the donor `Dn` names in `*isolate` and `*age`. Nothing is sorted or
+deduplicated, and a donor with no bound holds its slot with `not provided` —
+`not provided; not provided; 40 years` for three donors where only the third has
+one.
+
 Age comes from the sample's `developmental_stages` term,
 because `HumanDonor` has no age property of its own: a numeric stage renders as a
 number and unit (`29-year-old stage` → `29 years`), and a qualitative one keeps

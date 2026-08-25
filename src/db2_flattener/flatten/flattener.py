@@ -1,4 +1,6 @@
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
@@ -18,6 +20,7 @@ from db2_flattener.schema.constants import (
     Configs,
 )
 from db2_flattener.utils import (
+    age_from_developmental_stage,
     collapse_dataframe,
     collapse_duplicate_columns,
     combine_bound_columns,
@@ -29,7 +32,61 @@ from db2_flattener.utils import (
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
+    to_items,
 )
+
+# For SRA Biosample sheet creation, utilizing TISSUE_TYPE_MAP to get various sample types
+SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE_MAP.values())
+
+
+def age_with_units(value, units) -> str | None:
+    """
+    '29 years' from an age bound and its units. None when the bound is empty.
+
+    Pluralises off the bare unit, so 'year' and 'years' in the data both give
+    '29 years' and '1 year'.
+    """
+    if is_empty(value):
+        return None
+    # lower/upper_bound_age are typed number, so a null anywhere in the column
+    # makes pandas store the lot as float
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = str(value).strip()
+    if is_empty(units):
+        return text
+    unit = str(units).strip().rstrip("s")
+    return f"{text} {unit}" if text == "1" else f"{text} {unit}s"
+
+
+@dataclass(frozen=True)
+class SRABiosampleDonorColumn:
+    """
+    One SRA_BIOSAMPLE column derived per donor.
+
+    One source is given. 'columns' names MAIN columns directly and coalesces them,
+    first non-null winning, for a field that sits on the donor under both a human
+    and a non-human name. 'sample_fields' are fields on the sample, each expanded
+    across SAMPLE_URL_PREFIXES and coalesced, then passed to 'transform' in order -
+    two of them where a value needs its units. Neither means the column is the
+    donor id itself.
+
+    'render' is one of:
+      labelled   'pooled: D1 - x, D2 - y', the shared donor enumeration
+      positional 'x; y; not provided', one unlabelled entry per donor in that
+                 same order, so entry n and Dn are the same donor
+      summary    'pooled male and female', a summary over the donors, unordered
+
+    An 'optional' column is dropped when no donor has a value, where a required
+    one stays as a blank column.
+    """
+
+    name: str
+    columns: tuple[str, ...] = ()
+    sample_fields: tuple[str, ...] = ()
+    render: str = "labelled"
+    optional: bool = False
+    transform: Callable[..., str | None] | None = None
 
 
 class DB2Flattener:
@@ -377,7 +434,7 @@ class DB2Flattener:
 
         # Built while sample_name is still row-aligned with main_df, attached after
         # the collapse - one value per library already, so nothing to aggregate
-        isolate, age, sex = self._donor_cells_by_library(main_df, sra_df["sample_name"])
+        donor = self._donor_cells_by_library(main_df, sra_df["sample_name"])
         provider = self._biomaterial_provider_by_library(main_df, sra_df["sample_name"])
         collection_date = self._sample_field_by_library(
             main_df, sra_df["sample_name"], "date_obtained"
@@ -385,6 +442,12 @@ class DB2Flattener:
         geo_loc_name = self._sample_field_by_library(
             main_df, sra_df["sample_name"], "collection_geographical_location"
         )
+        tissue = self._tissue_by_library(main_df, sra_df["sample_name"])
+        suspension_type = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "suspension_type", optional=True
+        )
+        perturbation = self._perturbation_by_library(main_df, sra_df["sample_name"])
+        perturbation_factors = self._perturbation_factors_by_library(main_df, sra_df["sample_name"])
 
         # Barcodes are per row, so they do go through the collapse: that is what
         # turns rows disagreeing on the map into a list
@@ -414,42 +477,28 @@ class DB2Flattener:
         else:
             sra_df = collapse_dataframe(sra_df, group_col="sample_name")
 
-        if isolate:
-            sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
-        if age:
-            sra_df["*age"] = sra_df["sample_name"].map(age)
-        if sex:
-            sra_df["*sex"] = sra_df["sample_name"].map(sex)
+        # Optional donor columns are absent from 'donor' when nothing had a value
+        for spec in self.DONOR_COLUMNS:
+            if donor[spec.name]:
+                sra_df[spec.name] = sra_df["sample_name"].map(donor[spec.name])
+        if tissue:
+            sra_df["*tissue"] = sra_df["sample_name"].map(tissue)
         if provider:
             sra_df["*biomaterial_provider"] = sra_df["sample_name"].map(provider)
         sra_df["*collection_date"] = sra_df["sample_name"].map(collection_date)
         sra_df["*geo_loc_name"] = sra_df["sample_name"].map(geo_loc_name)
 
+        # Optional: left out entirely when no library has a value
+        if suspension_type:
+            sra_df["suspension_type"] = sra_df["sample_name"].map(suspension_type)
+        if perturbation:
+            sra_df["experimental_perturbation"] = sra_df["sample_name"].map(perturbation)
+        if perturbation_factors:
+            sra_df["experimental_perturbation_factors"] = sra_df["sample_name"].map(
+                perturbation_factors
+            )
+
         return sra_df
-
-    # Stage terms stating a numeric age, e.g. '29-year-old stage'
-    DEVELOPMENTAL_STAGE_AGE = re.compile(r"(\d+)-(year|month|week|day)-old")
-    # Trailing boilerplate, e.g. '10th week post-fertilization human stage'
-    DEVELOPMENTAL_STAGE_SUFFIX = re.compile(r"\s+(?:human\s+)?stage$")
-
-    @classmethod
-    def _age_from_developmental_stage(cls, term_name):
-        """
-        '29-year-old stage' -> '29 years'; 'adult stage' -> 'adult'.
-
-        A qualitative stage keeps its term name minus a trailing ' stage' or
-        ' human stage'. A numeric stage anywhere in a multi-stage cell wins.
-        """
-        names = term_name if isinstance(term_name, list) else [term_name]
-        texts = [name.strip() for name in names if isinstance(name, str) and name.strip()]
-
-        for text in texts:
-            match = cls.DEVELOPMENTAL_STAGE_AGE.search(text)
-            if match:
-                count, unit = match.group(1), match.group(2)
-                return f"{count} {unit}" if count == "1" else f"{count} {unit}s"
-
-        return cls.DEVELOPMENTAL_STAGE_SUFFIX.sub("", texts[0]) if texts else None
 
     @staticmethod
     def _donor_id_text(value) -> str:
@@ -503,19 +552,6 @@ class DB2Flattener:
             return ordered[0]
         return "pooled " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
 
-    def _sample_url_prefixes(self) -> list[str]:
-        """
-        Sample url_prefixes, e.g. 'tissues', from TISSUE_TYPE_MAP and OBJECT_CONFIG.
-
-        Needed because 'lab' sits on 19 object types - libraries, files, donors -
-        and only a sample's lab names a biomaterial provider.
-        """
-        return [
-            prefix
-            for prefix, config in self.configs.OBJECT_CONFIG.items()
-            if config.get("api_type") in TISSUE_TYPE_MAP
-        ]
-
     @staticmethod
     def _provider_titles(value) -> list[str]:
         """
@@ -525,14 +561,136 @@ class DB2Flattener:
         which extract.get_link_to() ignores, so the gatherer never resolves it to
         an object carrying a title.
         """
-        items = value if isinstance(value, list) else [value]
         titles = []
-        for item in items:
+        for item in to_items(value):
             if isinstance(item, dict):
                 title = item.get("title") or item.get("name")
                 if title and str(title).strip():
                     titles.append(str(title).strip())
         return titles
+
+    @staticmethod
+    def _duration_text(lower, upper, units) -> str:
+        """
+        '8 hour' from a duration and its units, '8-24 hour' when the bounds differ.
+
+        Units stay verbatim rather than pluralised - '8 hour stimulation' reads
+        adjectivally, unlike the '29 years' the age bound columns want.
+        """
+        bounds = []
+        for bound in (lower, upper):
+            if is_empty(bound):
+                continue
+            # durations are typed number, so a null anywhere makes the column float
+            if isinstance(bound, float) and bound.is_integer():
+                bound = int(bound)
+            bounds.append(str(bound).strip())
+        if not bounds:
+            return ""
+        span = bounds[0] if len(set(bounds)) == 1 else "-".join(bounds)
+        unit = "" if is_empty(units) else str(units).strip()
+        return f"{span} {unit}".strip()
+
+    @staticmethod
+    def _format_pooled_values(values) -> str | None:
+        """'pooled: a, b' across several values, or the bare value for a lone one."""
+        entries = [value for value in values if value]
+        if not entries:
+            return None
+        if len(entries) == 1:
+            return entries[0]
+        return "pooled: " + ", ".join(entries)
+
+    def _perturbation_by_library(self, main_df, library_key):
+        """
+        Build the 'experimental_perturbation' cell per library, keyed by library alias.
+
+        Reads the treatment's duration and description straight off 'treatments_*',
+        which is already the object prefix and so needs no sample expansion. A
+        sample with no treatment contributes 'not provided', which is why a library
+        that only partly perturbed reads 'pooled: 8 hour stimulation, not provided'.
+        Optional, so nothing anywhere drops the column.
+        """
+        columns = [
+            main_df[name] if name in main_df.columns else None
+            for name in (
+                "treatments_lower_bound_duration",
+                "treatments_upper_bound_duration",
+                "treatments_duration_units",
+                "treatments_description",
+            )
+        ]
+        if all(column is None for column in columns):
+            return {}
+
+        empty = pd.Series(None, index=main_df.index, dtype=object)
+        lower, upper, units, descriptions = (empty if c is None else c for c in columns)
+
+        found: dict[str, set[str]] = {}
+        missing: set[str] = set()
+        for library, low, high, unit, description in zip(
+            library_key, lower, upper, units, descriptions, strict=True
+        ):
+            if not isinstance(library, str):
+                continue
+            found.setdefault(library, set())
+            duration = self._duration_text(low, high, unit)
+            text = " ".join(
+                part
+                for part in (duration, "" if is_empty(description) else str(description).strip())
+            ).strip()
+            if text:
+                found[library].add(text)
+            else:
+                missing.add(library)
+
+        if not any(found.values()):
+            return {}
+
+        return {
+            library: self._format_pooled_values(
+                sorted(present) + (["not provided"] if library in missing else [])
+            )
+            for library, present in found.items()
+        }
+
+    def _perturbation_factors_by_library(self, main_df, library_key):
+        """
+        Build the 'experimental_perturbation_factors' cell per library, keyed by alias.
+
+        Each sample contributes the set of ontological terms its treatments name,
+        bracketed when there is more than one so a reader can tell which factors
+        went together: '[anti-CD2_HUMAN, IL2_HUMAN]'. Distinct sets are pooled
+        across the library, and a sample with no treatment contributes 'na'.
+        Optional, so nothing anywhere drops the column.
+        """
+        terms = main_df.get("treatments_ontological_term_term_name")
+        if terms is None:
+            return {}
+
+        found: dict[str, set[str]] = {}
+        missing: set[str] = set()
+        for library, value in zip(library_key, terms, strict=True):
+            if not isinstance(library, str):
+                continue
+            found.setdefault(library, set())
+            names = sorted({str(name).strip() for name in to_items(value)})
+            if not names:
+                missing.add(library)
+            elif len(names) == 1:
+                found[library].add(names[0])
+            else:
+                found[library].add(f"[{', '.join(names)}]")
+
+        if not any(found.values()):
+            return {}
+
+        return {
+            library: self._format_pooled_values(
+                sorted(present) + (["na"] if library in missing else [])
+            )
+            for library, present in found.items()
+        }
 
     def _biomaterial_provider_by_library(self, main_df, library_key):
         """
@@ -541,7 +699,7 @@ class DB2Flattener:
         Falls back per row, not per column: a sample with no usable 'sources' uses
         its own 'lab' even where a sibling has one. Distinct titles join with '; '.
         """
-        prefixes = self._sample_url_prefixes()
+        prefixes = SAMPLE_URL_PREFIXES
         sources = self._coalesce_columns(main_df, [f"{prefix}_sources" for prefix in prefixes])
         labs = self._coalesce_columns(main_df, [f"{prefix}_lab" for prefix in prefixes])
         if sources is None and labs is None:
@@ -565,15 +723,34 @@ class DB2Flattener:
 
         return {library: "; ".join(sorted(titles)) for library, titles in titles_by_library.items()}
 
-    def _sample_field_by_library(self, main_df, library_key, field):
+    @staticmethod
+    def _format_positional_donor_cell(values) -> str | None:
+        """
+        'x; y; not provided' - one entry per donor, in donor order.
+
+        values is one per donor, already in order. Nothing is deduplicated or
+        sorted, so entry n always describes the same donor as Dn does in the
+        labelled columns; a donor with no value holds its slot with the literal.
+        None when no donor has a value, leaving the column out.
+        """
+        entries = list(values)
+        if not any(entry for entry in entries):
+            return None
+        return "; ".join(entry if entry else "not provided" for entry in entries)
+
+    def _sample_field_by_library(self, main_df, library_key, field, optional=False):
         """
         Per-library cell for a plain string sample field, keyed by library alias.
 
-        A sample with no value contributes 'not provided', appended after any real
-        ones, so a library whose samples disagree reads '2023-01-05; not provided'.
+        A sample lacking a value contributes 'not provided' after any real ones,
+        so a library whose samples disagree reads '2023-01-05; not provided'.
+
+        'optional' decides only whether the column exists: nothing anywhere means
+        nothing is returned and the column drops. Once one library has a value,
+        every library gets a cell, filled the same way as a required column.
         """
         values = self._coalesce_columns(
-            main_df, [f"{prefix}_{field}" for prefix in self._sample_url_prefixes()]
+            main_df, [f"{prefix}_{field}" for prefix in SAMPLE_URL_PREFIXES]
         )
         if values is None:
             values = pd.Series(None, index=main_df.index, dtype=object)
@@ -589,12 +766,63 @@ class DB2Flattener:
             else:
                 found[library].add(str(value).strip())
 
+        if optional and not any(found.values()):
+            return {}
+
         return {
             library: "; ".join(
                 sorted(present) + (["not provided"] if library in missing or not present else [])
             )
             for library, present in found.items()
         }
+
+    # Sample types with no tissue of origin to report
+    TISSUELESS_SAMPLE_TYPES = ("cell_lines", "primary_cell_cultures")
+
+    def _tissue_by_library(self, main_df, library_key):
+        """
+        Per-library 'tissue' cell, keyed by library alias.
+
+        A cell line or primary cell culture has no tissue, so it reports
+        'not available'. A tissue or organoid reports its sample_terms, which is
+        an array - each term becomes its own entry. A sample with no term at all
+        contributes nothing, which the schema should not allow anyway.
+        """
+        tissueless = [
+            main_df[f"{prefix}_@id"]
+            for prefix in self.TISSUELESS_SAMPLE_TYPES
+            if f"{prefix}_@id" in main_df.columns
+        ]
+        terms = self._coalesce_columns(
+            main_df,
+            [
+                f"{prefix}_sample_terms_term_name"
+                for prefix in SAMPLE_URL_PREFIXES
+                if prefix not in self.TISSUELESS_SAMPLE_TYPES
+            ],
+        )
+        if terms is None and not tissueless:
+            return {}
+
+        empty = pd.Series(None, index=main_df.index, dtype=object)
+        terms = empty if terms is None else terms
+        # True where the row's sample is one of the tissueless types
+        is_tissueless = [
+            any(not is_empty(column.iloc[row]) for column in tissueless)
+            for row in range(len(main_df))
+        ]
+
+        by_library: dict[str, set[str]] = {}
+        for library, term, tissueless_row in zip(library_key, terms, is_tissueless, strict=True):
+            if not isinstance(library, str):
+                continue
+            if tissueless_row:
+                by_library.setdefault(library, set()).add("not available")
+                continue
+            for item in to_items(term):
+                by_library.setdefault(library, set()).add(str(item).strip())
+
+        return {library: "; ".join(sorted(values)) for library, values in by_library.items()}
 
     @staticmethod
     def _coalesce_columns(main_df, columns):
@@ -606,60 +834,115 @@ class DB2Flattener:
             out = main_df[col] if out is None else out.fillna(main_df[col])
         return out
 
+    # Every per-donor column on the SRA Biosample sheet. Add one here and nothing else needs
+    # touching: the D1..Dn enumeration, the empty-column rule and the assignment
+    # all read off these specs.
+    DONOR_COLUMNS = (
+        SRABiosampleDonorColumn("*isolate"),
+        SRABiosampleDonorColumn(
+            "*age",
+            sample_fields=("developmental_stages_term_name",),
+            transform=age_from_developmental_stage,
+        ),
+        SRABiosampleDonorColumn(
+            "*sex", columns=("human_donors_sex", "non_human_donors_sex"), render="summary"
+        ),
+        # ethnicity is on HumanDonor only, so a non-human run simply lacks it
+        SRABiosampleDonorColumn(
+            "ethnicity", columns=("human_donors_ethnicity_term_name",), optional=True
+        ),
+        SRABiosampleDonorColumn(
+            "age_lower_bound",
+            sample_fields=("lower_bound_age", "age_units"),
+            render="positional",
+            optional=True,
+            transform=age_with_units,
+        ),
+        SRABiosampleDonorColumn(
+            "age_upper_bound",
+            sample_fields=("upper_bound_age", "age_units"),
+            render="positional",
+            optional=True,
+            transform=age_with_units,
+        ),
+    )
+
     def _donor_cells_by_library(self, main_df, library_key):
         """
-        Build the 'isolate', 'age' and 'sex' cells per library, keyed by library alias.
+        Build the per-library donor cells, keyed by library alias then column name.
 
-        Donors are enumerated D1..Dn in donor id order, one enumeration feeding
-        both isolate and age so Dn names the same donor in each. Sex summarises
-        the same donors rather than listing them, so it carries no labels.
+        Donors are enumerated D1..Dn in donor id order and every pooled cell reads
+        from that one enumeration, so Dn names the same donor in each.
         """
         donor_ids = self._coalesce_columns(
             main_df, ("human_donors_cxg_donor_id", "non_human_donors_cxg_donor_id")
         )
         if donor_ids is None:
-            print("Warning: MAIN has no donor id column; SRA_BIOSAMPLE omits isolate, age and sex")
-            return {}, {}, {}
+            print("Warning: MAIN has no donor id column; SRA_BIOSAMPLE omits the donor columns")
+            return {spec.name: {} for spec in self.DONOR_COLUMNS}
 
-        sexes = self._coalesce_columns(main_df, ("human_donors_sex", "non_human_donors_sex"))
-        if sexes is None:
-            sexes = pd.Series(None, index=main_df.index, dtype=object)
+        empty = pd.Series(None, index=main_df.index, dtype=object)
 
-        # developmental_stages is on every sample type; take whichever this run has
-        stages = self._coalesce_columns(
-            main_df, [c for c in main_df.columns if c.endswith("_developmental_stages_term_name")]
-        )
-        ages = (
-            stages.map(self._age_from_developmental_stage)
-            if stages is not None
-            else pd.Series(None, index=main_df.index, dtype=object)
-        )
+        def coalesced(candidates):
+            found = self._coalesce_columns(main_df, candidates)
+            return empty if found is None else found
 
-        # {library: {donor_id: {'age': ..., 'sex': ...}}} - first non-empty wins
+        attributes = {}
+        for spec in self.DONOR_COLUMNS:
+            if spec.sample_fields:
+                sources = [
+                    coalesced([f"{p}_{field}" for p in SAMPLE_URL_PREFIXES])
+                    for field in spec.sample_fields
+                ]
+            elif spec.columns:
+                sources = [coalesced(spec.columns)]
+            else:
+                continue  # sourced from the donor id, seeded below
+            if spec.transform:
+                attributes[spec.name] = [spec.transform(*row) for row in zip(*sources, strict=True)]
+            else:
+                attributes[spec.name] = list(sources[0])
+
+        # {library: {donor_id: {column: value}}} - first value per donor wins
+        names = list(attributes)
         by_library: dict[str, dict[str, dict[str, str | None]]] = {}
-        for library, donor_id, age, sex in zip(library_key, donor_ids, ages, sexes, strict=True):
+        for library, donor_id, *values in zip(
+            library_key, donor_ids, *attributes.values(), strict=True
+        ):
             if not isinstance(library, str) or is_empty(donor_id):
                 continue
             donors = by_library.setdefault(library, {})
-            donor = donors.setdefault(self._donor_id_text(donor_id), {"age": None, "sex": None})
-            if donor["age"] is None:
-                donor["age"] = age
-            if donor["sex"] is None:
-                donor["sex"] = sex
+            donor = donors.setdefault(self._donor_id_text(donor_id), dict.fromkeys(names, None))
+            for name, value in zip(names, values, strict=True):
+                if is_empty(donor[name]):
+                    donor[name] = value
 
-        isolate_cells = {}
-        age_cells = {}
-        sex_cells = {}
+        cells: dict[str, dict[str, str | None]] = {spec.name: {} for spec in self.DONOR_COLUMNS}
         for library, donors in by_library.items():
             ordered = sorted(donors, key=self._donor_sort_key)
             labelled = [(f"D{number}", donor) for number, donor in enumerate(ordered, start=1)]
-            isolate_cells[library] = self._format_pooled_donor_cell(labelled)
-            age_cells[library] = self._format_pooled_donor_cell(
-                [(label, donors[donor]["age"]) for label, donor in labelled]
-            )
-            sex_cells[library] = self._format_pooled_sex(donors[donor]["sex"] for donor in ordered)
+            for spec in self.DONOR_COLUMNS:
+                if not spec.columns and not spec.sample_fields:
+                    value = self._format_pooled_donor_cell(labelled)
+                elif spec.render == "positional":
+                    value = self._format_positional_donor_cell(
+                        donors[donor][spec.name] for donor in ordered
+                    )
+                elif spec.render == "summary":
+                    value = self._format_pooled_sex(donors[donor][spec.name] for donor in ordered)
+                else:
+                    value = self._format_pooled_donor_cell(
+                        [(label, donors[donor][spec.name]) for label, donor in labelled]
+                    )
+                # An optional cell with no value is left out, so a column with no
+                # data anywhere stays completely false and is skipped. A required one keeps
+                # its None, so the column still appears blank when there are donors
+                # This will allow us to catch missing required data
+                if value is None and spec.optional:
+                    continue
+                cells[spec.name][library] = value
 
-        return isolate_cells, age_cells, sex_cells
+        return cells
 
     def _clean_alias_cell(self, value):
         """Strip the lab prefix from a raw aliases cell, which may be a list or a str."""
@@ -920,7 +1203,7 @@ class DB2Flattener:
         if value is None or value == []:
             return None
 
-        refs = value if isinstance(value, list) else [value]
+        refs = to_items(value)
         resolved = [
             term
             for term in (
@@ -941,7 +1224,7 @@ class DB2Flattener:
         """
         flat = []
         for value in values:
-            flat.extend(value if isinstance(value, list) else [value])
+            flat.extend(to_items(value))
 
         by_id = {term["@id"]: term for term in flat if isinstance(term, dict) and term.get("@id")}
         terms = sorted(by_id.values(), key=lambda term: term["@id"])
