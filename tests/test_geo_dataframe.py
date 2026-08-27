@@ -57,6 +57,9 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["tissues_developmental_stages_term_name"] == "donor_dev_stage"
     assert PROP_MAP_GEO["sequence_file_sets_sequencing_platform"] == "*instrument model"
     assert PROP_MAP_GEO["genetic_modifications_strategy"] == "genetic_modifications_strategy"
+    assert PROP_MAP_GEO["tissues_selection_kits"] == "selection_kits"
+    assert PROP_MAP_GEO["tissues_selection_markers"] == "selection_markers"
+    assert PROP_MAP_GEO["tissues_selection_methods"] == "selection_methods"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -85,6 +88,32 @@ def test_create_geo_dataframe_adds_new_columns():
     assert list(geo_df["**cell_type"]) == ["hepatocyte"]
     assert list(geo_df["single or paired-end"]) == ["paired"]
     assert list(geo_df["*instrument model"]) == ["Illumina NovaSeq 6000"]
+    assert "selection_kits" not in geo_df.columns
+    assert "selection_markers" not in geo_df.columns
+    assert "selection_methods" not in geo_df.columns
+
+
+def test_create_geo_dataframe_includes_tissue_selection_columns():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                tissues_selection_kits="EasySep",
+                tissues_selection_markers="CD4",
+                tissues_selection_methods="positive",
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["selection_kits"]) == ["EasySep"]
+    assert list(geo_df["selection_markers"]) == ["CD4"]
+    assert list(geo_df["selection_methods"]) == ["positive"]
+    assert "tissues_selection_kits" not in geo_df.columns
+    assert "tissues_selection_markers" not in geo_df.columns
+    assert "tissues_selection_methods" not in geo_df.columns
+    assert list(geo_df.columns)[-1:] == ["raw_file"]
 
 
 def test_create_geo_dataframe_collapses_human_and_non_human_donors():
@@ -500,6 +529,9 @@ def test_create_geo_dataframe_title_skips_empty_fields():
     assert all("no treatment" not in title for title in geo_df["title"])
     if "treatment" in geo_df.columns:
         assert list(geo_df["treatment"]) != ["no treatment"]
+    assert "selection_kits" not in geo_df.columns
+    assert "selection_markers" not in geo_df.columns
+    assert "selection_methods" not in geo_df.columns
 
 
 def test_create_geo_dataframe_title_pooled_when_samples_list():

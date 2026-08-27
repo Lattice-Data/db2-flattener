@@ -87,6 +87,9 @@ PROP_MAP_GEO = {
     "tissues_developmental_stages_term_name": "donor_dev_stage",
     "tissues_enriched_cell_types_term_name": "**cell_type",
     "tissues_sample_terms_term_name": "**tissue",
+    "tissues_selection_kits": "selection_kits",
+    "tissues_selection_markers": "selection_markers",
+    "tissues_selection_methods": "selection_methods",
 }
 
 PROP_MAP_BIOHUB = {
