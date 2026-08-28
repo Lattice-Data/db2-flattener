@@ -115,6 +115,16 @@ PROP_MAP_BIOHUB = {
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
 }
 
+# Only renames belong here; the derived columns are named in the flattener
+# The reason these are not derived is because there's no value transform, gap markers
+# or multiple source columns
+PROP_MAP_SRA_BIOSAMPLE = {
+    "droplet_based_libraries_aliases": "sample_name",
+    "plate_based_libraries_aliases": "sample_name",
+    "non_human_donors_taxa": "*organism",
+    "human_donors_taxa": "*organism",
+}
+
 BIOHUB_SORT_ONTOLOGY_IDS = [
     "experimental_condition_ontology_term_id",
     "self_reported_ethnicity_ontology_term_id",

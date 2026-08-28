@@ -21,6 +21,41 @@ TERM_ID_SUFFIX = "_term_id"
 TERM_NAME_SUFFIX = "_term_name"
 ONTOLOGY_TERM_ID_SUFFIX = "_ontology_term_id"
 
+# Stage terms stating a numeric age, e.g. '29-year-old stage'
+DEVELOPMENTAL_STAGE_AGE = re.compile(r"(\d+)-(year|month|week|day)-old")
+# Trailing boilerplate, e.g. '10th week post-fertilization human stage'
+DEVELOPMENTAL_STAGE_SUFFIX = re.compile(r"\s+(?:human\s+)?stage$")
+
+
+def age_from_developmental_stage(term_name):
+    """
+    '29-year-old stage' -> '29 years'; 'adult stage' -> 'adult'.
+
+    A qualitative stage keeps its term name minus a trailing ' stage' or
+    ' human stage'. A numeric stage anywhere in a multi-stage cell wins.
+    """
+    texts = [name.strip() for name in to_items(term_name) if isinstance(name, str) and name.strip()]
+
+    for text in texts:
+        match = DEVELOPMENTAL_STAGE_AGE.search(text)
+        if match:
+            count, unit = match.group(1), match.group(2)
+            return f"{count} {unit}" if count == "1" else f"{count} {unit}s"
+
+    return DEVELOPMENTAL_STAGE_SUFFIX.sub("", texts[0]) if texts else None
+
+
+def numeric_text(value) -> str:
+    """
+    Render a value as text without pandas' int-to-float artifacts.
+
+    A number-typed column holding a null anywhere is stored as float, so an
+    integral 889023040 arrives as 889023040.0 and would be written with the '.0'.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
 
 def is_empty(val) -> bool:
     """Return True for None, NaN, empty string, or empty list."""
@@ -375,11 +410,8 @@ def extract_references_from_field(field_value, field_name, configs: Configs) -> 
 
 def normalize_guide_rna_file_refs(value):
     """Turn guide_rna_files (dict, list of dicts, or list of @id strings) into dicts."""
-    if value is None or value == "" or value == []:
-        return []
-    items = value if isinstance(value, list) else [value]
     refs = []
-    for item in items:
+    for item in to_items(value):
         if isinstance(item, dict):
             refs.append(item)
         elif isinstance(item, str) and item.strip():
