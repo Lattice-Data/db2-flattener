@@ -55,89 +55,54 @@ sorted by alias. That map is read from the library's own embedded `samples`
 field, so this sheet does not depend on the per-sample merge that fills the
 `tissues_*` columns in MAIN.
 
-`*isolate` and `*age` describe the library's donors, enumerated `D1..Dn` in donor
-id order — `pooled: D1 - 889023040, D2 - 889081306` and
-`pooled: D1 - 32 years, D2 - 29 years`. A library with one donor gets the bare
-value and no `pooled:` prefix. Both columns share one enumeration, so `Dn` names
-the same donor in each. `*sex` summarises the same donors rather than listing
-them, so it carries no labels: one sex gives `female`, a mixed pool gives
-`pooled male and female`, with male first and any other value such as `unknown`
-pooled the same way after it.
+Every cell is an unordered set of the distinct values a library's samples carry.
+One value is written bare; several are prefixed `pooled:` — `pooled: 889023040,
+889081306`. The prefix marks the cell as a set and nothing more: it does **not**
+record which donor had which age or ethnicity, and a sample pooling several donors
+contributes all of them.
 
-`*biomaterial_provider` is the `title` of the sample's `sources`, falling back
-per row to the `title` of that sample's `lab`, so a library whose samples differ
-can carry both. Note that `sources` declares a multi-type `linkTo`, which
-`extract.get_link_to` only recognises as a single string, so `OBJECT_CONFIG` never
-lists it as a reference and the gatherer does not resolve it — when it arrives as
-a bare `@id` path there is no title to read and the `lab` fallback applies.
+`*isolate`, `*sex` and `ethnicity` come from the donors, `*age` and the age bounds
+from the sample. `*sex` keeps its own wording, `pooled: male and female`, with male
+first. `ethnicity` is `HumanDonor`-only, so a non-human run has no such column.
+
+`age_lower_bound` and `age_upper_bound` are optional, appearing only when some
+sample carries that bound. Both pair the bound with its `age_units`, pluralised
+(`29 years`, `1 year`), and a sample without one contributes `not provided` to the
+set.
+
+`*tissue` is the sample's `sample_terms`, one entry per term. A cell line or
+primary cell culture has no tissue of origin, so it reads `not available`.
+
+`*biomaterial_provider` is the `title` of the sample's `sources`, falling back per
+row to that sample's `lab`.
 
 `*collection_date` and `*geo_loc_name` are the sample's `date_obtained` and
-`collection_geographical_location`, with `not provided` standing in for any sample
-that has none — so a library whose samples disagree reads
-`2023-01-05; not provided`.
+`collection_geographical_location`, with `not provided` for a sample that has
+neither.
 
-`*tissue` is the sample's `sample_terms`, one entry per term since the field is an
-array. A cell line or primary cell culture has no tissue of origin, so it reports
-`not available` instead; tissues and organoids report their term.
+The remaining columns are optional, appearing only when some sample has a value.
+Being optional decides only whether the column exists, not how it is filled: once
+one library has a value, every library gets a cell.
 
-`experimental_perturbation` is optional and comes from `treatments_*`, joining the
-treatment's duration with its description — `8 hour stimulation`, or
-`8-24 hour stimulation` when the bounds differ. Units stay verbatim rather than
-pluralised, since the phrase reads adjectivally. One perturbation across a library
-gives the bare value; several give `pooled: a, b`, and a sample with no treatment
-contributes `not provided`, so a partly perturbed library reads
-`pooled: 8 hour stimulation, not provided`.
+- `suspension_type` — the sample's `suspension_type`.
+- `preservation_method` — on tissues alone, so any other sample type reads
+  `not applicable`.
+- `cell_type` — the sample's `intended_cell_types`, which only cell lines and
+  organoids have, so the others read `not applicable`.
+- `suspension_enriched_cell_types` — the sample's `enriched_cell_types`, on all
+  four sample types.
+- `genetic_perturbation_strategy` — the `strategy` of the sample's linked
+  `GeneticModification`, rewritten through `GENETIC_PERTURBATION_MAP` so it reads
+  `CRISPR interference screen`, matching BIOHUB. A sample with no modification
+  reads `not applicable`.
+- `experimental_perturbation` — the treatment's duration joined with its
+  description, `8 hour stimulation`, or `8-24 hour stimulation` when the bounds
+  differ. A sample with no treatment contributes `no treatment`.
+- `experimental_perturbation_factors` — the terms named by the sample's
+  treatments, bracketed when there are several so a reader can see which went
+  together, `[IL2_HUMAN, anti-CD2_HUMAN]`. A sample with no treatment
+  contributes `na`.
 
-`experimental_perturbation_factors` is optional and comes from
-`treatments_ontological_term`. Each sample contributes the set of terms its
-treatments name, bracketed when there is more than one so a reader can see which
-factors went together — `[IL2_HUMAN, anti-CD2_HUMAN]`. Distinct sets pool across
-the library and a sample with no treatment contributes `na`, giving
-`pooled: [IL2_HUMAN, anti-CD2_HUMAN], na`. Terms sort case-sensitively, so
-uppercase leads.
-
-`preservation_method` is optional and is a direct read of the sample's
-`preservation_method`. The field is on tissues alone, so the column is scoped to
-that prefix and any other sample type reads `not applicable`.
-
-`genetic_perturbation_strategy` is optional and comes from the `strategy` of the
-sample's linked `GeneticModification`, rewritten through `GENETIC_PERTURBATION_MAP`
-so it reads `CRISPR interference screen` rather than the stored
-`interference screen` — the same wording BIOHUB reports for this field. A sample
-with no genetic modification has no strategy, so its gap reads `not applicable`.
-
-`cell_type` and `suspension_enriched_cell_types` are optional and come from the
-sample's `intended_cell_types` and `enriched_cell_types`. Both are arrays, so each
-term becomes its own `; `-separated entry. `intended_cell_types` exists only on
-cell lines and organoids, so a tissue or primary cell culture genuinely cannot have
-one and its gap reads `not applicable`; `enriched_cell_types` is on all four sample
-types, where a gap just means a missing value and reads `not provided`.
-
-`suspension_type` is optional: being optional decides only whether the column
-exists, not how it is filled. If no sample anywhere has one the column is dropped;
-otherwise it behaves exactly like `*collection_date`, joining distinct values with
-`; ` and filling a gap with `not provided`.
-
-`ethnicity` is optional and appears only when some donor has one. It shares the
-`D1..Dn` enumeration with `*isolate` and `*age`, so the labels line up across all
-three — `pooled: D1 - European American, D2 - African American`. It comes from
-`HumanDonor` only, so a non-human run has no such column.
-
-`age_lower_bound` and `age_upper_bound` are optional: each appears only when some
-donor carries that bound. Both pair the sample's `lower_bound_age` /
-`upper_bound_age` with its `age_units`, pluralised (`29 years`, `1 year`). They
-carry no `D1..Dn` labels but hold one entry per donor in the same order, so entry
-*n* describes the donor `Dn` names in `*isolate` and `*age`. Nothing is sorted or
-deduplicated, and a donor with no bound holds its slot with `not provided` —
-`not provided; not provided; 40 years` for three donors where only the third has
-one.
-
-Age comes from the sample's `developmental_stages` term,
-because `HumanDonor` has no age property of its own: a numeric stage renders as a
-number and unit (`29-year-old stage` → `29 years`), and a qualitative one keeps
-its term name with a trailing ` stage` or ` human stage` removed (`adult stage` →
-`adult`, `10th week post-fertilization human stage` →
-`10th week post-fertilization`).
 
 ## Fetch latest schema from Lattice
 

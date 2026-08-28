@@ -45,6 +45,18 @@ def age_from_developmental_stage(term_name):
     return DEVELOPMENTAL_STAGE_SUFFIX.sub("", texts[0]) if texts else None
 
 
+def numeric_text(value) -> str:
+    """
+    Render a value as text without pandas' int-to-float artifacts.
+
+    A number-typed column holding a null anywhere is stored as float, so an
+    integral 889023040 arrives as 889023040.0 and would be written with the '.0'.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def is_empty(val) -> bool:
     """Return True for None, NaN, empty string, or empty list."""
     if val is None:

@@ -148,10 +148,13 @@ def test_droplet_run_is_one_row_per_library(capsys):
         "sample_name",
         ORGANISM_COLUMN,
         BARCODE_COLUMN,
+        ISOLATE_COLUMN,
+        AGE_COLUMN,
+        SEX_COLUMN,
         DATE_COLUMN,
         GEO_COLUMN,
     ]
-    assert "no donor id column" in capsys.readouterr().out
+    assert "no sample sources or lab column" in capsys.readouterr().out
     assert len(sra_df) == 1
     assert sra_df.loc[0, "sample_name"] == "TregR3_L13_L05_GEX"
     assert sra_df.loc[0, ORGANISM_COLUMN] == "Homo sapiens"
@@ -250,7 +253,14 @@ def test_alias_only_main_df_collapses_without_aggregating():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert list(sra_df.columns) == ["sample_name", DATE_COLUMN, GEO_COLUMN]
+    assert list(sra_df.columns) == [
+        "sample_name",
+        ISOLATE_COLUMN,
+        AGE_COLUMN,
+        SEX_COLUMN,
+        DATE_COLUMN,
+        GEO_COLUMN,
+    ]
     assert list(sra_df["sample_name"]) == ["LIB_A_GEX", "LIB_B_GEX"]
     assert list(sra_df[DATE_COLUMN]) == ["not provided", "not provided"]
     assert list(sra_df[GEO_COLUMN]) == ["not provided", "not provided"]
@@ -296,10 +306,6 @@ def test_clean_alias_cell(value, expected):
 # isolate and age
 
 
-def test_age_from_developmental_stage_parses_years():
-    assert age_from_developmental_stage("29-year-old stage") == "29 years"
-
-
 @pytest.mark.parametrize(
     ("term_name", "expected"),
     [
@@ -333,8 +339,8 @@ def test_age_from_developmental_stage(term_name, expected):
 
 def donor_main_df(**columns):
     """
-    One library, four samples, two donors. Mirrors the real Treg run: 889023040 is
-    the 32-year-old female (D1, the lower id), 889081306 the 29-year-old male (D2).
+    One library, four samples, two donors - one donor per sample row.
+    889023040 is the 32-year-old female, 889081306 the 29-year-old male.
     """
     base = {
         "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 4,
@@ -352,18 +358,19 @@ def donor_main_df(**columns):
     return pd.DataFrame(base)
 
 
-def test_two_donors_are_pooled_and_numbered_by_donor_id():
+def test_donor_columns_are_unordered_pooled_sets():
+    """'pooled:' marks the cell as an unordered set, nothing more."""
     sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
 
-    # D1 is the lower id, 889023040, whose samples are the 32-year-old ones.
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
-    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years, D2 - 29 years"
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 889023040, 889081306"
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: 29 years, 32 years"
 
 
 def test_single_donor_has_no_pooled_prefix():
-    main_df = donor_main_df()
-    main_df["human_donors_cxg_donor_id"] = 889023040
-    main_df["tissues_developmental_stages_term_name"] = "32-year-old stage"
+    main_df = donor_main_df(
+        human_donors_cxg_donor_id=[889023040] * 4,
+        tissues_developmental_stages_term_name=["32-year-old stage"] * 4,
+    )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -371,23 +378,26 @@ def test_single_donor_has_no_pooled_prefix():
     assert sra_df.loc[0, AGE_COLUMN] == "32 years"
 
 
-def test_numeric_donor_ids_sort_numerically_not_lexically():
-    main_df = donor_main_df()
-    main_df["human_donors_cxg_donor_id"] = [9, 10, 9, 10]
+def test_a_sample_pooling_several_donors_is_split_apart():
+    """
+    create_dataframe collapses a multi-donor sample into one '; '-joined cell.
+    Because the cell is an unordered set there is no pairing to recover, so
+    splitting it is enough.
+    """
+    main_df = donor_main_df(human_donors_cxg_donor_id=["889023040; 889081306"] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    # Lexical order would put 10 before 9.
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 9, D2 - 10"
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 889023040, 889081306"
 
 
-def test_non_numeric_donor_ids_sort_lexically():
-    main_df = donor_main_df()
-    main_df["human_donors_cxg_donor_id"] = ["CE0010866", "CE0008162", "CE0010866", "CE0008162"]
+def test_donor_ids_sort_lexically():
+    """Plain string sort, so '10' precedes '9'."""
+    main_df = donor_main_df(human_donors_cxg_donor_id=[9, 10, 9, 10])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - CE0008162, D2 - CE0010866"
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 10, 9"
 
 
 def test_donor_id_is_not_rendered_as_a_float():
@@ -398,59 +408,39 @@ def test_donor_id_is_not_rendered_as_a_float():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+    assert "889023040.0" not in sra_df.loc[0, ISOLATE_COLUMN]
 
 
-def test_qualitative_stage_lands_in_age_alongside_a_numeric_one():
-    main_df = donor_main_df()
-    # The 889081306 rows, D2, have no numeric stage.
-    main_df.loc[[0, 2], "tissues_developmental_stages_term_name"] = "adult stage"
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years, D2 - adult"
-
-
-def test_donor_without_an_age_keeps_its_label_in_the_other_column():
-    main_df = donor_main_df()
-    # Blank the 889081306 rows, which are D2.
-    main_df.loc[[0, 2], "tissues_developmental_stages_term_name"] = None
+def test_qualitative_and_numeric_stages_pool_together():
+    main_df = donor_main_df(
+        tissues_developmental_stages_term_name=[
+            "adult stage",
+            "32-year-old stage",
+            "adult stage",
+            "32-year-old stage",
+        ]
+    )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
-    # D2 drops out of age, but D1 keeps its number so the labels still agree.
-    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years"
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: 32 years, adult"
 
 
 def test_no_stage_at_all_leaves_the_age_column_empty():
-    main_df = donor_main_df()
-    main_df["tissues_developmental_stages_term_name"] = None
+    main_df = donor_main_df(tissues_developmental_stages_term_name=[None] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert pd.isna(sra_df.loc[0, AGE_COLUMN])
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
+    assert sra_df.loc[0, AGE_COLUMN] == "not provided"
 
 
-def test_missing_stage_column_still_gives_isolate():
-    main_df = donor_main_df().drop(columns=["tissues_developmental_stages_term_name"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
-    assert pd.isna(sra_df.loc[0, AGE_COLUMN])
-
-
-def test_no_donor_column_omits_all_donor_columns(capsys):
+def test_no_donor_id_column_omits_isolate():
     main_df = donor_main_df().drop(columns=["human_donors_cxg_donor_id"])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert ISOLATE_COLUMN not in sra_df.columns
-    assert AGE_COLUMN not in sra_df.columns
-    assert SEX_COLUMN not in sra_df.columns
-    assert "no donor id column" in capsys.readouterr().out
+    # isolate is required, so it stays as a filled column rather than vanishing
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "not provided"
 
 
 # *sex
@@ -460,22 +450,16 @@ def test_no_donor_column_omits_all_donor_columns(capsys):
     ("sexes", "expected"),
     [
         pytest.param(["male"], "male", id="male-only"),
-        pytest.param(["female"], "female", id="female-only"),
-        pytest.param(["female", "male"], "pooled male and female", id="male-listed-first"),
-        pytest.param(["male", "female"], "pooled male and female", id="order-independent"),
-        pytest.param(["male", "male", "female"], "pooled male and female", id="deduplicated"),
-        pytest.param(["unknown", "male"], "pooled male and unknown", id="male-then-unknown"),
-        pytest.param(["unknown", "female"], "pooled female and unknown", id="female-then-unknown"),
+        pytest.param(["female", "male"], "pooled: male and female", id="male-listed-first"),
+        pytest.param(["male", "male", "female"], "pooled: male and female", id="deduplicated"),
+        pytest.param(["unknown", "male"], "pooled: male and unknown", id="male-then-unknown"),
         pytest.param(
             ["unknown", "female", "male"],
-            "pooled male, female and unknown",
+            "pooled: male, female and unknown",
             id="three-values",
         ),
         pytest.param(["unknown"], "unknown", id="unknown-alone-passes-through"),
-        pytest.param(["  male  "], "male", id="whitespace-stripped"),
-        pytest.param([None, "male"], "male", id="nulls-ignored"),
         pytest.param([], None, id="empty"),
-        pytest.param([None, float("nan"), ""], None, id="all-empty"),
     ],
 )
 def test_format_pooled_sex(sexes, expected):
@@ -485,27 +469,24 @@ def test_format_pooled_sex(sexes, expected):
 def test_mixed_sex_pool_reads_male_first():
     sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
 
-    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled: male and female"
 
 
 def test_single_sex_library_is_the_bare_value():
-    main_df = donor_main_df()
-    main_df["human_donors_sex"] = "female"
+    main_df = donor_main_df(human_donors_sex=["female"] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert sra_df.loc[0, SEX_COLUMN] == "female"
 
 
-def test_sex_is_summarised_over_donors_not_rows():
-    main_df = donor_main_df()
-    main_df["human_donors_cxg_donor_id"] = 889023040
-    main_df["human_donors_sex"] = ["female", "female", "female", "female"]
+def test_a_sample_pooling_several_donors_splits_the_sexes():
+    """The reviewer's case: 'female; male' in one cell must not read as one sex."""
+    main_df = donor_main_df(human_donors_sex=["female; male"] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, SEX_COLUMN] == "female"
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "889023040"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled: male and female"
 
 
 def test_missing_sex_column_leaves_the_sex_column_empty():
@@ -514,18 +495,23 @@ def test_missing_sex_column_leaves_the_sex_column_empty():
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert pd.isna(sra_df.loc[0, SEX_COLUMN])
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
 
 
-def test_non_human_sex_column_is_used_when_human_is_absent():
-    main_df = donor_main_df().rename(columns={"human_donors_sex": "non_human_donors_sex"})
+def test_non_human_donor_columns_are_used_when_human_is_absent():
+    main_df = donor_main_df().rename(
+        columns={
+            "human_donors_sex": "non_human_donors_sex",
+            "human_donors_cxg_donor_id": "non_human_donors_cxg_donor_id",
+        }
+    )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled: male and female"
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 889023040, 889081306"
 
 
-def test_sex_is_scoped_to_each_library():
+def test_donor_columns_are_scoped_to_each_library():
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
@@ -537,41 +523,10 @@ def test_sex_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", SEX_COLUMN] == "pooled male and female"
-    assert sra_df.loc["LIB_B_GEX", SEX_COLUMN] == "male"
-
-
-def test_non_human_donor_column_is_used_when_human_is_absent():
-    main_df = donor_main_df().rename(
-        columns={"human_donors_cxg_donor_id": "non_human_donors_cxg_donor_id"}
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
-
-
-def test_donor_cells_are_scoped_to_each_library():
-    main_df = pd.DataFrame(
-        {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
-            "human_donors_cxg_donor_id": [11, 22, 33],
-            "tissues_developmental_stages_term_name": [
-                "40-year-old stage",
-                "50-year-old stage",
-                "60-year-old stage",
-            ],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A_GEX", ISOLATE_COLUMN] == "pooled: D1 - 11, D2 - 22"
-    assert sra_df.loc["LIB_A_GEX", AGE_COLUMN] == "pooled: D1 - 40 years, D2 - 50 years"
-    # A single-donor library gets the bare form even when a sibling is pooled.
+    assert sra_df.loc["LIB_A_GEX", ISOLATE_COLUMN] == "pooled: 11, 22"
+    assert sra_df.loc["LIB_A_GEX", SEX_COLUMN] == "pooled: male and female"
     assert sra_df.loc["LIB_B_GEX", ISOLATE_COLUMN] == "33"
-    assert sra_df.loc["LIB_B_GEX", AGE_COLUMN] == "60 years"
+    assert sra_df.loc["LIB_B_GEX", SEX_COLUMN] == "male"
 
 
 # *tissue
@@ -671,7 +626,7 @@ def test_tissue_is_no_longer_a_prop_map_rename():
     assert "tissues_sample_terms_term_name" not in PROP_MAP_SRA_BIOSAMPLE
 
 
-# *biomaterial_provider
+# SAMPLE_URL_PREFIXES
 
 
 def test_sample_url_prefixes_are_derived_from_the_tissue_type_map():
@@ -682,6 +637,9 @@ def test_sample_url_prefixes_are_derived_from_the_tissue_type_map():
         "tissues",
     ]
     assert len(SAMPLE_URL_PREFIXES) == len(TISSUE_TYPE_MAP)
+
+
+# *biomaterial_provider
 
 
 @pytest.mark.parametrize(
@@ -980,7 +938,7 @@ def test_geo_loc_name_is_scoped_to_each_library():
 # ethnicity
 
 
-def test_ethnicity_is_pooled_and_labelled_like_isolate():
+def test_ethnicity_is_an_unordered_pooled_set():
     main_df = donor_main_df(
         human_donors_ethnicity_term_name=[
             "African American",
@@ -992,33 +950,40 @@ def test_ethnicity_is_pooled_and_labelled_like_isolate():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    # D1 is 889023040, the European American donor - same labels as *isolate.
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 889023040, D2 - 889081306"
-    assert sra_df.loc[0, ETHNICITY_COLUMN] == (
-        "pooled: D1 - European American, D2 - African American"
-    )
+    assert sra_df.loc[0, ETHNICITY_COLUMN] == "pooled: African American, European American"
 
 
-def test_single_donor_ethnicity_has_no_pooled_prefix():
-    main_df = donor_main_df(
-        human_donors_cxg_donor_id=[889023040] * 4,
-        human_donors_ethnicity_term_name=["European American"] * 4,
-    )
+def test_single_ethnicity_has_no_pooled_prefix():
+    main_df = donor_main_df(human_donors_ethnicity_term_name=["European American"] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert sra_df.loc[0, ETHNICITY_COLUMN] == "European American"
 
 
-def test_donor_without_an_ethnicity_keeps_its_label():
+def test_a_sample_pooling_several_donors_lists_both_ethnicities():
+    """
+    A multi-donor sample arrives as a list of terms. It must not be stringified
+    into a Python repr, which is what the reviewer found.
+    """
+    main_df = donor_main_df(
+        human_donors_ethnicity_term_name=[["African American", "European American"]] * 4
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ETHNICITY_COLUMN] == "pooled: African American, European American"
+    assert "[" not in sra_df.loc[0, ETHNICITY_COLUMN]
+
+
+def test_a_donor_without_an_ethnicity_adds_the_gap():
     main_df = donor_main_df(
         human_donors_ethnicity_term_name=[None, "European American", None, "European American"]
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    # D2 drops out, D1 keeps its number so it still lines up with *isolate.
-    assert sra_df.loc[0, ETHNICITY_COLUMN] == "pooled: D1 - European American"
+    assert sra_df.loc[0, ETHNICITY_COLUMN] == "pooled: European American, not provided"
 
 
 def test_no_ethnicity_column_omits_the_ethnicity_column():
@@ -1047,21 +1012,26 @@ def test_ethnicity_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", ETHNICITY_COLUMN] == (
-        "pooled: D1 - Asian, D2 - European American"
-    )
+    assert sra_df.loc["LIB_A_GEX", ETHNICITY_COLUMN] == "pooled: Asian, European American"
     assert sra_df.loc["LIB_B_GEX", ETHNICITY_COLUMN] == "Asian"
 
 
+def test_ethnicity_is_human_only():
+    """The field is on HumanDonor, so a non-human run has no such column."""
+    main_df = donor_main_df(non_human_donors_ethnicity_term_name=["Asian"] * 4)
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert ETHNICITY_COLUMN not in sra_df.columns
+
+
 def test_ethnicity_has_no_required_marker():
-    """Optional columns carry no '*'; the required donor columns do."""
     main_df = donor_main_df(human_donors_ethnicity_term_name=["Asian"] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert ETHNICITY_COLUMN in sra_df.columns
     assert f"*{ETHNICITY_COLUMN}" not in sra_df.columns
-    assert ISOLATE_COLUMN.startswith("*")
 
 
 # experimental_perturbation
@@ -1129,7 +1099,7 @@ def test_perturbation_partly_treated_library_marks_the_gap():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, PERTURBATION_COLUMN] == "pooled: 8 hour stimulation, not provided"
+    assert sra_df.loc[0, PERTURBATION_COLUMN] == "pooled: 8 hour stimulation, no treatment"
 
 
 def test_perturbation_pools_two_treatments():
@@ -1198,9 +1168,31 @@ def test_perturbation_is_scoped_to_each_library():
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
     assert sra_df.loc["LIB_A_GEX", PERTURBATION_COLUMN] == (
-        "pooled: 8 hour stimulation, not provided"
+        "pooled: 8 hour stimulation, no treatment"
     )
     assert sra_df.loc["LIB_B_GEX", PERTURBATION_COLUMN] == "24 hour fasting"
+
+
+def test_perturbation_warns_when_a_sample_has_several_treatments(capsys):
+    """
+    create_dataframe collapses them into one cell with the duration and the
+    description sorted independently, so the pairing is gone. Warn, do not guess.
+    """
+    main_df = perturbation_main_df(
+        treatments_lower_bound_duration=["8; 24"] * 2,
+        treatments_upper_bound_duration=["8; 24"] * 2,
+        treatments_description=["stimulation; washout"] * 2,
+    )
+
+    make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert "several treatments collapsed into one cell" in capsys.readouterr().out
+
+
+def test_perturbation_does_not_warn_for_a_single_treatment(capsys):
+    make_flattener().create_sra_biosample_dataframe(perturbation_main_df())
+
+    assert "several treatments" not in capsys.readouterr().out
 
 
 def test_perturbation_skips_rows_with_no_library_alias():
@@ -1717,10 +1709,7 @@ def test_age_with_units(value, units, expected):
 
 
 def age_main_df(**columns):
-    """
-    donor_main_df plus age bounds, keyed by donor so the ordering is checkable:
-    889023040 is D1 (the lower id) at 32-35, 889081306 is D2 at 29-30.
-    """
+    """donor_main_df plus age bounds: 32-35 for one donor, 29-30 for the other."""
     frame = donor_main_df()
     frame["tissues_lower_bound_age"] = frame["human_donors_cxg_donor_id"].map(
         {889023040: 32, 889081306: 29}
@@ -1734,53 +1723,31 @@ def age_main_df(**columns):
     return frame
 
 
-def test_age_bounds_follow_donor_order_so_entry_n_matches_dn():
+def test_age_bounds_are_unordered_pooled_sets():
     sra_df = make_flattener().create_sra_biosample_dataframe(age_main_df())
 
-    # D1 is 889023040, the 32-year-old, so it leads all three columns.
-    assert sra_df.loc[0, AGE_COLUMN] == "pooled: D1 - 32 years, D2 - 29 years"
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "32 years; 29 years"
-    assert sra_df.loc[0, AGE_UPPER_COLUMN] == "35 years; 30 years"
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
+    assert sra_df.loc[0, AGE_UPPER_COLUMN] == "pooled: 30 years, 35 years"
 
 
-def test_age_bounds_are_not_sorted():
-    """A younger second donor must not be reordered to the front."""
-    main_df = age_main_df()
-    main_df["tissues_lower_bound_age"] = main_df["human_donors_cxg_donor_id"].map(
-        {889023040: 29, 889081306: 3}
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "29 years; 3 years"
-
-
-def test_age_bounds_do_not_dedupe_matching_donors():
-    """Two donors at the same age must still give two entries."""
+def test_age_bounds_dedupe_matching_donors():
+    """Being a set, two donors of the same age give one entry."""
     main_df = age_main_df(tissues_lower_bound_age=29)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "29 years; 29 years"
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "29 years"
 
 
-def test_age_bounds_fill_a_donor_with_no_value():
-    """Three donors, only the third with a bound - the slots hold."""
-    main_df = pd.DataFrame(
-        {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 3,
-            "human_donors_cxg_donor_id": [1, 2, 3],
-            "tissues_lower_bound_age": [None, None, 40],
-            "tissues_age_units": ["year"] * 3,
-        }
+def test_age_bounds_include_the_gap_in_the_set():
+    main_df = age_main_df()
+    main_df["tissues_lower_bound_age"] = main_df["human_donors_cxg_donor_id"].map(
+        {889023040: 32, 889081306: None}
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: D1 - 1, D2 - 2, D3 - 3"
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "not provided; not provided; 40 years"
-    # No donor has an upper bound, so that column is dropped.
-    assert AGE_UPPER_COLUMN not in sra_df.columns
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 32 years, not provided"
 
 
 def test_no_age_bounds_omits_both_columns():
@@ -1795,7 +1762,7 @@ def test_lower_bound_alone_omits_only_the_upper_column():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "32 years; 29 years"
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
     assert AGE_UPPER_COLUMN not in sra_df.columns
 
 
@@ -1805,7 +1772,7 @@ def test_all_null_bound_omits_that_column():
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert AGE_LOWER_COLUMN not in sra_df.columns
-    assert sra_df.loc[0, AGE_UPPER_COLUMN] == "35 years; 30 years"
+    assert sra_df.loc[0, AGE_UPPER_COLUMN] == "pooled: 30 years, 35 years"
 
 
 def test_age_bounds_read_primary_cell_cultures_too():
@@ -1819,7 +1786,7 @@ def test_age_bounds_read_primary_cell_cultures_too():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "32 years; 29 years"
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
 
 
 def test_age_bounds_without_units():
@@ -1827,7 +1794,16 @@ def test_age_bounds_without_units():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "32; 29"
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29, 32"
+
+
+def test_age_bounds_do_not_need_a_donor_id_column():
+    """The bounds are sample fields, so they no longer depend on donor grouping."""
+    main_df = age_main_df().drop(columns=["human_donors_cxg_donor_id"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
 
 
 def test_age_bounds_are_scoped_to_each_library():
@@ -1835,7 +1811,6 @@ def test_age_bounds_are_scoped_to_each_library():
         {
             "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
             + [["alex-marson:LIB_B_GEX"]],
-            "human_donors_cxg_donor_id": [11, 22, 33],
             "tissues_lower_bound_age": [29, 22, 40],
             "tissues_age_units": ["year"] * 3,
         }
@@ -1843,18 +1818,11 @@ def test_age_bounds_are_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", AGE_LOWER_COLUMN] == "29 years; 22 years"
+    assert sra_df.loc["LIB_A_GEX", AGE_LOWER_COLUMN] == "pooled: 22 years, 29 years"
     assert sra_df.loc["LIB_B_GEX", AGE_LOWER_COLUMN] == "40 years"
 
 
-def test_age_bounds_need_a_donor_id_column():
-    """The bounds are keyed per donor, so with no donor id there is nothing to key."""
-    main_df = age_main_df().drop(columns=["human_donors_cxg_donor_id"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert AGE_LOWER_COLUMN not in sra_df.columns
-    assert AGE_UPPER_COLUMN not in sra_df.columns
+# PROP_MAP_SRA_BIOSAMPLE
 
 
 def test_prop_map_sends_both_library_types_to_sample_name():

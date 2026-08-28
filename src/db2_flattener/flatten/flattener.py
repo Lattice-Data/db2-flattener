@@ -1,6 +1,4 @@
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
@@ -29,6 +27,7 @@ from db2_flattener.utils import (
     get_url_prefix_from_id,
     is_empty,
     normalize_guide_rna_file_refs,
+    numeric_text,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
@@ -48,45 +47,11 @@ def age_with_units(value, units) -> str | None:
     """
     if is_empty(value):
         return None
-    # lower/upper_bound_age are typed number, so a null anywhere in the column
-    # makes pandas store the lot as float
-    if isinstance(value, float) and value.is_integer():
-        value = int(value)
-    text = str(value).strip()
+    text = numeric_text(value)
     if is_empty(units):
         return text
     unit = str(units).strip().rstrip("s")
     return f"{text} {unit}" if text == "1" else f"{text} {unit}s"
-
-
-@dataclass(frozen=True)
-class SRABiosampleDonorColumn:
-    """
-    One SRA_BIOSAMPLE column derived per donor.
-
-    One source is given. 'columns' names MAIN columns directly and coalesces them,
-    first non-null winning, for a field that sits on the donor under both a human
-    and a non-human name. 'sample_fields' are fields on the sample, each expanded
-    across SAMPLE_URL_PREFIXES and coalesced, then passed to 'transform' in order -
-    two of them where a value needs its units. Neither means the column is the
-    donor id itself.
-
-    'render' is one of:
-      labelled   'pooled: D1 - x, D2 - y', the shared donor enumeration
-      positional 'x; y; not provided', one unlabelled entry per donor in that
-                 same order, so entry n and Dn are the same donor
-      summary    'pooled male and female', a summary over the donors, unordered
-
-    An 'optional' column is dropped when no donor has a value, where a required
-    one stays as a blank column.
-    """
-
-    name: str
-    columns: tuple[str, ...] = ()
-    sample_fields: tuple[str, ...] = ()
-    render: str = "labelled"
-    optional: bool = False
-    transform: Callable[..., str | None] | None = None
 
 
 class DB2Flattener:
@@ -432,9 +397,62 @@ class DB2Flattener:
         sra_df.rename(columns=PROP_MAP_SRA_BIOSAMPLE, inplace=True)
         sra_df = collapse_duplicate_columns(sra_df)
 
-        # Built while sample_name is still row-aligned with main_df, attached after
-        # the collapse, one value per library already, so nothing to aggregate
-        donor = self._donor_cells_by_library(main_df, sra_df["sample_name"])
+        # Every cell below is built while sample_name is still row-aligned with
+        # main_df, then attached after the collapse: one value per library already,
+        # so there is nothing left to aggregate. Donor cells split their MAIN value
+        # on '; ' because create_dataframe collapses a multi-donor sample that way.
+        donor_prefixes = ("human_donors", "non_human_donors")
+        isolate = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "cxg_donor_id",
+            prefixes=donor_prefixes,
+            split_joined=True,
+            formatter=self._format_pooled_values,
+        )
+        sex = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "sex",
+            prefixes=donor_prefixes,
+            split_joined=True,
+            gap=None,
+            formatter=self._format_pooled_sex,
+        )
+        ethnicity = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "ethnicity_term_name",
+            prefixes=("human_donors",),
+            optional=True,
+            split_joined=True,
+            formatter=self._format_pooled_values,
+        )
+        age = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "developmental_stages_term_name",
+            transform=age_from_developmental_stage,
+            formatter=self._format_pooled_values,
+        )
+        age_lower = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "lower_bound_age",
+            "age_units",
+            optional=True,
+            transform=age_with_units,
+            formatter=self._format_pooled_values,
+        )
+        age_upper = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "upper_bound_age",
+            "age_units",
+            optional=True,
+            transform=age_with_units,
+            formatter=self._format_pooled_values,
+        )
         provider = self._biomaterial_provider_by_library(main_df, sra_df["sample_name"])
         collection_date = self._sample_field_by_library(
             main_df, sra_df["sample_name"], "date_obtained"
@@ -482,6 +500,7 @@ class DB2Flattener:
             prefixes=("genetic_modifications",),
             gap="not applicable",
             translate=GENETIC_PERTURBATION_MAP,
+            split_joined=True,
         )
 
         # Barcodes are per row, so they do go through the collapse: that is what
@@ -512,10 +531,12 @@ class DB2Flattener:
         else:
             sra_df = collapse_dataframe(sra_df, group_col="sample_name")
 
-        # Optional donor columns are absent from 'donor' when nothing had a value
-        for spec in self.DONOR_COLUMNS:
-            if donor[spec.name]:
-                sra_df[spec.name] = sra_df["sample_name"].map(donor[spec.name])
+        if isolate:
+            sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
+        if age:
+            sra_df["*age"] = sra_df["sample_name"].map(age)
+        if sex:
+            sra_df["*sex"] = sra_df["sample_name"].map(sex)
         if tissue:
             sra_df["*tissue"] = sra_df["sample_name"].map(tissue)
         if provider:
@@ -542,36 +563,14 @@ class DB2Flattener:
             sra_df["genetic_perturbation_strategy"] = sra_df["sample_name"].map(genetic_strategy)
         if preservation_method:
             sra_df["preservation_method"] = sra_df["sample_name"].map(preservation_method)
+        if ethnicity:
+            sra_df["ethnicity"] = sra_df["sample_name"].map(ethnicity)
+        if age_lower:
+            sra_df["age_lower_bound"] = sra_df["sample_name"].map(age_lower)
+        if age_upper:
+            sra_df["age_upper_bound"] = sra_df["sample_name"].map(age_upper)
 
         return sra_df
-
-    @staticmethod
-    def _donor_id_text(value) -> str:
-        """Render a donor id as text without pandas' int-to-float artifacts."""
-        if isinstance(value, float) and value.is_integer():
-            return str(int(value))
-        return str(value)
-
-    @staticmethod
-    def _donor_sort_key(donor_id: str):
-        """Numeric ids sort numerically, so D10 does not land between D1 and D2."""
-        return (0, int(donor_id), "") if donor_id.isdigit() else (1, 0, donor_id)
-
-    @staticmethod
-    def _format_pooled_donor_cell(labelled_values) -> str | None:
-        """
-        'pooled: D1 - x, D2 - y' across donors, or the bare value for a lone donor.
-
-        labelled_values is [(label, value)] already in donor order. Entries with
-        no value drop out, but the surviving labels keep their numbers so they
-        still name the same donor as in the other donor column.
-        """
-        entries = [(label, value) for label, value in labelled_values if not is_empty(value)]
-        if not entries:
-            return None
-        if len(labelled_values) == 1:
-            return str(entries[0][1])
-        return "pooled: " + ", ".join(f"{label} - {value}" for label, value in entries)
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")
@@ -579,9 +578,9 @@ class DB2Flattener:
     @classmethod
     def _format_pooled_sex(cls, sexes) -> str | None:
         """
-        'male' for one sex, 'pooled male and female' across a mixed pool.
+        'male' for one sex, 'pooled: male and female' across a mixed pool.
 
-        Values outside the pair pool the same way: 'pooled male and unknown'.
+        Values outside the pair pool the same way: 'pooled: male and unknown'.
         """
         unique = {str(sex).strip() for sex in sexes if not is_empty(sex)}
         if not unique:
@@ -595,7 +594,7 @@ class DB2Flattener:
         ordered = sorted(unique, key=sort_key)
         if len(ordered) == 1:
             return ordered[0]
-        return "pooled " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
+        return "pooled: " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
 
     @staticmethod
     def _provider_titles(value) -> list[str]:
@@ -626,10 +625,7 @@ class DB2Flattener:
         for bound in (lower, upper):
             if is_empty(bound):
                 continue
-            # durations are typed number, so a null anywhere makes the column float
-            if isinstance(bound, float) and bound.is_integer():
-                bound = int(bound)
-            bounds.append(str(bound).strip())
+            bounds.append(numeric_text(bound))
         if not bounds:
             return ""
         span = bounds[0] if len(set(bounds)) == 1 else "-".join(bounds)
@@ -652,9 +648,15 @@ class DB2Flattener:
 
         Reads the treatment's duration and description straight off 'treatments_*',
         which is already the object prefix and so needs no sample expansion. A
-        sample with no treatment contributes 'not provided', which is why a library
-        that only partly perturbed reads 'pooled: 8 hour stimulation, not provided'.
+        sample with no treatment contributes 'no treatment', which is why a library
+        that only partly perturbed reads 'pooled: 8 hour stimulation, no treatment'.
         Optional, so nothing anywhere drops the column.
+
+        A sample carrying several treatments is the one shape this cannot render.
+        create_dataframe collapses each field with _join_unique, which sorts and
+        deduplicates independently, so '24; 8' and 'stimulation; washout' no longer
+        say which duration went with which description. That is warned about rather
+        than guessed at.
         """
         columns = [
             main_df[name] if name in main_df.columns else None
@@ -670,6 +672,20 @@ class DB2Flattener:
 
         empty = pd.Series(None, index=main_df.index, dtype=object)
         lower, upper, units, descriptions = (empty if c is None else c for c in columns)
+
+        fused = sum(
+            1
+            for column in columns
+            if column is not None
+            for value in column
+            if isinstance(value, str) and "; " in value
+        )
+        if fused:
+            print(
+                f"Warning: {fused} treatment value(s) in MAIN hold several treatments "
+                "collapsed into one cell, so experimental_perturbation cannot tell which "
+                "duration belongs to which description"
+            )
 
         found: dict[str, set[str]] = {}
         missing: set[str] = set()
@@ -694,7 +710,7 @@ class DB2Flattener:
 
         return {
             library: self._format_pooled_values(
-                sorted(present) + (["not provided"] if library in missing else [])
+                sorted(present) + (["no treatment"] if library in missing else [])
             )
             for library, present in found.items()
         }
@@ -768,74 +784,84 @@ class DB2Flattener:
 
         return {library: "; ".join(sorted(titles)) for library, titles in titles_by_library.items()}
 
-    @staticmethod
-    def _format_positional_donor_cell(values) -> str | None:
-        """
-        'x; y; not provided' - one entry per donor, in donor order.
-
-        values is one per donor, already in order. Nothing is deduplicated or
-        sorted, so entry n always describes the same donor as Dn does in the
-        labelled columns; a donor with no value holds its slot with the literal.
-        None when no donor has a value, leaving the column out.
-        """
-        entries = list(values)
-        if not any(entry for entry in entries):
-            return None
-        return "; ".join(entry if entry else "not provided" for entry in entries)
-
     def _sample_field_by_library(
         self,
         main_df,
         library_key,
-        field,
+        *fields,
         optional=False,
         prefixes=SAMPLE_URL_PREFIXES,
         gap="not provided",
         translate=None,
+        split_joined=False,
+        transform=None,
+        formatter=None,
     ):
         """
-        Per-library cell for a field on the sample or something it links to.
+        Per-library cell for a field on the sample or on something it links to.
 
-        A sample lacking a value contributes 'gap' after any real ones, so a
-        library whose samples disagree reads '2023-01-05; not provided'. An array
-        field contributes each of its items separately.
+        Every cell on this sheet is an unordered set of the distinct values its
+        library's samples carry. A sample with no value contributes 'gap', unless
+        gap is None. An array field contributes each of its items separately.
 
         'prefixes' narrows which MAIN column prefixes are read - the sample types
-        for a field on the sample itself, or a single linked object's prefix.
-        'translate' rewrites each value through a lookup, for a field whose stored
-        term differs from the one the sheet reports. 'optional' decides only
-        whether the column exists: nothing anywhere means nothing is returned and
-        the column drops. Once one library has a value, every library gets a cell,
-        filled as a required column is.
+        for a field on the sample itself, or a linked object's prefix.
+        'split_joined' splits items on '; ', which is how create_dataframe
+        collapses a field when a sample references several of an object; only set
+        it where that is the source, so a value legitimately containing '; ' is
+        never torn apart.
+        'transform' combines one row's fields into a single value, for a value
+        that needs its units. 'translate' rewrites each value through a lookup.
+        'formatter' renders the finished list, defaulting to a '; ' join.
+        'optional' decides only whether the column exists: nothing anywhere means
+        nothing is returned and the column drops.
         """
-        values = self._coalesce_columns(main_df, [f"{prefix}_{field}" for prefix in prefixes])
-        if values is None:
-            values = pd.Series(None, index=main_df.index, dtype=object)
+        empty = pd.Series(None, index=main_df.index, dtype=object)
+        sources = []
+        for field in fields:
+            found_column = self._coalesce_columns(
+                main_df, [f"{prefix}_{field}" for prefix in prefixes]
+            )
+            sources.append(empty if found_column is None else found_column)
 
         found: dict[str, set[str]] = {}
         missing: set[str] = set()
-        for library, value in zip(library_key, values, strict=True):
+        for library, *row in zip(library_key, *sources, strict=True):
             if not isinstance(library, str):
                 continue
             found.setdefault(library, set())
-            items = to_items(value)
-            if not items:
-                missing.add(library)
-            else:
-                texts = [str(item).strip() for item in items]
-                if translate:
-                    texts = [translate.get(text, text) for text in texts]
+            texts = self._field_texts(row, transform, split_joined, translate)
+            if texts:
                 found[library].update(texts)
+            else:
+                missing.add(library)
 
         if optional and not any(found.values()):
             return {}
 
-        return {
-            library: "; ".join(
-                sorted(present) + ([gap] if library in missing or not present else [])
-            )
-            for library, present in found.items()
-        }
+        render = formatter or "; ".join
+        cells = {}
+        for library, present in found.items():
+            values = sorted(present)
+            if gap is not None and (library in missing or not values):
+                values.append(gap)
+            cells[library] = render(values)
+        return cells
+
+    @staticmethod
+    def _field_texts(row, transform, split_joined, translate) -> list[str]:
+        """One row's fields as zero or more cell values."""
+        if transform:
+            text = transform(*row)
+            return [] if is_empty(text) else [str(text).strip()]
+
+        # numeric_text before the split, or str() stamps a float's '.0' on first
+        texts = [numeric_text(item) for item in to_items(row[0])]
+        if split_joined:
+            texts = [part for text in texts for part in text.split("; ")]
+        if translate:
+            texts = [translate.get(text, text) for text in texts]
+        return [text for text in texts if text]
 
     # Sample types with no tissue of origin to report
     TISSUELESS_SAMPLE_TYPES = ("cell_lines", "primary_cell_cultures")
@@ -894,116 +920,6 @@ class DB2Flattener:
                 continue
             out = main_df[col] if out is None else out.fillna(main_df[col])
         return out
-
-    # Every per-donor column on the SRA Biosample sheet. Add one here and nothing else needs
-    # touching: the D1..Dn enumeration, the empty-column rule and the assignment
-    # all read off these specs.
-    DONOR_COLUMNS = (
-        SRABiosampleDonorColumn("*isolate"),
-        SRABiosampleDonorColumn(
-            "*age",
-            sample_fields=("developmental_stages_term_name",),
-            transform=age_from_developmental_stage,
-        ),
-        SRABiosampleDonorColumn(
-            "*sex", columns=("human_donors_sex", "non_human_donors_sex"), render="summary"
-        ),
-        # ethnicity is on HumanDonor only, so a non-human run simply lacks it
-        SRABiosampleDonorColumn(
-            "ethnicity", columns=("human_donors_ethnicity_term_name",), optional=True
-        ),
-        SRABiosampleDonorColumn(
-            "age_lower_bound",
-            sample_fields=("lower_bound_age", "age_units"),
-            render="positional",
-            optional=True,
-            transform=age_with_units,
-        ),
-        SRABiosampleDonorColumn(
-            "age_upper_bound",
-            sample_fields=("upper_bound_age", "age_units"),
-            render="positional",
-            optional=True,
-            transform=age_with_units,
-        ),
-    )
-
-    def _donor_cells_by_library(self, main_df, library_key):
-        """
-        Build the per-library donor cells, keyed by library alias then column name.
-
-        Donors are enumerated D1..Dn in donor id order and every pooled cell reads
-        from that one enumeration, so Dn names the same donor in each.
-        """
-        donor_ids = self._coalesce_columns(
-            main_df, ("human_donors_cxg_donor_id", "non_human_donors_cxg_donor_id")
-        )
-        if donor_ids is None:
-            print("Warning: MAIN has no donor id column; SRA_BIOSAMPLE omits the donor columns")
-            return {spec.name: {} for spec in self.DONOR_COLUMNS}
-
-        empty = pd.Series(None, index=main_df.index, dtype=object)
-
-        def coalesced(candidates):
-            found = self._coalesce_columns(main_df, candidates)
-            return empty if found is None else found
-
-        attributes = {}
-        for spec in self.DONOR_COLUMNS:
-            if spec.sample_fields:
-                sources = [
-                    coalesced([f"{p}_{field}" for p in SAMPLE_URL_PREFIXES])
-                    for field in spec.sample_fields
-                ]
-            elif spec.columns:
-                sources = [coalesced(spec.columns)]
-            else:
-                continue  # sourced from the donor id, seeded below
-            if spec.transform:
-                attributes[spec.name] = [spec.transform(*row) for row in zip(*sources, strict=True)]
-            else:
-                attributes[spec.name] = list(sources[0])
-
-        # {library: {donor_id: {column: value}}} - first value per donor wins
-        names = list(attributes)
-        by_library: dict[str, dict[str, dict[str, str | None]]] = {}
-        for library, donor_id, *values in zip(
-            library_key, donor_ids, *attributes.values(), strict=True
-        ):
-            if not isinstance(library, str) or is_empty(donor_id):
-                continue
-            donors = by_library.setdefault(library, {})
-            donor = donors.setdefault(self._donor_id_text(donor_id), dict.fromkeys(names, None))
-            for name, value in zip(names, values, strict=True):
-                if is_empty(donor[name]):
-                    donor[name] = value
-
-        cells: dict[str, dict[str, str | None]] = {spec.name: {} for spec in self.DONOR_COLUMNS}
-        for library, donors in by_library.items():
-            ordered = sorted(donors, key=self._donor_sort_key)
-            labelled = [(f"D{number}", donor) for number, donor in enumerate(ordered, start=1)]
-            for spec in self.DONOR_COLUMNS:
-                if not spec.columns and not spec.sample_fields:
-                    value = self._format_pooled_donor_cell(labelled)
-                elif spec.render == "positional":
-                    value = self._format_positional_donor_cell(
-                        donors[donor][spec.name] for donor in ordered
-                    )
-                elif spec.render == "summary":
-                    value = self._format_pooled_sex(donors[donor][spec.name] for donor in ordered)
-                else:
-                    value = self._format_pooled_donor_cell(
-                        [(label, donors[donor][spec.name]) for label, donor in labelled]
-                    )
-                # An optional cell with no value is left out, so a column with no
-                # data anywhere stays completely false and is skipped. A required one keeps
-                # its None, so the column still appears blank when there are donors
-                # This will allow us to catch missing required data
-                if value is None and spec.optional:
-                    continue
-                cells[spec.name][library] = value
-
-        return cells
 
     def _clean_alias_cell(self, value):
         """Strip the lab prefix from a raw aliases cell, which may be a list or a str."""
