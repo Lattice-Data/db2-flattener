@@ -82,7 +82,7 @@ PROP_MAP_GEO = {
     "organoids_sample_terms_term_name": "**tissue",
     "primary_cell_cultures_enriched_cell_types_term_name": "**cell_type",
     "raw_file_samples": "samples",
-    "raw_matrix_file_alias": "raw_file",
+    "raw_matrix_file_alias": "processed data file",
     "sequence_file_sets_sequencing_platform": "*instrument model",
     "tissues_developmental_stages_term_name": "donor_dev_stage",
     "tissues_enriched_cell_types_term_name": "**cell_type",
@@ -141,6 +141,10 @@ TISSUE_TYPE_MAP = {
 
 GEO_LIBRARY_CARDINALITY_MAP = {
     "dual": "paired-end",
+}
+
+GEO_INSTRUMENT_MODEL_MAP = {
+    "Ultima Genomics UG 100": "UG 100",
 }
 
 GEO_EXPERIMENTAL_CONDITION_COLS = [

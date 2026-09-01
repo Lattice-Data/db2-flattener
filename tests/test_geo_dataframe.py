@@ -113,7 +113,7 @@ def test_create_geo_dataframe_includes_tissue_selection_columns():
     assert "tissues_selection_kits" not in geo_df.columns
     assert "tissues_selection_markers" not in geo_df.columns
     assert "tissues_selection_methods" not in geo_df.columns
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def test_create_geo_dataframe_collapses_human_and_non_human_donors():
@@ -151,8 +151,40 @@ def test_create_geo_dataframe_collapses_human_and_non_human_donors():
 
     both = geo_df.loc["libBoth"]
     assert both["donor_ids"] == ["H1", "M2"]
-    assert both["donor_sex"] == ["female", "male"]
+    assert both["donor_sex"] == "pooled male and female"
     assert both["*organism"] == ["Homo sapiens", "Mus musculus"]
+
+
+def test_create_geo_dataframe_pools_mixed_donor_sex():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libMaleFemale",
+                human_donors_sex="male",
+                non_human_donors_sex="female",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libSameLib",
+                human_donors_sex="female",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libSameLib",
+                human_donors_sex="male",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libExtra",
+                human_donors_sex="female",
+                non_human_donors_sex="unknown",
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["libMaleFemale"]["donor_sex"] == "pooled male and female"
+    assert geo_df.loc["libSameLib"]["donor_sex"] == "pooled male and female"
+    assert geo_df.loc["libExtra"]["donor_sex"] == ["female", "unknown"]
 
 
 def test_create_geo_dataframe_expands_raw_file_to_rightmost_columns():
@@ -165,10 +197,10 @@ def test_create_geo_dataframe_expands_raw_file_to_rightmost_columns():
     ).dropna(axis=1, how="all")
 
     geo_df = flattener.create_geo_dataframe(main_df)
-    raw_values = geo_df.loc[:, geo_df.columns == "raw_file"].iloc[0].tolist()
+    raw_values = geo_df.loc[:, geo_df.columns == "processed data file"].iloc[0].tolist()
 
-    assert list(geo_df.columns[-2:]) == ["raw_file", "raw_file"]
-    assert list(geo_df.columns).count("raw_file") == 2
+    assert list(geo_df.columns[-2:]) == ["processed data file", "processed data file"]
+    assert list(geo_df.columns).count("processed data file") == 2
     assert raw_values == ["file1.h5", "file2.h5"]
     assert all(isinstance(v, str) for v in raw_values)
 
@@ -182,6 +214,17 @@ def test_create_geo_dataframe_maps_dual_cardinality_to_paired_end():
     geo_df = flattener.create_geo_dataframe(main_df)
 
     assert list(geo_df["single or paired-end"]) == ["paired-end"]
+
+
+def test_create_geo_dataframe_maps_ultima_instrument_model():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(sequence_file_sets_sequencing_platform="Ultima Genomics UG 100")]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*instrument model"]) == ["UG 100"]
 
 
 def _assert_no_exp_source_cols(geo_df):
@@ -214,7 +257,7 @@ def test_create_geo_dataframe_experimental_condition_equal_duration():
 
     assert list(geo_df["experimental_condition"]) == ["treatment; LPS 4 hours"]
     _assert_no_exp_source_cols(geo_df)
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def test_create_geo_dataframe_experimental_condition_unequal_duration():
@@ -235,7 +278,7 @@ def test_create_geo_dataframe_experimental_condition_unequal_duration():
 
     assert list(geo_df["experimental_condition"]) == ["treatment; LPS 2-4 hours"]
     _assert_no_exp_source_cols(geo_df)
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def test_create_geo_dataframe_experimental_condition_no_duration_columns():
@@ -253,7 +296,7 @@ def test_create_geo_dataframe_experimental_condition_no_duration_columns():
 
     assert list(geo_df["experimental_condition"]) == ["treatment; LPS"]
     _assert_no_exp_source_cols(geo_df)
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def _assert_no_library_strategy_source_cols(geo_df):
@@ -347,7 +390,7 @@ def test_create_geo_dataframe_treatment_all_fields():
 
     assert list(geo_df["treatment"]) == ["lipopolysaccharide; LPS stimulation 4 hours"]
     _assert_no_treatment_source_cols(geo_df)
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def test_create_geo_dataframe_treatment_no_duration():
@@ -453,7 +496,7 @@ def test_create_geo_dataframe_includes_stripped_author_metadata():
     assert list(geo_df["diet"]) == ["fasted"]
     assert "tissues_author_metadata_mouse_litter_batch" not in geo_df.columns
     assert "tissues_author_metadata_diet" not in geo_df.columns
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def test_create_geo_dataframe_maps_genetic_modifications_strategy():
@@ -496,7 +539,7 @@ def test_create_geo_dataframe_title_full_set():
     assert "treatments_schema_version" not in geo_df.columns
     assert "treatments_ontological_term_term_name" not in geo_df.columns
     _assert_no_treatment_source_cols(geo_df)
-    assert list(geo_df.columns)[-1:] == ["raw_file"]
+    assert list(geo_df.columns)[-1:] == ["processed data file"]
 
 
 def test_create_geo_dataframe_title_unequal_duration():

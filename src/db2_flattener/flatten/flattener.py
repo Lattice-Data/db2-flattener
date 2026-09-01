@@ -11,6 +11,7 @@ from db2_flattener.schema.constants import (
     GENETIC_PERTURBATION_MAP,
     GEO_EXPERIMENTAL_CONDITION_COLS,
     GEO_FLEX_LIBRARY_PROTOCOLS,
+    GEO_INSTRUMENT_MODEL_MAP,
     GEO_LIBRARY_CARDINALITY_MAP,
     GEO_LIBRARY_STRATEGY_FEATURE_COL,
     GEO_LIBRARY_STRATEGY_MAP,
@@ -337,11 +338,26 @@ class DB2Flattener:
         col = "genetic_modifications_strategy"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GENETIC_PERTURBATION_MAP)
+        col = "donor_sex"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._pool_mixed_geo_sex)
         geo_df = self._add_geo_title(geo_df)
         col = "single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_LIBRARY_CARDINALITY_MAP)
-        return expand_list_column(geo_df, "raw_file")
+        col = "*instrument model"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].replace(GEO_INSTRUMENT_MODEL_MAP)
+        return expand_list_column(geo_df, "processed data file")
+
+    @staticmethod
+    def _pool_mixed_geo_sex(val):
+        """Rewrite a list of male and female (either order) to a pooled label."""
+        if isinstance(val, (list, tuple)):
+            sexes = {str(item).strip().lower() for item in val if not is_empty(item)}
+            if sexes == {"male", "female"}:
+                return "pooled male and female"
+        return val
 
     @staticmethod
     def _summarize_geo_experimental_condition(geo_df: pd.DataFrame) -> pd.DataFrame:
