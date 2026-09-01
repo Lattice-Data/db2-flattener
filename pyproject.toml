@@ -28,7 +28,7 @@ dev = [
   # Pinned, not a floor: `lint.select` below names rule *families*, so a ruff
   # release that adds rules to one silently changes what CI enforces. Keep in
   # sync with the ruff pin in .pre-commit-config.yaml.
-  "ruff==0.16.1",
+  "ruff==0.16.5",
 ]
 
 [project.urls]
