@@ -14,7 +14,7 @@ MIN_CONFIGS = Configs(
         },
         "tissues": {
             "api_type": "Tissue",
-            "fields": ["@id", "aliases", "author_metadata"],
+            "fields": ["@id", "aliases", "author_metadata", "sources"],
             "references": {},
         },
     },
@@ -29,12 +29,13 @@ def make_flattener():
     return f
 
 
-def _tissue(sample_id="/tissues/s1/", alias="lab:sample1", author_metadata=None):
+def _tissue(sample_id="/tissues/s1/", alias="lab:sample1", author_metadata=None, sources=None):
     return {
         "@id": sample_id,
         "@type": ["Tissue"],
         "aliases": [alias],
         "author_metadata": author_metadata,
+        "sources": sources,
     }
 
 
@@ -207,6 +208,59 @@ def test_author_metadata_non_dict_kept_as_normal_field():
 
     assert "tissues_author_metadata" in main_df.columns
     assert "tissues_mouse_litter_batch" not in main_df.columns
+
+
+def test_sources_title_extracted_from_embedded_dict():
+    f = make_flattener()
+    sample = _tissue(sources={"title": "Vendor X"})
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [rmf], [sample]),
+            ]
+        )
+    )
+
+    assert main_df.iloc[0]["tissues_sources_title"] == "Vendor X"
+    assert main_df.iloc[0]["tissues_sources"] == {"title": "Vendor X"}
+
+
+def test_sources_title_extracted_from_list_of_dicts():
+    f = make_flattener()
+    sample = _tissue(sources=[{"title": "Vendor X"}])
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [rmf], [sample]),
+            ]
+        )
+    )
+
+    assert main_df.iloc[0]["tissues_sources_title"] == "Vendor X"
+
+
+def test_sources_without_title_does_not_add_title_column():
+    f = make_flattener()
+    sample = _tissue(sources={"@id": "/sources/s1/"})
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [rmf], [sample]),
+            ]
+        )
+    )
+
+    assert "tissues_sources_title" not in main_df.columns
+    assert main_df.iloc[0]["tissues_sources"] == {"@id": "/sources/s1/"}
 
 
 # --- _join_unique: keep boolean False ---

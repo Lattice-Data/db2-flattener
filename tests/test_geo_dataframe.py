@@ -61,6 +61,7 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["tissues_selection_markers"] == "selection_markers"
     assert PROP_MAP_GEO["tissues_selection_methods"] == "selection_methods"
     assert PROP_MAP_GEO["droplet_based_libraries_dbxrefs"] == "*SRA Experiment or Run"
+    assert PROP_MAP_GEO["tissues_sources_title"] == "source"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -238,6 +239,16 @@ def test_create_geo_dataframe_extracts_sra_accession_from_dbxrefs():
 
     assert list(geo_df["*SRA Experiment or Run"]) == ["SRX123"]
     assert "droplet_based_libraries_dbxrefs" not in geo_df.columns
+
+
+def test_create_geo_dataframe_maps_tissues_sources_title_to_source():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(tissues_sources_title="Vendor X")]).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["source"]) == ["Vendor X"]
+    assert "tissues_sources_title" not in geo_df.columns
 
 
 def test_create_geo_dataframe_empty_when_dbxrefs_have_no_sra():

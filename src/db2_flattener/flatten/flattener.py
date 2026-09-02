@@ -190,6 +190,12 @@ class DB2Flattener:
                                     )
                                 field_name = f"{sample_type}_{field}"
                                 sample_metadata[sample_alias][field_name] = value
+                                if field == "sources":
+                                    titles = self._source_titles(value)
+                                    if titles:
+                                        sample_metadata[sample_alias][
+                                            f"{sample_type}_sources_title"
+                                        ] = self._join_unique(titles)
 
                         self._flatten_resolved_references(
                             sample_obj,
@@ -834,6 +840,20 @@ class DB2Flattener:
             ref_id = term_ref
 
         return resolved_controlled_terms.get(ref_id)
+
+    @staticmethod
+    def _source_titles(value):
+        """Collect title values from an embedded Source object or list of objects."""
+        if value is None or value == []:
+            return []
+        items = value if isinstance(value, list) else [value]
+        titles = []
+        for item in items:
+            if isinstance(item, dict):
+                title = item.get("title")
+                if title not in (None, ""):
+                    titles.append(title)
+        return titles
 
     @staticmethod
     def _is_controlled_term_field(field_name, references):
