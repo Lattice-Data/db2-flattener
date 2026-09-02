@@ -70,6 +70,7 @@ GUIDE_METADATA_COLUMNS = [
 PROP_MAP_GEO = {
     "cell_lines_sample_terms_term_name": "**cell_line",
     "droplet_based_libraries_CRO_group_identifier": "*library name",
+    "droplet_based_libraries_dbxrefs": "*SRA Experiment or Run",
     "droplet_based_libraries_library_cardinality": "single or paired-end",
     "droplet_based_libraries_library_construction_technology_term_name": "library_protocol",
     "genetic_modifications_strategy": "genetic_modifications_strategy",

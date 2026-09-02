@@ -348,7 +348,25 @@ class DB2Flattener:
         col = "*instrument model"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_INSTRUMENT_MODEL_MAP)
+        col = "*SRA Experiment or Run"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._extract_geo_sra_accession)
         return expand_list_column(geo_df, "processed data file")
+
+    @staticmethod
+    def _extract_geo_sra_accession(val):
+        """Take unique accessions after an SRA: prefix from a dbxref cell."""
+        accessions = []
+        for item in to_items(val):
+            text = str(item).strip()
+            if text.startswith("SRA:"):
+                accession = text[len("SRA:") :]
+                if accession:
+                    accessions.append(accession)
+        unique = list(dict.fromkeys(accessions))
+        if not unique:
+            return pd.NA
+        return unique[0] if len(unique) == 1 else unique
 
     @staticmethod
     def _pool_mixed_geo_sex(val):

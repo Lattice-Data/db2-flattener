@@ -60,6 +60,7 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["tissues_selection_kits"] == "selection_kits"
     assert PROP_MAP_GEO["tissues_selection_markers"] == "selection_markers"
     assert PROP_MAP_GEO["tissues_selection_methods"] == "selection_methods"
+    assert PROP_MAP_GEO["droplet_based_libraries_dbxrefs"] == "*SRA Experiment or Run"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -225,6 +226,32 @@ def test_create_geo_dataframe_maps_ultima_instrument_model():
     geo_df = flattener.create_geo_dataframe(main_df)
 
     assert list(geo_df["*instrument model"]) == ["UG 100"]
+
+
+def test_create_geo_dataframe_extracts_sra_accession_from_dbxrefs():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(droplet_based_libraries_dbxrefs=["GEO:GSE1", "SRA:SRX123"])]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*SRA Experiment or Run"]) == ["SRX123"]
+    assert "droplet_based_libraries_dbxrefs" not in geo_df.columns
+
+
+def test_create_geo_dataframe_empty_when_dbxrefs_have_no_sra():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(droplet_based_libraries_dbxrefs=["GEO:GSE1"])]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df) == 1
+    assert pd.isna(geo_df["*SRA Experiment or Run"].iloc[0])
+    assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
+    assert "droplet_based_libraries_dbxrefs" not in geo_df.columns
 
 
 def _assert_no_exp_source_cols(geo_df):
