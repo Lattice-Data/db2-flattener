@@ -356,23 +356,37 @@ class DB2Flattener:
             geo_df[col] = geo_df[col].replace(GEO_INSTRUMENT_MODEL_MAP)
         col = "*SRA Experiment or Run"
         if col in geo_df.columns:
+            # Both columns come from the same dbxrefs cell, so read BioSample out
+            # before the SRA accessions overwrite it.
+            biosample = geo_df[col].map(self._extract_geo_biosample)
             geo_df[col] = geo_df[col].map(self._extract_geo_sra_accession)
+            geo_df.insert(geo_df.columns.get_loc(col) + 1, "*BioSample", biosample)
         return expand_list_column(geo_df, "processed data file")
 
     @staticmethod
-    def _extract_geo_sra_accession(val):
-        """Take unique accessions after an SRA: prefix from a dbxref cell."""
+    def _extract_dbxref_accessions(val, prefix: str):
+        """Take unique accessions after a given prefix from a dbxref cell."""
         accessions = []
         for item in to_items(val):
             text = str(item).strip()
-            if text.startswith("SRA:"):
-                accession = text[len("SRA:") :]
+            if text.startswith(prefix):
+                accession = text[len(prefix) :]
                 if accession:
                     accessions.append(accession)
         unique = list(dict.fromkeys(accessions))
         if not unique:
             return pd.NA
         return unique[0] if len(unique) == 1 else unique
+
+    @classmethod
+    def _extract_geo_sra_accession(cls, val):
+        """Take unique accessions after an SRA: prefix from a dbxref cell."""
+        return cls._extract_dbxref_accessions(val, "SRA:")
+
+    @classmethod
+    def _extract_geo_biosample(cls, val):
+        """Take unique accessions after a Biomaterial: prefix from a dbxref cell."""
+        return cls._extract_dbxref_accessions(val, "Biomaterial:")
 
     @staticmethod
     def _pool_mixed_geo_sex(val):

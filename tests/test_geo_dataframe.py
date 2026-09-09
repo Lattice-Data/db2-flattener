@@ -253,9 +253,9 @@ def test_create_geo_dataframe_maps_tissues_sources_title_to_source():
 
 def test_create_geo_dataframe_empty_when_dbxrefs_have_no_sra():
     flattener = make_flattener()
-    main_df = pd.DataFrame(
-        [gex_row(droplet_based_libraries_dbxrefs=["GEO:GSE1"])]
-    ).dropna(axis=1, how="all")
+    main_df = pd.DataFrame([gex_row(droplet_based_libraries_dbxrefs=["GEO:GSE1"])]).dropna(
+        axis=1, how="all"
+    )
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
@@ -263,6 +263,61 @@ def test_create_geo_dataframe_empty_when_dbxrefs_have_no_sra():
     assert pd.isna(geo_df["*SRA Experiment or Run"].iloc[0])
     assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
     assert "droplet_based_libraries_dbxrefs" not in geo_df.columns
+
+
+def test_create_geo_dataframe_extracts_biosample_from_dbxrefs():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_dbxrefs=[
+                    "GEO:GSE1",
+                    "SRA:SRX123",
+                    "Biomaterial:SAMN53299868",
+                ]
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*BioSample"]) == ["SAMN53299868"]
+    # BioSample is read off the same cell, so the SRA accession must survive it.
+    assert list(geo_df["*SRA Experiment or Run"]) == ["SRX123"]
+    assert list(geo_df.columns).index("*BioSample") == (
+        list(geo_df.columns).index("*SRA Experiment or Run") + 1
+    )
+
+
+def test_create_geo_dataframe_keeps_all_biosamples_from_dbxrefs():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_dbxrefs=[
+                    "Biomaterial:SAMN1",
+                    "Biomaterial:SAMN2",
+                    "Biomaterial:SAMN1",
+                ]
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert geo_df["*BioSample"].iloc[0] == ["SAMN1", "SAMN2"]
+
+
+def test_create_geo_dataframe_empty_when_dbxrefs_have_no_biosample():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(droplet_based_libraries_dbxrefs=["GEO:GSE1", "SRA:SRX123"])]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df) == 1
+    assert pd.isna(geo_df["*BioSample"].iloc[0])
 
 
 def _assert_no_exp_source_cols(geo_df):
@@ -736,7 +791,5 @@ def test_create_geo_dataframe_title_lists_mixed_treatments_same_library():
     assert list(geo_df["treatment"]) == [
         ["lipopolysaccharide; LPS stimulation 4 hours", "no treatment"]
     ]
-    assert list(geo_df["title"]) == [
-        "libA scRNA-seq; ['LPS stimulation 4 hours', 'no treatment']"
-    ]
+    assert list(geo_df["title"]) == ["libA scRNA-seq; ['LPS stimulation 4 hours', 'no treatment']"]
     assert all("lipopolysaccharide" not in title for title in geo_df["title"])
