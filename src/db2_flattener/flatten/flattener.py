@@ -430,6 +430,11 @@ class DB2Flattener:
             biohub_df["tissue_type"] = biohub_df["tissue_type"].apply(
                 lambda x: TISSUE_TYPE_MAP.get(x[0], x) if isinstance(x, (list, tuple)) else x
             )
+            cell_line = biohub_df["tissue_type"] == "cell line"
+            for col in ("development_stage", "donor_id", "sex", "self_reported_ethnicity"):
+                if col not in biohub_df.columns:
+                    biohub_df[col] = pd.NA
+                biohub_df.loc[cell_line, col] = "na"
         if "genetic_perturbation_strategy" in biohub_df.columns:
             biohub_df["genetic_perturbation_strategy"] = biohub_df[
                 "genetic_perturbation_strategy"
