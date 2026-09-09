@@ -251,3 +251,26 @@ def test_create_dataframe_keeps_is_pilot_order_false():
     )
 
     assert main_df.iloc[0]["sequence_file_sets_is_pilot_order"] == "False"
+
+
+def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [
+                ["Tissue", "Biosample", "Item"],
+                None,
+                ["Tissue", "Biosample", "Item"],
+            ],
+            "cell_lines_@type": [
+                None,
+                ["CellLine", "Biosample", "Item"],
+                ["CellLine", "Biosample", "Item"],
+            ],
+            "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["tissue_type"]) == ["tissue", "cell line", "tissue"]

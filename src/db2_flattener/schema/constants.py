@@ -100,6 +100,7 @@ PROP_MAP_BIOHUB = {
     "tissues_developmental_stages_term_name": "development_stage",
     "tissues_multiplexing_barcodes": "sample_probe_barcode",
     "tissues_@type": "tissue_type",
+    "cell_lines_@type": "tissue_type",
     "tissues_selection_markers": "suspension_enrichment_factors",
     "tissues_selection_kits": "suspension_selection_kits",
     "tissues_suspension_type": "suspension_type",
