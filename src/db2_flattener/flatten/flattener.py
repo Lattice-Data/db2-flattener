@@ -373,26 +373,46 @@ class DB2Flattener:
 
     def create_sra_biosample_dataframe(self, main_df) -> pd.DataFrame:
         """
-        Build the SRA/BioSample dataframe from main_df: one row per library.
+        Build the SRA/BioSample dataframe from main_df: one row per CRO group.
 
-        Grouped on the library alias, which PROP_MAP_SRA_BIOSAMPLE renames to
-        'sample_name'. The submitted 'sample' is the sequencing library.
+        Grouped on the library's CRO_group_identifier, which
+        PROP_MAP_SRA_BIOSAMPLE renames to 'sample_name'. That identifier spans a
+        group's libraries, so the GEX libraries are taken and the rest dropped,
+        as on GEO, one row per group rather than per library.
         """
-        alias_cols = [
+        group_cols = [
             col
-            for col in ("droplet_based_libraries_aliases", "plate_based_libraries_aliases")
+            for col in (
+                "droplet_based_libraries_CRO_group_identifier",
+                "plate_based_libraries_CRO_group_identifier",
+            )
             if col in main_df.columns
         ]
-        if not alias_cols:
-            print("Warning: MAIN has no library aliases column; SRA_BIOSAMPLE will be empty")
+        if not group_cols:
+            print(
+                "Warning: MAIN has no library CRO group identifier column; "
+                "SRA_BIOSAMPLE will be empty"
+            )
+            return pd.DataFrame()
+
+        if main_df.empty:
+            return pd.DataFrame()
+
+        # Filtered before anything is built: every cell below is keyed by a
+        # sample_name taken from this frame, so the two have to stay row-aligned
+        gex_mask = main_df.apply(self._row_is_gex, axis=1)
+        print(
+            f"SRA_BIOSAMPLE: filtered to {int(gex_mask.sum())} GEX rows "
+            f"out of {len(main_df)} MAIN rows"
+        )
+        # The one cell taken from the unfiltered frame, so it has to be built here
+        library_id = self._library_ids_by_group(main_df, gex_mask)
+        main_df = main_df[gex_mask].reset_index(drop=True)
+        if main_df.empty:
             return pd.DataFrame()
 
         columns_to_keep = [k for k in PROP_MAP_SRA_BIOSAMPLE if k in main_df.columns]
         sra_df = main_df[columns_to_keep].copy()
-
-        # Strip the lab prefix before the rename merges droplet and plate into one
-        for alias_col in alias_cols:
-            sra_df[alias_col] = sra_df[alias_col].map(self._clean_alias_cell)
 
         sra_df.rename(columns=PROP_MAP_SRA_BIOSAMPLE, inplace=True)
         sra_df = collapse_duplicate_columns(sra_df)
@@ -468,7 +488,7 @@ class DB2Flattener:
         perturbation_factors = self._perturbation_factors_by_library(main_df, sra_df["sample_name"])
         # intended_cell_types is only on cell lines and organoids, so a tissue or
         # primary cell culture genuinely cannot have one, hence 'not applicable'
-        cell_type = self._sample_field_by_library(
+        intended_cell_type = self._sample_field_by_library(
             main_df,
             sra_df["sample_name"],
             "intended_cell_types_term_name",
@@ -476,8 +496,20 @@ class DB2Flattener:
             prefixes=("cell_lines", "organoids"),
             gap="not applicable",
         )
+        # The suspension columns below are on all four sample types, and take
+        # their sources from BIOHUB: kits to selection_kits, enrichment factors
+        # to selection_markers.
         enriched_cell_types = self._sample_field_by_library(
             main_df, sra_df["sample_name"], "enriched_cell_types_term_name", optional=True
+        )
+        depleted_cell_types = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "depleted_cell_types_term_name", optional=True
+        )
+        selection_kits = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "selection_kits", optional=True
+        )
+        enrichment_factors = self._sample_field_by_library(
+            main_df, sra_df["sample_name"], "selection_markers", optional=True
         )
         # preservation_method is on tissues alone, so any other sample type has
         # none to report, hence 'not applicable'
@@ -518,7 +550,7 @@ class DB2Flattener:
         if unnamed:
             print(
                 f"Warning: dropping {unnamed} of {len(sra_df)} MAIN row(s) with no library "
-                "alias from SRA_BIOSAMPLE"
+                "CRO group identifier from SRA_BIOSAMPLE"
             )
             sra_df = sra_df[sra_df["sample_name"].notna()]
 
@@ -530,6 +562,11 @@ class DB2Flattener:
             sra_df = sra_df.drop_duplicates().reset_index(drop=True)
         else:
             sra_df = collapse_dataframe(sra_df, group_col="sample_name")
+
+        # Beside sample_name rather than at the end: this is what identifies the
+        # row's libraries, now the key names their group instead
+        if library_id:
+            sra_df.insert(1, "library_id", sra_df["sample_name"].map(library_id))
 
         if isolate:
             sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
@@ -553,12 +590,20 @@ class DB2Flattener:
             sra_df["experimental_perturbation_factors"] = sra_df["sample_name"].map(
                 perturbation_factors
             )
-        if cell_type:
-            sra_df["cell_type"] = sra_df["sample_name"].map(cell_type)
+        if intended_cell_type:
+            sra_df["intended_cell_type"] = sra_df["sample_name"].map(intended_cell_type)
         if enriched_cell_types:
             sra_df["suspension_enriched_cell_types"] = sra_df["sample_name"].map(
                 enriched_cell_types
             )
+        if depleted_cell_types:
+            sra_df["suspension_depleted_cell_types"] = sra_df["sample_name"].map(
+                depleted_cell_types
+            )
+        if selection_kits:
+            sra_df["suspension_selection_kits"] = sra_df["sample_name"].map(selection_kits)
+        if enrichment_factors:
+            sra_df["suspension_enrichment_factors"] = sra_df["sample_name"].map(enrichment_factors)
         if genetic_strategy:
             sra_df["genetic_perturbation_strategy"] = sra_df["sample_name"].map(genetic_strategy)
         if preservation_method:
@@ -578,9 +623,9 @@ class DB2Flattener:
     @classmethod
     def _format_pooled_sex(cls, sexes) -> str | None:
         """
-        'male' for one sex, 'pooled: male and female' across a mixed pool.
+        'male' for one sex, 'pooled male and female' across a mixed pool.
 
-        Values outside the pair pool the same way: 'pooled: male and unknown'.
+        Values outside the pair pool the same way: 'pooled male and unknown'.
         """
         unique = {str(sex).strip() for sex in sexes if not is_empty(sex)}
         if not unique:
@@ -594,7 +639,7 @@ class DB2Flattener:
         ordered = sorted(unique, key=sort_key)
         if len(ordered) == 1:
             return ordered[0]
-        return "pooled: " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
+        return "pooled " + ", ".join(ordered[:-1]) + " and " + ordered[-1]
 
     @staticmethod
     def _provider_titles(value) -> list[str]:
@@ -644,7 +689,7 @@ class DB2Flattener:
 
     def _perturbation_by_library(self, main_df, library_key):
         """
-        Build the 'experimental_perturbation' cell per library, keyed by library alias.
+        Build the 'experimental_perturbation' cell per library, keyed by CRO group.
 
         Reads the treatment's duration and description straight off 'treatments_*',
         which is already the object prefix and so needs no sample expansion. A
@@ -717,7 +762,7 @@ class DB2Flattener:
 
     def _perturbation_factors_by_library(self, main_df, library_key):
         """
-        Build the 'experimental_perturbation_factors' cell per library, keyed by alias.
+        Build the 'experimental_perturbation_factors' cell per library, keyed by CRO group.
 
         Each sample contributes the set of ontological terms its treatments name,
         bracketed when there is more than one so a reader can tell which factors
@@ -753,9 +798,50 @@ class DB2Flattener:
             for library, present in found.items()
         }
 
+    def _library_ids_by_group(self, main_df, gex_mask):
+        """
+        Per-group 'library_id' cell: every library in the group, GEX ones first.
+
+        The one builder taking the unfiltered frame, because the non-GEX
+        libraries it reports are exactly the rows the GEX filter removes. Both
+        halves of a group carry the same CRO identifier, so grouping still works
+        on the wider frame. gex_mask is passed in rather than recomputed to keep
+        one answer to what counts as GEX.
+
+        Aliases arrive with the lab prefix in MAIN, so they are cleaned. Sorted
+        within each half, but GEX before the rest: plain sorting would lead with
+        the CRISPR library, whose alias suffix happens to come first.
+        """
+        groups = self._coalesce_columns(
+            main_df,
+            [f"{kind}_based_libraries_CRO_group_identifier" for kind in ("droplet", "plate")],
+        )
+        aliases = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_aliases" for kind in ("droplet", "plate")]
+        )
+        if aliases is None:
+            print("Warning: MAIN has no library aliases column; SRA_BIOSAMPLE omits library_id")
+            return {}
+
+        # {group: (gex aliases, everything else)}
+        by_group: dict[str, tuple[set[str], set[str]]] = {}
+        for group, alias, is_gex in zip(groups, aliases, gex_mask, strict=True):
+            if not isinstance(group, str):
+                continue
+            cleaned = self._get_clean_alias({"aliases": to_items(alias)})
+            if not cleaned:
+                continue
+            gex, other = by_group.setdefault(group, (set(), set()))
+            (gex if is_gex else other).add(cleaned)
+
+        return {
+            group: ", ".join(sorted(gex) + sorted(other))
+            for group, (gex, other) in by_group.items()
+        }
+
     def _biomaterial_provider_by_library(self, main_df, library_key):
         """
-        Build the 'biomaterial_provider' cell per library, keyed by library alias.
+        Build the 'biomaterial_provider' cell per library, keyed by CRO group.
 
         Falls back per row, not per column: a sample with no usable 'sources' uses
         its own 'lab' even where a sibling has one. Distinct titles join with '; '.
@@ -868,7 +954,7 @@ class DB2Flattener:
 
     def _tissue_by_library(self, main_df, library_key):
         """
-        Per-library 'tissue' cell, keyed by library alias.
+        Per-library 'tissue' cell, keyed by CRO group.
 
         A cell line or primary cell culture has no tissue, so it reports
         'not available'. A tissue or organoid reports its sample_terms, which is
@@ -920,14 +1006,6 @@ class DB2Flattener:
                 continue
             out = main_df[col] if out is None else out.fillna(main_df[col])
         return out
-
-    def _clean_alias_cell(self, value):
-        """Strip the lab prefix from a raw aliases cell, which may be a list or a str."""
-        if isinstance(value, list):
-            return self._get_clean_alias({"aliases": value})
-        if isinstance(value, str) and value:
-            return self._get_clean_alias({"aliases": [value]})
-        return value
 
     def create_guide_metadata_dataframe(self, file_info):
         """

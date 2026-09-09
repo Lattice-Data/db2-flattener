@@ -1,6 +1,7 @@
 """
-SRA/BioSample sheet: one row per library, keyed on the library alias under the
-name 'sample_name' because the submitted 'sample' is the sequencing library.
+SRA/BioSample sheet: one row per CRO group, keyed on the library's
+CRO_group_identifier under the name 'sample_name'. That identifier spans a
+group's libraries, so only the GEX ones reach the sheet.
 """
 
 import pandas as pd
@@ -35,8 +36,11 @@ ETHNICITY_COLUMN = "ethnicity"
 SUSPENSION_COLUMN = "suspension_type"
 PERTURBATION_COLUMN = "experimental_perturbation"
 FACTORS_COLUMN = "experimental_perturbation_factors"
-CELL_TYPE_COLUMN = "cell_type"
+INTENDED_CELL_TYPE_COLUMN = "intended_cell_type"
 ENRICHED_COLUMN = "suspension_enriched_cell_types"
+DEPLETED_COLUMN = "suspension_depleted_cell_types"
+KITS_COLUMN = "suspension_selection_kits"
+ENRICHMENT_FACTORS_COLUMN = "suspension_enrichment_factors"
 STRATEGY_COLUMN = "genetic_perturbation_strategy"
 PRESERVATION_COLUMN = "preservation_method"
 # Read off the map so a rename there, e.g. dropping the SRA '*' required marker,
@@ -54,6 +58,21 @@ def make_flattener():
     flattener.connection = None
     flattener.configs = Configs(FIELD_TYPES={}, OBJECT_CONFIG={})
     return flattener
+
+
+def main_frame(columns):
+    """
+    A MAIN frame whose droplet libraries declare themselves GEX.
+
+    The sheet takes GEX libraries only, and a droplet library that leaves
+    feature_types unset is read as non-GEX, so a fixture that did not say so
+    would be filtered out before any cell was built. A plate library needs no
+    such marker: unset feature_types is read as GEX there.
+    """
+    frame = pd.DataFrame(columns)
+    if "droplet_based_libraries_CRO_group_identifier" in frame.columns:
+        frame["droplet_based_libraries_feature_types"] = [["Gene Expression"]] * len(frame)
+    return frame
 
 
 def sample(alias, barcodes, lab="alex-marson"):
@@ -130,10 +149,10 @@ def test_barcode_map_accepts_a_bare_barcode_string():
 def droplet_main_df():
     """Four samples pooled into one droplet library, one MAIN row per sample."""
     aliases = [s["aliases"][0].split(":", 1)[1] for s in FOUR_SAMPLES]
-    return pd.DataFrame(
+    return main_frame(
         {
             "sample_alias": aliases,
-            "droplet_based_libraries_aliases": [["alex-marson:TregR3_L13_L05_GEX"]] * 4,
+            "droplet_based_libraries_CRO_group_identifier": ["TregR3_L13_L05"] * 4,
             "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
             "human_donors_taxa": ["Homo sapiens"] * 4,
         }
@@ -156,16 +175,16 @@ def test_droplet_run_is_one_row_per_library(capsys):
     ]
     assert "no sample sources or lab column" in capsys.readouterr().out
     assert len(sra_df) == 1
-    assert sra_df.loc[0, "sample_name"] == "TregR3_L13_L05_GEX"
+    assert sra_df.loc[0, "sample_name"] == "TregR3_L13_L05"
     assert sra_df.loc[0, ORGANISM_COLUMN] == "Homo sapiens"
     assert sra_df.loc[0, DATE_COLUMN] == "not provided"
     assert sra_df.loc[0, BARCODE_COLUMN] == FOUR_SAMPLES_MAP
 
 
 def test_plate_library_columns_are_used_when_droplet_is_absent():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "plate_based_libraries_aliases": [["alex-marson:PLATE_1"]],
+            "plate_based_libraries_CRO_group_identifier": ["PLATE_1"],
             "plate_based_libraries_samples": [[sample("s1", ["BC001+CR001"])]],
         }
     )
@@ -176,28 +195,209 @@ def test_plate_library_columns_are_used_when_droplet_is_absent():
     assert list(sra_df[BARCODE_COLUMN]) == ["s1 : BC001+CR001"]
 
 
-def test_paired_libraries_get_their_own_rows_sharing_the_same_map():
+def test_paired_libraries_share_one_row_because_the_crispr_half_is_dropped(capsys):
+    """
+    A group's GEX and CRISPR libraries carry one CRO id, so they are one row.
+
+    This is what taking GEX libraries only buys: without the filter the pair
+    would collapse together anyway, but every cell would be built from twice
+    the rows.
+    """
     main_df = pd.DataFrame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_A_CRI"]] * 2,
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 4,
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2
+            + [["CRISPR Guide Capture"]] * 2,
             "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
             "human_donors_taxa": ["Homo sapiens"] * 4,
         }
     )
 
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sorted(sra_df.index) == ["LIB_A_CRI", "LIB_A_GEX"]
-    assert sra_df.loc["LIB_A_GEX", BARCODE_COLUMN] == FOUR_SAMPLES_MAP
-    assert sra_df.loc["LIB_A_CRI", BARCODE_COLUMN] == FOUR_SAMPLES_MAP
+    assert list(sra_df["sample_name"]) == ["LIB_A"]
+    assert sra_df.loc[0, BARCODE_COLUMN] == FOUR_SAMPLES_MAP
+    assert "filtered to 2 GEX rows out of 4 MAIN rows" in capsys.readouterr().out
+
+
+def test_group_with_no_gex_library_is_dropped_entirely(capsys):
+    """A CRISPR-only group has no GEX library, so it leaves the sheet."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+            "human_donors_taxa": ["Homo sapiens"] * 2,
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["sample_name"]) == ["LIB_A"]
+    assert "filtered to 1 GEX rows out of 2 MAIN rows" in capsys.readouterr().out
+
+
+def test_all_libraries_non_gex_returns_empty_frame():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_feature_types": [["CRISPR Guide Capture"]],
+        }
+    )
+
+    assert make_flattener().create_sra_biosample_dataframe(main_df).empty
+
+
+# library_id
+
+
+def library_id_main_df():
+    """Two groups, each a GEX library paired with a CRISPR one."""
+    return pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A", "LIB_B", "LIB_B"],
+            "droplet_based_libraries_aliases": [
+                ["alex-marson:LIB_A_GEX"],
+                ["alex-marson:LIB_A_CRI"],
+                ["alex-marson:LIB_B_GEX"],
+                ["alex-marson:LIB_B_CRI"],
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ]
+            * 2,
+        }
+    )
+
+
+def test_library_id_lists_the_gex_library_before_the_crispr_one():
+    """
+    Sorting alone would lead with the CRISPR library, so GEX is put first.
+
+    The whole column comes from the unfiltered frame: LIB_A_CRI is on a row the
+    GEX filter drops, so a builder reading the filtered frame could not see it.
+    """
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_aliases": [
+                ["alex-marson:LIB_A_GEX"],
+                ["alex-marson:LIB_A_CRI"],
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["sample_name"]) == ["LIB_A"]
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX, LIB_A_CRI"]
+
+
+def test_library_id_sits_next_to_sample_name():
+    sra_df = make_flattener().create_sra_biosample_dataframe(library_id_main_df())
+
+    assert list(sra_df.columns)[:2] == ["sample_name", "library_id"]
+
+
+def test_library_id_is_scoped_to_each_group():
+    sra_df = make_flattener().create_sra_biosample_dataframe(library_id_main_df())
+
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX, LIB_A_CRI", "LIB_B_GEX, LIB_B_CRI"]
+
+
+def test_library_id_strips_the_lab_prefix():
+    main_df = main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["some-other-lab:LIB_A_GEX"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
+
+
+def test_library_id_of_a_lone_gex_library_is_the_bare_alias():
+    main_df = main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
+
+
+def test_library_id_omits_a_group_that_never_reaches_the_sheet():
+    """A CRISPR-only group is filtered out, so its alias is never reported."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_aliases": [
+                ["alex-marson:LIB_A_GEX"],
+                ["alex-marson:LIB_B_CRI"],
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["sample_name"]) == ["LIB_A"]
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
+
+
+def test_plate_library_aliases_are_used_when_droplet_is_absent():
+    main_df = pd.DataFrame(
+        {
+            "plate_based_libraries_CRO_group_identifier": ["PLATE_1"],
+            "plate_based_libraries_aliases": [["alex-marson:PLATE_1_GEX"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["library_id"]) == ["PLATE_1_GEX"]
+
+
+def test_missing_aliases_column_omits_library_id(capsys):
+    sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
+
+    assert "library_id" not in sra_df.columns
+    assert "no library aliases column" in capsys.readouterr().out
+
+
+def test_row_with_no_alias_contributes_nothing_to_library_id():
+    main_df = main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"], None],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
 
 
 def test_library_rows_disagreeing_on_the_map_collapse_to_a_list():
     other_samples = [sample("s1", ["BC099+CR099"])]
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
             "droplet_based_libraries_samples": [FOUR_SAMPLES, other_samples],
         }
     )
@@ -208,18 +408,21 @@ def test_library_rows_disagreeing_on_the_map_collapse_to_a_list():
     assert sra_df.loc[0, BARCODE_COLUMN] == [FOUR_SAMPLES_MAP, "s1 : BC099+CR099"]
 
 
-def test_rows_with_no_library_alias_are_dropped(capsys):
+def test_rows_with_no_library_group_are_dropped(capsys):
     main_df = droplet_main_df()
-    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert list(sra_df["sample_name"]) == ["TregR3_L13_L05_GEX"]
-    assert "dropping 1 of 4 MAIN row(s) with no library alias" in capsys.readouterr().out
+    assert list(sra_df["sample_name"]) == ["TregR3_L13_L05"]
+    assert (
+        "dropping 1 of 4 MAIN row(s) with no library CRO group identifier"
+        in capsys.readouterr().out
+    )
 
 
 def test_sample_alias_is_not_the_grouping_key():
-    """The library alias keys the sheet, so nulling sample_alias changes nothing."""
+    """The CRO group keys the sheet, so nulling sample_alias changes nothing."""
     expected = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
 
     main_df = droplet_main_df()
@@ -230,25 +433,19 @@ def test_sample_alias_is_not_the_grouping_key():
     pd.testing.assert_frame_equal(actual, expected)
 
 
-def test_missing_library_aliases_column_returns_empty_frame(capsys):
-    main_df = pd.DataFrame({"sample_alias": ["s1"]})
+def test_missing_library_group_column_returns_empty_frame(capsys):
+    main_df = main_frame({"sample_alias": ["s1"]})
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert sra_df.empty
-    assert "no library aliases column" in capsys.readouterr().out
+    assert "no library CRO group identifier column" in capsys.readouterr().out
 
 
-def test_alias_only_main_df_collapses_without_aggregating():
+def test_key_only_main_df_collapses_without_aggregating():
     """groupby().agg({}) raises, so a frame of nothing but the key dedupes instead."""
-    main_df = pd.DataFrame(
-        {
-            "droplet_based_libraries_aliases": [
-                ["alex-marson:LIB_A_GEX"],
-                ["alex-marson:LIB_A_GEX"],
-                ["alex-marson:LIB_B_GEX"],
-            ]
-        }
+    main_df = main_frame(
+        {"droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A", "LIB_B"]}
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
@@ -261,15 +458,15 @@ def test_alias_only_main_df_collapses_without_aggregating():
         DATE_COLUMN,
         GEO_COLUMN,
     ]
-    assert list(sra_df["sample_name"]) == ["LIB_A_GEX", "LIB_B_GEX"]
+    assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_B"]
     assert list(sra_df[DATE_COLUMN]) == ["not provided", "not provided"]
     assert list(sra_df[GEO_COLUMN]) == ["not provided", "not provided"]
 
 
 def test_library_without_barcodes_leaves_the_column_empty():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
             "droplet_based_libraries_samples": [[sample("s1", [])]],
         }
     )
@@ -280,27 +477,9 @@ def test_library_without_barcodes_leaves_the_column_empty():
 
 
 def test_empty_main_df_returns_empty_frame():
-    main_df = pd.DataFrame({"droplet_based_libraries_aliases": pd.Series(dtype=object)})
+    main_df = main_frame({"droplet_based_libraries_CRO_group_identifier": pd.Series(dtype=object)})
 
     assert make_flattener().create_sra_biosample_dataframe(main_df).empty
-
-
-# _clean_alias_cell
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        pytest.param(["alex-marson:LIB_A_GEX"], "LIB_A_GEX", id="list"),
-        pytest.param("alex-marson:LIB_A_GEX", "LIB_A_GEX", id="bare-string"),
-        pytest.param("LIB_A_GEX", "LIB_A_GEX", id="string-without-prefix"),
-        pytest.param([], None, id="empty-list"),
-        pytest.param("", "", id="empty-string"),
-        pytest.param(None, None, id="none"),
-    ],
-)
-def test_clean_alias_cell(value, expected):
-    assert make_flattener()._clean_alias_cell(value) == expected
 
 
 # isolate and age
@@ -343,7 +522,7 @@ def donor_main_df(**columns):
     889023040 is the 32-year-old female, 889081306 the 29-year-old male.
     """
     base = {
-        "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 4,
+        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 4,
         "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
         "human_donors_cxg_donor_id": [889081306, 889023040, 889081306, 889023040],
         "human_donors_sex": ["male", "female", "male", "female"],
@@ -355,7 +534,7 @@ def donor_main_df(**columns):
         ],
     }
     base.update(columns)
-    return pd.DataFrame(base)
+    return main_frame(base)
 
 
 def test_donor_columns_are_unordered_pooled_sets():
@@ -450,12 +629,12 @@ def test_no_donor_id_column_omits_isolate():
     ("sexes", "expected"),
     [
         pytest.param(["male"], "male", id="male-only"),
-        pytest.param(["female", "male"], "pooled: male and female", id="male-listed-first"),
-        pytest.param(["male", "male", "female"], "pooled: male and female", id="deduplicated"),
-        pytest.param(["unknown", "male"], "pooled: male and unknown", id="male-then-unknown"),
+        pytest.param(["female", "male"], "pooled male and female", id="male-listed-first"),
+        pytest.param(["male", "male", "female"], "pooled male and female", id="deduplicated"),
+        pytest.param(["unknown", "male"], "pooled male and unknown", id="male-then-unknown"),
         pytest.param(
             ["unknown", "female", "male"],
-            "pooled: male, female and unknown",
+            "pooled male, female and unknown",
             id="three-values",
         ),
         pytest.param(["unknown"], "unknown", id="unknown-alone-passes-through"),
@@ -469,7 +648,7 @@ def test_format_pooled_sex(sexes, expected):
 def test_mixed_sex_pool_reads_male_first():
     sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
 
-    assert sra_df.loc[0, SEX_COLUMN] == "pooled: male and female"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
 
 
 def test_single_sex_library_is_the_bare_value():
@@ -486,7 +665,7 @@ def test_a_sample_pooling_several_donors_splits_the_sexes():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, SEX_COLUMN] == "pooled: male and female"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
 
 
 def test_missing_sex_column_leaves_the_sex_column_empty():
@@ -507,15 +686,14 @@ def test_non_human_donor_columns_are_used_when_human_is_absent():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, SEX_COLUMN] == "pooled: male and female"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
     assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 889023040, 889081306"
 
 
 def test_donor_columns_are_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "human_donors_cxg_donor_id": [11, 22, 33],
             "human_donors_sex": ["male", "female", "male"],
         }
@@ -523,10 +701,10 @@ def test_donor_columns_are_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", ISOLATE_COLUMN] == "pooled: 11, 22"
-    assert sra_df.loc["LIB_A_GEX", SEX_COLUMN] == "pooled: male and female"
-    assert sra_df.loc["LIB_B_GEX", ISOLATE_COLUMN] == "33"
-    assert sra_df.loc["LIB_B_GEX", SEX_COLUMN] == "male"
+    assert sra_df.loc["LIB_A", ISOLATE_COLUMN] == "pooled: 11, 22"
+    assert sra_df.loc["LIB_A", SEX_COLUMN] == "pooled male and female"
+    assert sra_df.loc["LIB_B", ISOLATE_COLUMN] == "33"
+    assert sra_df.loc["LIB_B", SEX_COLUMN] == "male"
 
 
 # *tissue
@@ -535,13 +713,13 @@ def test_donor_columns_are_scoped_to_each_library():
 def tissue_main_df(prefix, term="blood", **columns):
     """One library, two samples of the given sample type."""
     base = {
-        "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
         f"{prefix}_@id": [f"/{prefix}/s1/", f"/{prefix}/s2/"],
     }
     if term is not None:
         base[f"{prefix}_sample_terms_term_name"] = [term, term]
     base.update(columns)
-    return pd.DataFrame(base)
+    return main_frame(base)
 
 
 @pytest.mark.parametrize("prefix", ["cell_lines", "primary_cell_cultures"])
@@ -569,9 +747,9 @@ def test_tissue_flattens_a_multi_term_sample():
 
 
 def test_tissue_mixes_a_real_term_with_not_available():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
             "tissues_@id": ["/tissues/s1/", None],
             "tissues_sample_terms_term_name": ["blood", None],
             "cell_lines_@id": [None, "/cell_lines/s2/"],
@@ -594,10 +772,9 @@ def test_tissue_with_no_sample_term_stays_empty():
 
 
 def test_tissue_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]]
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] + ["LIB_B"],
             "tissues_@id": ["/tissues/s1/", None],
             "tissues_sample_terms_term_name": ["blood", None],
             "cell_lines_@id": [None, "/cell_lines/s2/"],
@@ -606,14 +783,14 @@ def test_tissue_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", TISSUE_COLUMN] == "blood"
-    assert sra_df.loc["LIB_B_GEX", TISSUE_COLUMN] == "not available"
+    assert sra_df.loc["LIB_A", TISSUE_COLUMN] == "blood"
+    assert sra_df.loc["LIB_B", TISSUE_COLUMN] == "not available"
 
 
-def test_tissue_skips_rows_with_no_library_alias():
+def test_tissue_skips_rows_with_no_library_group():
     main_df = tissue_main_df("tissues")
     main_df["tissues_sample_terms_term_name"] = ["blood", "lung"]
-    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -665,11 +842,11 @@ def test_provider_titles(value, expected):
 
 def provider_main_df(**columns):
     base = {
-        "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
         "tissues_lab": [LAB, LAB],
     }
     base.update(columns)
-    return pd.DataFrame(base)
+    return main_frame(base)
 
 
 def test_provider_falls_back_to_sample_lab_when_sources_is_absent():
@@ -727,9 +904,9 @@ def test_provider_ignores_lab_columns_on_non_sample_objects():
     assert PROVIDER_COLUMN not in sra_df.columns
 
 
-def test_provider_skips_rows_with_no_library_alias():
+def test_provider_skips_rows_with_no_library_group():
     main_df = provider_main_df(tissues_lab=[LAB, OTHER_LAB])
-    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -747,18 +924,17 @@ def test_no_sources_or_lab_column_omits_the_provider(capsys):
 
 
 def test_provider_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "tissues_lab": [LAB, LAB, OTHER_LAB],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", PROVIDER_COLUMN] == "Alex Marson, UCSF"
-    assert sra_df.loc["LIB_B_GEX", PROVIDER_COLUMN] == "Other Lab"
+    assert sra_df.loc["LIB_A", PROVIDER_COLUMN] == "Alex Marson, UCSF"
+    assert sra_df.loc["LIB_B", PROVIDER_COLUMN] == "Other Lab"
 
 
 # *collection_date
@@ -841,10 +1017,9 @@ def test_collection_date_ignores_date_obtained_on_non_sample_objects():
 
 
 def test_collection_date_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "tissues_lab": [LAB, LAB, LAB],
             "tissues_date_obtained": ["2023-01-05", None, "2024-02-02"],
         }
@@ -852,13 +1027,13 @@ def test_collection_date_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", DATE_COLUMN] == "2023-01-05; not provided"
-    assert sra_df.loc["LIB_B_GEX", DATE_COLUMN] == "2024-02-02"
+    assert sra_df.loc["LIB_A", DATE_COLUMN] == "2023-01-05; not provided"
+    assert sra_df.loc["LIB_B", DATE_COLUMN] == "2024-02-02"
 
 
-def test_collection_date_skips_rows_with_no_library_alias():
+def test_collection_date_skips_rows_with_no_library_group():
     main_df = provider_main_df(tissues_date_obtained=["2023-01-05", "2024-02-02"])
-    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -921,18 +1096,17 @@ def test_geo_loc_name_ignores_non_sample_objects():
 
 
 def test_geo_loc_name_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "tissues_collection_geographical_location": ["USA", None, "Canada"],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", GEO_COLUMN] == "USA; not provided"
-    assert sra_df.loc["LIB_B_GEX", GEO_COLUMN] == "Canada"
+    assert sra_df.loc["LIB_A", GEO_COLUMN] == "USA; not provided"
+    assert sra_df.loc["LIB_B", GEO_COLUMN] == "Canada"
 
 
 # ethnicity
@@ -1001,10 +1175,9 @@ def test_all_null_ethnicity_omits_the_column():
 
 
 def test_ethnicity_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "human_donors_cxg_donor_id": [11, 22, 33],
             "human_donors_ethnicity_term_name": ["Asian", "European American", "Asian"],
         }
@@ -1012,8 +1185,8 @@ def test_ethnicity_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", ETHNICITY_COLUMN] == "pooled: Asian, European American"
-    assert sra_df.loc["LIB_B_GEX", ETHNICITY_COLUMN] == "Asian"
+    assert sra_df.loc["LIB_A", ETHNICITY_COLUMN] == "pooled: Asian, European American"
+    assert sra_df.loc["LIB_B", ETHNICITY_COLUMN] == "Asian"
 
 
 def test_ethnicity_is_human_only():
@@ -1072,14 +1245,14 @@ def test_format_pooled_values(values, expected):
 
 def perturbation_main_df(rows=2, **columns):
     base = {
-        "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * rows,
+        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * rows,
         "treatments_lower_bound_duration": [8] * rows,
         "treatments_upper_bound_duration": [8] * rows,
         "treatments_duration_units": ["hour"] * rows,
         "treatments_description": ["stimulation"] * rows,
     }
     base.update(columns)
-    return pd.DataFrame(base)
+    return main_frame(base)
 
 
 def test_perturbation_single_value_is_bare():
@@ -1154,10 +1327,9 @@ def test_all_null_treatments_omits_the_perturbation():
 
 
 def test_perturbation_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "treatments_lower_bound_duration": [8, None, 24],
             "treatments_upper_bound_duration": [8, None, 24],
             "treatments_duration_units": ["hour", None, "hour"],
@@ -1167,10 +1339,8 @@ def test_perturbation_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", PERTURBATION_COLUMN] == (
-        "pooled: 8 hour stimulation, no treatment"
-    )
-    assert sra_df.loc["LIB_B_GEX", PERTURBATION_COLUMN] == "24 hour fasting"
+    assert sra_df.loc["LIB_A", PERTURBATION_COLUMN] == ("pooled: 8 hour stimulation, no treatment")
+    assert sra_df.loc["LIB_B", PERTURBATION_COLUMN] == "24 hour fasting"
 
 
 def test_perturbation_warns_when_a_sample_has_several_treatments(capsys):
@@ -1195,9 +1365,9 @@ def test_perturbation_does_not_warn_for_a_single_treatment(capsys):
     assert "several treatments" not in capsys.readouterr().out
 
 
-def test_perturbation_skips_rows_with_no_library_alias():
+def test_perturbation_skips_rows_with_no_library_group():
     main_df = perturbation_main_df(treatments_description=["stimulation", "fasting"])
-    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -1210,11 +1380,11 @@ def test_perturbation_skips_rows_with_no_library_alias():
 
 def factors_main_df(rows=2, **columns):
     base = {
-        "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * rows,
+        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * rows,
         "treatments_ontological_term_term_name": [["anti-CD2_HUMAN", "IL2_HUMAN"]] * rows,
     }
     base.update(columns)
-    return pd.DataFrame(base)
+    return main_frame(base)
 
 
 def test_factors_bracket_a_multi_factor_sample():
@@ -1285,10 +1455,9 @@ def test_all_null_ontological_terms_omits_the_factors():
 
 
 def test_factors_are_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "treatments_ontological_term_term_name": [
                 ["anti-CD2_HUMAN", "IL2_HUMAN"],
                 None,
@@ -1299,13 +1468,13 @@ def test_factors_are_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", FACTORS_COLUMN] == "pooled: [IL2_HUMAN, anti-CD2_HUMAN], na"
-    assert sra_df.loc["LIB_B_GEX", FACTORS_COLUMN] == "IL6_HUMAN"
+    assert sra_df.loc["LIB_A", FACTORS_COLUMN] == "pooled: [IL2_HUMAN, anti-CD2_HUMAN], na"
+    assert sra_df.loc["LIB_B", FACTORS_COLUMN] == "IL6_HUMAN"
 
 
-def test_factors_skip_rows_with_no_library_alias():
+def test_factors_skip_rows_with_no_library_group():
     main_df = factors_main_df(treatments_ontological_term_term_name=[["IL2_HUMAN"], ["IL6_HUMAN"]])
-    main_df.loc[1, "droplet_based_libraries_aliases"] = None
+    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -1365,27 +1534,26 @@ def test_preservation_method_absent_when_no_sample_has_one():
 
 
 def test_preservation_method_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "tissues_preservation_method": ["fresh", None, "fixed-frozen"],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", PRESERVATION_COLUMN] == "fresh; not applicable"
-    assert sra_df.loc["LIB_B_GEX", PRESERVATION_COLUMN] == "fixed-frozen"
+    assert sra_df.loc["LIB_A", PRESERVATION_COLUMN] == "fresh; not applicable"
+    assert sra_df.loc["LIB_B", PRESERVATION_COLUMN] == "fixed-frozen"
 
 
 # genetic_perturbation_strategy
 
 
 def strategy_main_df(values=("interference screen", "interference screen")):
-    return pd.DataFrame(
+    return main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * len(values),
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * len(values),
             "genetic_modifications_strategy": list(values),
         }
     )
@@ -1450,9 +1618,9 @@ def test_genetic_strategy_absent_when_no_sample_has_one():
 
 def test_genetic_strategy_ignores_sample_prefixed_columns():
     """'strategy' is read off genetic_modifications, not off the sample."""
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
             "tissues_strategy": ["interference screen"] * 2,
         }
     )
@@ -1463,10 +1631,9 @@ def test_genetic_strategy_ignores_sample_prefixed_columns():
 
 
 def test_genetic_strategy_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "genetic_modifications_strategy": [
                 "interference screen",
                 None,
@@ -1477,69 +1644,67 @@ def test_genetic_strategy_is_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", STRATEGY_COLUMN] == (
-        "CRISPR interference screen; not applicable"
-    )
-    assert sra_df.loc["LIB_B_GEX", STRATEGY_COLUMN] == "CRISPR activation screen"
+    assert sra_df.loc["LIB_A", STRATEGY_COLUMN] == ("CRISPR interference screen; not applicable")
+    assert sra_df.loc["LIB_B", STRATEGY_COLUMN] == "CRISPR activation screen"
 
 
-# cell_type / suspension_enriched_cell_types
+# intended_cell_type / the suspension_* columns
 
 
 def cell_type_main_df(prefix="cell_lines", values=(["HeLa"], ["HeLa"]), field="intended"):
-    return pd.DataFrame(
+    return main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * len(values),
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * len(values),
             f"{prefix}_{field}_cell_types_term_name": list(values),
         }
     )
 
 
 @pytest.mark.parametrize("prefix", ["cell_lines", "organoids"])
-def test_cell_type_reads_intended_cell_types(prefix):
+def test_intended_cell_type_reads_intended_cell_types(prefix):
     sra_df = make_flattener().create_sra_biosample_dataframe(cell_type_main_df(prefix))
 
-    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa"
+    assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa"
 
 
 @pytest.mark.parametrize("prefix", ["tissues", "primary_cell_cultures"])
-def test_cell_type_ignores_sample_types_without_intended_cell_types(prefix):
+def test_intended_cell_type_ignores_sample_types_without_intended_cell_types(prefix):
     """The field is only on cell lines and organoids."""
     sra_df = make_flattener().create_sra_biosample_dataframe(cell_type_main_df(prefix))
 
-    assert CELL_TYPE_COLUMN not in sra_df.columns
+    assert INTENDED_CELL_TYPE_COLUMN not in sra_df.columns
 
 
-def test_cell_type_flattens_a_multi_term_array():
+def test_intended_cell_type_flattens_a_multi_term_array():
     main_df = cell_type_main_df(values=(["HeLa", "K562"], ["HeLa", "K562"]))
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa; K562"
+    assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa; K562"
 
 
-def test_cell_type_gap_is_not_applicable():
+def test_intended_cell_type_gap_is_not_applicable():
     """A tissue cannot have an intended cell type, so the gap is not 'not provided'."""
     main_df = cell_type_main_df(values=(["HeLa"], None))
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa; not applicable"
+    assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa; not applicable"
 
 
-def test_cell_type_absent_when_no_sample_has_one():
+def test_intended_cell_type_absent_when_no_sample_has_one():
     """All-gap means the column drops, rather than a column of 'not applicable'."""
     main_df = cell_type_main_df(values=(None, None))
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert CELL_TYPE_COLUMN not in sra_df.columns
+    assert INTENDED_CELL_TYPE_COLUMN not in sra_df.columns
 
 
-def test_cell_type_absent_when_the_column_is_missing():
+def test_intended_cell_type_absent_when_the_column_is_missing():
     sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
 
-    assert CELL_TYPE_COLUMN not in sra_df.columns
+    assert INTENDED_CELL_TYPE_COLUMN not in sra_df.columns
 
 
 @pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
@@ -1571,9 +1736,9 @@ def test_enriched_cell_types_absent_when_no_sample_has_one():
 
 def test_both_cell_type_columns_can_coexist():
     """A cell line run carries both, each with its own gap marker."""
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
             "cell_lines_intended_cell_types_term_name": [["HeLa"], None],
             "cell_lines_enriched_cell_types_term_name": [["T cell"], None],
         }
@@ -1581,23 +1746,158 @@ def test_both_cell_type_columns_can_coexist():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, CELL_TYPE_COLUMN] == "HeLa; not applicable"
+    assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa; not applicable"
     assert sra_df.loc[0, ENRICHED_COLUMN] == "T cell; not provided"
 
 
-def test_cell_type_columns_are_scoped_to_each_library():
-    main_df = pd.DataFrame(
+def test_intended_cell_type_columns_are_scoped_to_each_library():
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "cell_lines_intended_cell_types_term_name": [["HeLa"], ["K562"], ["HeLa"]],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", CELL_TYPE_COLUMN] == "HeLa; K562"
-    assert sra_df.loc["LIB_B_GEX", CELL_TYPE_COLUMN] == "HeLa"
+    assert sra_df.loc["LIB_A", INTENDED_CELL_TYPE_COLUMN] == "HeLa; K562"
+    assert sra_df.loc["LIB_B", INTENDED_CELL_TYPE_COLUMN] == "HeLa"
+
+
+@pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
+def test_depleted_cell_types_reads_any_sample_type(prefix):
+    """The depleted twin of enriched_cell_types, on all four types likewise."""
+    main_df = cell_type_main_df(prefix, field="depleted")
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DEPLETED_COLUMN] == "HeLa"
+
+
+def test_depleted_cell_types_gap_is_not_provided():
+    main_df = cell_type_main_df(values=(["T cell"], None), field="depleted")
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, DEPLETED_COLUMN] == "T cell; not provided"
+
+
+def test_depleted_cell_types_absent_when_no_sample_has_one():
+    main_df = cell_type_main_df(values=(None, None), field="depleted")
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert DEPLETED_COLUMN not in sra_df.columns
+
+
+def test_enriched_and_depleted_are_separate_columns():
+    """One sample enriched for a type and depleted of another reports both."""
+    main_df = main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "tissues_enriched_cell_types_term_name": [["T cell"]],
+            "tissues_depleted_cell_types_term_name": [["B cell"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ENRICHED_COLUMN] == "T cell"
+    assert sra_df.loc[0, DEPLETED_COLUMN] == "B cell"
+
+
+# suspension_selection_kits / suspension_enrichment_factors
+
+
+def selection_main_df(field, values, prefix="tissues"):
+    return main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * len(values),
+            f"{prefix}_{field}": list(values),
+        }
+    )
+
+
+@pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
+def test_selection_kits_reads_any_sample_type(prefix):
+    main_df = selection_main_df("selection_kits", (["EasySep CD4"],), prefix)
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, KITS_COLUMN] == "EasySep CD4"
+
+
+def test_selection_kits_flattens_a_multi_kit_array():
+    main_df = selection_main_df("selection_kits", (["EasySep CD4", "EasySep CD8"],))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, KITS_COLUMN] == "EasySep CD4; EasySep CD8"
+
+
+def test_selection_kits_gap_is_not_provided():
+    main_df = selection_main_df("selection_kits", (["EasySep CD4"], None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, KITS_COLUMN] == "EasySep CD4; not provided"
+
+
+def test_selection_kits_absent_when_no_sample_has_one():
+    main_df = selection_main_df("selection_kits", (None, None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert KITS_COLUMN not in sra_df.columns
+
+
+@pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
+def test_enrichment_factors_read_selection_markers(prefix):
+    """BIOHUB's mapping: the factors column is fed by selection_markers."""
+    main_df = selection_main_df("selection_markers", (["lipid stain (top 30%)"],), prefix)
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ENRICHMENT_FACTORS_COLUMN] == "lipid stain (top 30%)"
+
+
+def test_enrichment_factors_pool_across_samples_that_disagree():
+    """One group whose samples were sorted on opposite tails of the same stain."""
+    main_df = selection_main_df(
+        "selection_markers", (["lipid stain (top 30%)"], ["lipid stain (bottom 30%)"])
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ENRICHMENT_FACTORS_COLUMN] == (
+        "lipid stain (bottom 30%); lipid stain (top 30%)"
+    )
+
+
+def test_enrichment_factors_gap_is_not_provided():
+    main_df = selection_main_df("selection_markers", (["CD4"], None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, ENRICHMENT_FACTORS_COLUMN] == "CD4; not provided"
+
+
+def test_enrichment_factors_absent_when_no_sample_has_one():
+    main_df = selection_main_df("selection_markers", (None, None))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert ENRICHMENT_FACTORS_COLUMN not in sra_df.columns
+
+
+def test_kits_and_factors_are_independent_columns():
+    """Distinct sources, so a run with only kits gets no factors column."""
+    main_df = selection_main_df("selection_kits", (["EasySep CD4"],))
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert KITS_COLUMN in sra_df.columns
+    assert ENRICHMENT_FACTORS_COLUMN not in sra_df.columns
 
 
 # suspension_type
@@ -1630,18 +1930,17 @@ def test_suspension_type_fills_a_gap_like_a_required_column():
 
 def test_a_library_with_no_suspension_type_still_gets_a_cell():
     """One library has values so the column exists; the other is filled, not blank."""
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]]
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] + ["LIB_B"],
             "tissues_suspension_type": ["cell", None],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", SUSPENSION_COLUMN] == "cell"
-    assert sra_df.loc["LIB_B_GEX", SUSPENSION_COLUMN] == "not provided"
+    assert sra_df.loc["LIB_A", SUSPENSION_COLUMN] == "cell"
+    assert sra_df.loc["LIB_B", SUSPENSION_COLUMN] == "not provided"
 
 
 def test_no_suspension_type_column_omits_it():
@@ -1671,18 +1970,17 @@ def test_suspension_type_reads_any_sample_type(sample_type):
 
 
 def test_suspension_type_is_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "tissues_suspension_type": ["cell", "nucleus", "cell"],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", SUSPENSION_COLUMN] == "cell; nucleus"
-    assert sra_df.loc["LIB_B_GEX", SUSPENSION_COLUMN] == "cell"
+    assert sra_df.loc["LIB_A", SUSPENSION_COLUMN] == "cell; nucleus"
+    assert sra_df.loc["LIB_B", SUSPENSION_COLUMN] == "cell"
 
 
 # age_lower_bound / age_upper_bound
@@ -1807,10 +2105,9 @@ def test_age_bounds_do_not_need_a_donor_id_column():
 
 
 def test_age_bounds_are_scoped_to_each_library():
-    main_df = pd.DataFrame(
+    main_df = main_frame(
         {
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2
-            + [["alex-marson:LIB_B_GEX"]],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
             "tissues_lower_bound_age": [29, 22, 40],
             "tissues_age_units": ["year"] * 3,
         }
@@ -1818,8 +2115,8 @@ def test_age_bounds_are_scoped_to_each_library():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
 
-    assert sra_df.loc["LIB_A_GEX", AGE_LOWER_COLUMN] == "pooled: 22 years, 29 years"
-    assert sra_df.loc["LIB_B_GEX", AGE_LOWER_COLUMN] == "40 years"
+    assert sra_df.loc["LIB_A", AGE_LOWER_COLUMN] == "pooled: 22 years, 29 years"
+    assert sra_df.loc["LIB_B", AGE_LOWER_COLUMN] == "40 years"
 
 
 # PROP_MAP_SRA_BIOSAMPLE
@@ -1827,12 +2124,15 @@ def test_age_bounds_are_scoped_to_each_library():
 
 def test_prop_map_sends_both_library_types_to_sample_name():
     """The rename relies on both library keys sharing one output name."""
-    assert PROP_MAP_SRA_BIOSAMPLE["droplet_based_libraries_aliases"] == "sample_name"
-    assert PROP_MAP_SRA_BIOSAMPLE["plate_based_libraries_aliases"] == "sample_name"
-    # The per-sample alias is deliberately absent: the key is the library.
+    droplet_key = "droplet_based_libraries_CRO_group_identifier"
+    assert PROP_MAP_SRA_BIOSAMPLE[droplet_key] == "sample_name"
+    assert PROP_MAP_SRA_BIOSAMPLE["plate_based_libraries_CRO_group_identifier"] == "sample_name"
+    # The per-sample alias is deliberately absent: the key is the CRO group.
     assert "sample_alias" not in PROP_MAP_SRA_BIOSAMPLE
+    # The library alias is absent too, now the group identifier keys the sheet.
+    assert "droplet_based_libraries_aliases" not in PROP_MAP_SRA_BIOSAMPLE
     # sample_name is the one output column without the SRA required marker.
-    assert not PROP_MAP_SRA_BIOSAMPLE["droplet_based_libraries_aliases"].startswith("*")
+    assert not PROP_MAP_SRA_BIOSAMPLE[droplet_key].startswith("*")
     assert ORGANISM_COLUMN.startswith("*")
 
 

@@ -119,8 +119,8 @@ PROP_MAP_BIOHUB = {
 # The reason these are not derived is because there's no value transform, gap markers
 # or multiple source columns
 PROP_MAP_SRA_BIOSAMPLE = {
-    "droplet_based_libraries_aliases": "sample_name",
-    "plate_based_libraries_aliases": "sample_name",
+    "droplet_based_libraries_CRO_group_identifier": "sample_name",
+    "plate_based_libraries_CRO_group_identifier": "sample_name",
     "non_human_donors_taxa": "*organism",
     "human_donors_taxa": "*organism",
 }
