@@ -18,7 +18,18 @@ jobs:
   review:
     # Only review PRs from branches within this repo; skip PRs opened from forks
     # (fork PRs don't get access to repo secrets, so the review would fail anyway).
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    #
+    # Also skip PRs opened by a bot. The action refuses to run for a non-human
+    # actor unless that bot is named in its `allowed_bots` input, and a
+    # bot-triggered run reads from the Dependabot secret store rather than the
+    # Actions one, so CLAUDE_CODE_OAUTH_TOKEN would resolve empty even if it
+    # were allowed. Without this guard every Dependabot version bump carries a
+    # red X for a review that never could have run - and a one-line pin bump is
+    # not worth an Opus review anyway. `user.type` is the same signal the action
+    # itself checks, so this skips cleanly instead of failing.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     # An opus review with up to 80 turns over a large diff needs room. A job
     # timeout kills the run before the review is posted, so it costs the whole
