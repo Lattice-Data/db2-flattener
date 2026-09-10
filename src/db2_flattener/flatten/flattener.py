@@ -439,6 +439,8 @@ class DB2Flattener:
             biohub_df["development_stage"] = (
                 biohub_df["development_stage"].replace("", pd.NA).fillna("unknown")
             )
+        if "sex" in biohub_df.columns:
+            biohub_df["sex"] = biohub_df["sex"].replace("unspecified", "unknown")
         if "genetic_perturbation_strategy" in biohub_df.columns:
             biohub_df["genetic_perturbation_strategy"] = biohub_df[
                 "genetic_perturbation_strategy"

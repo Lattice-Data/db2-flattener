@@ -352,3 +352,33 @@ def test_biohub_empty_development_stage_defaults_to_unknown():
         "adult",
         "na",
     ]
+
+
+def test_biohub_unspecified_sex_defaults_to_unknown():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+                None,
+            ],
+            "cell_lines_@type": [
+                None,
+                None,
+                ["CellLine", "Biosample", "Item"],
+            ],
+            "tissues_sample_terms_term_name": ["lung", "lung", None],
+            "cell_lines_sample_terms_term_id": [None, None, "CL:0000000"],
+            "tissues_developmental_stages_term_name": ["adult", "adult", None],
+            "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
+            "human_donors_sex": ["unspecified", "female", "unspecified"],
+            "human_donors_ethnicity_term_name": ["European", "European", "Asian"],
+            "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["tissue_type"]) == ["tissue", "tissue", "cell line"]
+    assert list(biohub_df["sex"]) == ["unknown", "female", "na"]
