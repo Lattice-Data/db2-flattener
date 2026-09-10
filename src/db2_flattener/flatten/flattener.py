@@ -948,12 +948,15 @@ class DB2Flattener:
         Per-library 'tissue' cell, keyed by CRO group.
 
         A cell line or primary cell culture has no tissue, so it reports
-        'not available'. A tissue or organoid reports its sample_terms, which is
+        'not applicable'. A tissue or organoid reports its sample_terms, which is
         an array - each term becomes its own entry. A sample with no term at all
-        contributes 'not provided', a different thing from 'not available': the
+        contributes 'not provided', a different thing from 'not applicable': the
         schema should not allow it, but this column is required and cannot be
         left blank. A MAIN with no sample_terms column at all fills the same way,
         rather than dropping a required column.
+
+        Both markers are INSDC missing-value terms, which is what BioSample
+        validates a required attribute against.
         """
         tissueless = [
             main_df[f"{prefix}_@id"]
@@ -982,7 +985,7 @@ class DB2Flattener:
                 continue
             found = by_library.setdefault(library, set())
             if tissueless_row:
-                found.add("not available")
+                found.add("not applicable")
                 continue
             found.update([str(item).strip() for item in to_items(term)] or ["not provided"])
 

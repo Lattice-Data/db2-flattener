@@ -627,10 +627,10 @@ def tissue_main_df(prefix, term="blood", **columns):
 
 
 @pytest.mark.parametrize("prefix", ["cell_lines", "primary_cell_cultures"])
-def test_tissueless_sample_types_report_not_available(prefix):
+def test_tissueless_sample_types_report_not_applicable(prefix):
     sra_df = make_flattener().create_sra_biosample_dataframe(tissue_main_df(prefix, "HeLa"))
 
-    assert sra_df.loc[0, TISSUE_COLUMN] == "not available"
+    assert sra_df.loc[0, TISSUE_COLUMN] == "not applicable"
 
 
 @pytest.mark.parametrize("prefix", ["tissues", "organoids"])
@@ -640,7 +640,7 @@ def test_tissue_and_organoid_report_their_sample_term(prefix):
     assert sra_df.loc[0, TISSUE_COLUMN] == "blood"
 
 
-def test_tissue_mixes_a_real_term_with_not_available():
+def test_tissue_mixes_a_real_term_with_not_applicable():
     main_df = main_frame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
@@ -653,7 +653,7 @@ def test_tissue_mixes_a_real_term_with_not_available():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, TISSUE_COLUMN] == "blood; not available"
+    assert sra_df.loc[0, TISSUE_COLUMN] == "blood; not applicable"
 
 
 def test_tissue_with_no_sample_term_column_still_fills_the_required_cell():
