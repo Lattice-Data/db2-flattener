@@ -294,3 +294,61 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
     assert list(biohub_df["sample_probe_barcode"]) == ["BC001", "BC005", "BC003"]
     assert list(biohub_df["suspension_type"]) == ["cell", "cell", "cell"]
     assert list(biohub_df["preservation_method"]) == ["fresh", "frozen", "fresh"]
+
+
+def test_biohub_empty_development_stage_defaults_to_unknown():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+                None,
+            ],
+            "cell_lines_@type": [
+                None,
+                None,
+                None,
+                None,
+                ["CellLine", "Biosample", "Item"],
+            ],
+            "tissues_sample_terms_term_name": ["lung", "lung", "lung", "lung", None],
+            "cell_lines_sample_terms_term_id": [None, None, None, None, "CL:0000000"],
+            "tissues_developmental_stages_term_name": ["", None, pd.NA, "adult", None],
+            "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3", "donor4", "donor5"],
+            "human_donors_sex": ["female", "female", "female", "female", "male"],
+            "human_donors_ethnicity_term_name": [
+                "European",
+                "European",
+                "European",
+                "European",
+                "Asian",
+            ],
+            "human_donors_taxa": [
+                "Homo sapiens",
+                "Homo sapiens",
+                "Homo sapiens",
+                "Homo sapiens",
+                "Homo sapiens",
+            ],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["tissue_type"]) == [
+        "tissue",
+        "tissue",
+        "tissue",
+        "tissue",
+        "cell line",
+    ]
+    assert list(biohub_df["development_stage"]) == [
+        "unknown",
+        "unknown",
+        "unknown",
+        "adult",
+        "na",
+    ]

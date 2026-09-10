@@ -435,6 +435,10 @@ class DB2Flattener:
                 if col not in biohub_df.columns:
                     biohub_df[col] = pd.NA
                 biohub_df.loc[cell_line, col] = "na"
+        if "development_stage" in biohub_df.columns:
+            biohub_df["development_stage"] = (
+                biohub_df["development_stage"].replace("", pd.NA).fillna("unknown")
+            )
         if "genetic_perturbation_strategy" in biohub_df.columns:
             biohub_df["genetic_perturbation_strategy"] = biohub_df[
                 "genetic_perturbation_strategy"
