@@ -327,3 +327,10 @@ def test_expand_list_column_missing_is_noop():
     df = pd.DataFrame({"keep": ["x"]})
     result = expand_list_column(df, "raw_file")
     pd.testing.assert_frame_equal(result, df)
+
+
+def test_expand_list_column_empty_frame_keeps_na_column():
+    df = pd.DataFrame({"keep": pd.Series([], dtype=object), "raw_file": pd.Series([], dtype=object)})
+    result = expand_list_column(df, "raw_file")
+    assert list(result.columns) == ["keep", "raw_file"]
+    assert len(result) == 0

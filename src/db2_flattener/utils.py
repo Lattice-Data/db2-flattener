@@ -173,7 +173,8 @@ def expand_list_column(df: pd.DataFrame, col: str) -> pd.DataFrame:
         return df
 
     items = df[col].map(to_items)
-    max_n = int(items.map(len).max() or 0)
+    lengths = items.map(len)
+    max_n = int(lengths.max()) if len(lengths) else 0
     other = df.drop(columns=[col])
     if max_n == 0:
         other[col] = pd.NA
