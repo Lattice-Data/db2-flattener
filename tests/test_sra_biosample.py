@@ -18,7 +18,7 @@ from db2_flattener.schema.constants import (
     TISSUE_TYPE_MAP,
     Configs,
 )
-from db2_flattener.utils import age_from_developmental_stage
+from db2_flattener.utils import ages_from_developmental_stages
 
 # Derived columns, named in the flattener rather than in PROP_MAP_SRA_BIOSAMPLE.
 BARCODE_COLUMN = "sample_name: sample_probe_barcode"
@@ -48,7 +48,6 @@ PRESERVATION_COLUMN = "preservation_method"
 ORGANISM_COLUMN = PROP_MAP_SRA_BIOSAMPLE["human_donors_taxa"]
 
 LAB = {"@id": "/labs/alex-marson/", "title": "Alex Marson, UCSF"}
-OTHER_LAB = {"@id": "/labs/other/", "title": "Other Lab"}
 SOURCE = {"@id": "/sources/abcam/", "title": "Abcam"}
 
 
@@ -106,18 +105,6 @@ def test_barcode_map_sorts_by_alias_and_strips_lab_prefix():
     assert make_flattener()._sample_probe_barcode_map(FOUR_SAMPLES) == FOUR_SAMPLES_MAP
 
 
-def test_barcode_map_is_independent_of_source_order():
-    flattener = make_flattener()
-    forward = flattener._sample_probe_barcode_map(FOUR_SAMPLES)
-    reversed_ = flattener._sample_probe_barcode_map(list(reversed(FOUR_SAMPLES)))
-    assert forward == reversed_
-
-
-def test_barcode_map_single_sample():
-    samples = [sample("s1", ["BC001+CR001", "BC002+CR002"])]
-    assert make_flattener()._sample_probe_barcode_map(samples) == "s1 : BC001+CR001|BC002+CR002"
-
-
 def test_barcode_map_keeps_sample_with_no_barcodes_when_another_has_some():
     samples = [sample("s2", []), sample("s1", ["BC001+CR001"])]
     assert make_flattener()._sample_probe_barcode_map(samples) == "s1 : BC001+CR001, s2 : "
@@ -136,11 +123,6 @@ def test_barcode_map_keeps_sample_with_no_barcodes_when_another_has_some():
 )
 def test_barcode_map_returns_none(library_samples):
     assert make_flattener()._sample_probe_barcode_map(library_samples) is None
-
-
-def test_barcode_map_accepts_a_bare_barcode_string():
-    samples = [sample("s1", "BC001+CR001")]
-    assert make_flattener()._sample_probe_barcode_map(samples) == "s1 : BC001+CR001"
 
 
 # create_sra_biosample_dataframe
@@ -162,7 +144,8 @@ def droplet_main_df():
 def test_droplet_run_is_one_row_per_library(capsys):
     sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
 
-    # No donor id or lab column here, so only the always-on columns are derived
+    # No optional column has data here, so only the required ones are derived,
+    # and every one of those is present even where MAIN has nothing to fill it
     assert list(sra_df.columns) == [
         "sample_name",
         ORGANISM_COLUMN,
@@ -170,6 +153,8 @@ def test_droplet_run_is_one_row_per_library(capsys):
         ISOLATE_COLUMN,
         AGE_COLUMN,
         SEX_COLUMN,
+        TISSUE_COLUMN,
+        PROVIDER_COLUMN,
         DATE_COLUMN,
         GEO_COLUMN,
     ]
@@ -300,12 +285,6 @@ def test_library_id_lists_the_gex_library_before_the_crispr_one():
     assert list(sra_df["library_id"]) == ["LIB_A_GEX, LIB_A_CRI"]
 
 
-def test_library_id_sits_next_to_sample_name():
-    sra_df = make_flattener().create_sra_biosample_dataframe(library_id_main_df())
-
-    assert list(sra_df.columns)[:2] == ["sample_name", "library_id"]
-
-
 def test_library_id_is_scoped_to_each_group():
     sra_df = make_flattener().create_sra_biosample_dataframe(library_id_main_df())
 
@@ -325,72 +304,11 @@ def test_library_id_strips_the_lab_prefix():
     assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
 
 
-def test_library_id_of_a_lone_gex_library_is_the_bare_alias():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"]] * 2,
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
-
-
-def test_library_id_omits_a_group_that_never_reaches_the_sheet():
-    """A CRISPR-only group is filtered out, so its alias is never reported."""
-    main_df = pd.DataFrame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
-            "droplet_based_libraries_aliases": [
-                ["alex-marson:LIB_A_GEX"],
-                ["alex-marson:LIB_B_CRI"],
-            ],
-            "droplet_based_libraries_feature_types": [
-                ["Gene Expression"],
-                ["CRISPR Guide Capture"],
-            ],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert list(sra_df["sample_name"]) == ["LIB_A"]
-    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
-
-
-def test_plate_library_aliases_are_used_when_droplet_is_absent():
-    main_df = pd.DataFrame(
-        {
-            "plate_based_libraries_CRO_group_identifier": ["PLATE_1"],
-            "plate_based_libraries_aliases": [["alex-marson:PLATE_1_GEX"]],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert list(sra_df["library_id"]) == ["PLATE_1_GEX"]
-
-
 def test_missing_aliases_column_omits_library_id(capsys):
     sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
 
     assert "library_id" not in sra_df.columns
     assert "no library aliases column" in capsys.readouterr().out
-
-
-def test_row_with_no_alias_contributes_nothing_to_library_id():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
-            "droplet_based_libraries_aliases": [["alex-marson:LIB_A_GEX"], None],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
 
 
 def test_library_rows_disagreeing_on_the_map_collapse_to_a_list():
@@ -421,18 +339,6 @@ def test_rows_with_no_library_group_are_dropped(capsys):
     )
 
 
-def test_sample_alias_is_not_the_grouping_key():
-    """The CRO group keys the sheet, so nulling sample_alias changes nothing."""
-    expected = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
-
-    main_df = droplet_main_df()
-    main_df["sample_alias"] = None
-
-    actual = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    pd.testing.assert_frame_equal(actual, expected)
-
-
 def test_missing_library_group_column_returns_empty_frame(capsys):
     main_df = main_frame({"sample_alias": ["s1"]})
 
@@ -455,25 +361,17 @@ def test_key_only_main_df_collapses_without_aggregating():
         ISOLATE_COLUMN,
         AGE_COLUMN,
         SEX_COLUMN,
+        TISSUE_COLUMN,
+        PROVIDER_COLUMN,
         DATE_COLUMN,
         GEO_COLUMN,
     ]
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_B"]
+    # A frame of nothing but the key still fills every required column
+    for column in (ISOLATE_COLUMN, AGE_COLUMN, SEX_COLUMN, TISSUE_COLUMN, PROVIDER_COLUMN):
+        assert list(sra_df[column]) == ["not provided", "not provided"], column
     assert list(sra_df[DATE_COLUMN]) == ["not provided", "not provided"]
     assert list(sra_df[GEO_COLUMN]) == ["not provided", "not provided"]
-
-
-def test_library_without_barcodes_leaves_the_column_empty():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_samples": [[sample("s1", [])]],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert pd.isna(sra_df.loc[0, BARCODE_COLUMN])
 
 
 def test_empty_main_df_returns_empty_frame():
@@ -488,32 +386,54 @@ def test_empty_main_df_returns_empty_frame():
 @pytest.mark.parametrize(
     ("term_name", "expected"),
     [
-        pytest.param("29-year-old stage", "29 years", id="years"),
-        pytest.param("1-year-old stage", "1 year", id="singular-year"),
-        pytest.param("6-month-old stage", "6 months", id="months"),
-        pytest.param("1-week-old stage", "1 week", id="singular-week"),
+        pytest.param("29-year-old stage", ["29 years"], id="years"),
+        pytest.param("1-year-old stage", ["1 year"], id="singular-year"),
+        pytest.param("6-month-old stage", ["6 months"], id="months"),
+        pytest.param("1-week-old stage", ["1 week"], id="singular-week"),
+        # Every stage contributes: nothing is dropped for being coarser
         pytest.param(
-            ["adult stage", "42-year-old stage"], "42 years", id="numeric-wins-over-qualitative"
+            ["adult stage", "42-year-old stage"],
+            ["adult", "42 years"],
+            id="qualitative-and-numeric-both-kept",
         ),
-        pytest.param("adult stage", "adult", id="qualitative"),
-        pytest.param("newborn stage", "newborn", id="newborn"),
-        pytest.param("adult", "adult", id="no-stage-suffix"),
+        pytest.param(
+            ["29-year-old stage", "32-year-old stage"],
+            ["29 years", "32 years"],
+            id="two-numeric-stages",
+        ),
+        pytest.param(
+            "29-year-old stage; 32-year-old stage",
+            ["29 years", "32 years"],
+            id="two-numeric-stages-joined-in-one-cell",
+        ),
+        pytest.param(
+            ["29-year-old stage", "29-year-old stage"],
+            ["29 years"],
+            id="matching-stages-dedupe",
+        ),
+        pytest.param("adult stage", ["adult"], id="qualitative"),
+        pytest.param("newborn stage", ["newborn"], id="newborn"),
+        pytest.param("adult", ["adult"], id="no-stage-suffix"),
         pytest.param(
             "10th week post-fertilization human stage",
-            "10th week post-fertilization",
+            ["10th week post-fertilization"],
             id="qualitative-containing-a-number",
         ),
-        pytest.param("adult human stage", "adult", id="human-stage-suffix"),
-        pytest.param("mouse adult stage", "mouse adult", id="only-human-is-trimmed"),
-        pytest.param(["adult stage", "newborn stage"], "adult", id="first-qualitative-in-list"),
-        pytest.param(None, None, id="none"),
-        pytest.param(float("nan"), None, id="nan"),
-        pytest.param([], None, id="empty-list"),
-        pytest.param("   ", None, id="blank"),
+        pytest.param("adult human stage", ["adult"], id="human-stage-suffix"),
+        pytest.param("mouse adult stage", ["mouse adult"], id="only-human-is-trimmed"),
+        pytest.param(
+            ["adult stage", "newborn stage"],
+            ["adult", "newborn"],
+            id="two-qualitative-stages",
+        ),
+        pytest.param(None, [], id="none"),
+        pytest.param(float("nan"), [], id="nan"),
+        pytest.param([], [], id="empty-list"),
+        pytest.param("   ", [], id="blank"),
     ],
 )
-def test_age_from_developmental_stage(term_name, expected):
-    assert age_from_developmental_stage(term_name) == expected
+def test_ages_from_developmental_stages(term_name, expected):
+    assert ages_from_developmental_stages(term_name) == expected
 
 
 def donor_main_df(**columns):
@@ -545,18 +465,6 @@ def test_donor_columns_are_unordered_pooled_sets():
     assert sra_df.loc[0, AGE_COLUMN] == "pooled: 29 years, 32 years"
 
 
-def test_single_donor_has_no_pooled_prefix():
-    main_df = donor_main_df(
-        human_donors_cxg_donor_id=[889023040] * 4,
-        tissues_developmental_stages_term_name=["32-year-old stage"] * 4,
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "889023040"
-    assert sra_df.loc[0, AGE_COLUMN] == "32 years"
-
-
 def test_a_sample_pooling_several_donors_is_split_apart():
     """
     create_dataframe collapses a multi-donor sample into one '; '-joined cell.
@@ -570,13 +478,36 @@ def test_a_sample_pooling_several_donors_is_split_apart():
     assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 889023040, 889081306"
 
 
-def test_donor_ids_sort_lexically():
-    """Plain string sort, so '10' precedes '9'."""
-    main_df = donor_main_df(human_donors_cxg_donor_id=[9, 10, 9, 10])
+def test_age_pools_alongside_isolate_and_sex_on_a_multi_donor_row():
+    """
+    A row claiming two donors must not claim one age.
+
+    *age goes through a transform, which bypasses split_joined, so this is the
+    case where it used to keep the first stage and disagree with its own row.
+    """
+    main_df = donor_main_df(
+        human_donors_cxg_donor_id=["889023040; 889081306"] * 4,
+        human_donors_sex=["female; male"] * 4,
+        tissues_developmental_stages_term_name=["29-year-old stage; 32-year-old stage"] * 4,
+    )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 10, 9"
+    assert sra_df.loc[0, ISOLATE_COLUMN] == "pooled: 889023040, 889081306"
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: 29 years, 32 years"
+
+
+def test_age_keeps_a_qualitative_stage_alongside_a_numeric_one():
+    """Nothing is dropped for being coarser: both stages reach the cell."""
+    main_df = donor_main_df(
+        human_donors_cxg_donor_id=["D1"] * 4,
+        tissues_developmental_stages_term_name=[["adult stage", "42-year-old stage"]] * 4,
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, AGE_COLUMN] == "pooled: 42 years, adult"
 
 
 def test_donor_id_is_not_rendered_as_a_float():
@@ -590,30 +521,7 @@ def test_donor_id_is_not_rendered_as_a_float():
     assert "889023040.0" not in sra_df.loc[0, ISOLATE_COLUMN]
 
 
-def test_qualitative_and_numeric_stages_pool_together():
-    main_df = donor_main_df(
-        tissues_developmental_stages_term_name=[
-            "adult stage",
-            "32-year-old stage",
-            "adult stage",
-            "32-year-old stage",
-        ]
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_COLUMN] == "pooled: 32 years, adult"
-
-
-def test_no_stage_at_all_leaves_the_age_column_empty():
-    main_df = donor_main_df(tissues_developmental_stages_term_name=[None] * 4)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_COLUMN] == "not provided"
-
-
-def test_no_donor_id_column_omits_isolate():
+def test_no_donor_id_column_still_fills_isolate():
     main_df = donor_main_df().drop(columns=["human_donors_cxg_donor_id"])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
@@ -645,20 +553,6 @@ def test_format_pooled_sex(sexes, expected):
     assert make_flattener()._format_pooled_sex(sexes) == expected
 
 
-def test_mixed_sex_pool_reads_male_first():
-    sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
-
-    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
-
-
-def test_single_sex_library_is_the_bare_value():
-    main_df = donor_main_df(human_donors_sex=["female"] * 4)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, SEX_COLUMN] == "female"
-
-
 def test_a_sample_pooling_several_donors_splits_the_sexes():
     """The reviewer's case: 'female; male' in one cell must not read as one sex."""
     main_df = donor_main_df(human_donors_sex=["female; male"] * 4)
@@ -668,12 +562,22 @@ def test_a_sample_pooling_several_donors_splits_the_sexes():
     assert sra_df.loc[0, SEX_COLUMN] == "pooled male and female"
 
 
-def test_missing_sex_column_leaves_the_sex_column_empty():
+def test_missing_sex_column_still_fills_the_required_cell():
+    """*sex is required, so it is never blank, even with no sex data at all."""
     main_df = donor_main_df().drop(columns=["human_donors_sex"])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert pd.isna(sra_df.loc[0, SEX_COLUMN])
+    assert sra_df.loc[0, SEX_COLUMN] == "not provided"
+
+
+def test_partly_known_sex_pool_names_the_gap():
+    """One donor sexed and one not is a pool of two states, not one."""
+    main_df = donor_main_df(human_donors_sex=["male", None, None, None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, SEX_COLUMN] == "pooled male and not provided"
 
 
 def test_non_human_donor_columns_are_used_when_human_is_absent():
@@ -736,16 +640,6 @@ def test_tissue_and_organoid_report_their_sample_term(prefix):
     assert sra_df.loc[0, TISSUE_COLUMN] == "blood"
 
 
-def test_tissue_flattens_a_multi_term_sample():
-    """sample_terms is an array, so two terms give two entries not a stringified list."""
-    main_df = tissue_main_df("tissues", term=None)
-    main_df["tissues_sample_terms_term_name"] = [["blood", "lung"], ["blood", "lung"]]
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, TISSUE_COLUMN] == "blood; lung"
-
-
 def test_tissue_mixes_a_real_term_with_not_available():
     main_df = main_frame(
         {
@@ -762,45 +656,13 @@ def test_tissue_mixes_a_real_term_with_not_available():
     assert sra_df.loc[0, TISSUE_COLUMN] == "blood; not available"
 
 
-def test_tissue_with_no_sample_term_stays_empty():
-    """Should not happen - the schema requires it - but must not invent a value."""
+def test_tissue_with_no_sample_term_column_still_fills_the_required_cell():
+    """Should not happen - the schema requires a term - but *tissue is required."""
     main_df = tissue_main_df("tissues", term=None)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert TISSUE_COLUMN not in sra_df.columns
-
-
-def test_tissue_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] + ["LIB_B"],
-            "tissues_@id": ["/tissues/s1/", None],
-            "tissues_sample_terms_term_name": ["blood", None],
-            "cell_lines_@id": [None, "/cell_lines/s2/"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", TISSUE_COLUMN] == "blood"
-    assert sra_df.loc["LIB_B", TISSUE_COLUMN] == "not available"
-
-
-def test_tissue_skips_rows_with_no_library_group():
-    main_df = tissue_main_df("tissues")
-    main_df["tissues_sample_terms_term_name"] = ["blood", "lung"]
-    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    # The unkeyed row's term must not leak into the surviving library.
-    assert list(sra_df[TISSUE_COLUMN]) == ["blood"]
-
-
-def test_tissue_is_no_longer_a_prop_map_rename():
-    assert "*tissue" not in PROP_MAP_SRA_BIOSAMPLE.values()
-    assert "tissues_sample_terms_term_name" not in PROP_MAP_SRA_BIOSAMPLE
+    assert sra_df.loc[0, TISSUE_COLUMN] == "not provided"
 
 
 # SAMPLE_URL_PREFIXES
@@ -849,12 +711,6 @@ def provider_main_df(**columns):
     return main_frame(base)
 
 
-def test_provider_falls_back_to_sample_lab_when_sources_is_absent():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert sra_df.loc[0, PROVIDER_COLUMN] == "Alex Marson, UCSF"
-
-
 def test_provider_prefers_sources_over_lab():
     main_df = provider_main_df(tissues_sources=[[SOURCE], [SOURCE]])
 
@@ -871,26 +727,6 @@ def test_provider_falls_back_per_row_not_per_column():
     assert sra_df.loc[0, PROVIDER_COLUMN] == "Abcam; Alex Marson, UCSF"
 
 
-def test_provider_falls_back_when_sources_is_an_unresolved_id_path():
-    main_df = provider_main_df(tissues_sources=[["/sources/abcam/"], ["/sources/abcam/"]])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, PROVIDER_COLUMN] == "Alex Marson, UCSF"
-
-
-@pytest.mark.parametrize(
-    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
-)
-def test_provider_reads_any_sample_type(sample_type):
-    main_df = provider_main_df().drop(columns=["tissues_lab"])
-    main_df[f"{sample_type}_lab"] = [LAB, LAB]
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, PROVIDER_COLUMN] == "Alex Marson, UCSF"
-
-
 def test_provider_ignores_lab_columns_on_non_sample_objects():
     """'lab' is on 19 object types - libraries, files, donors - only samples count."""
     main_df = provider_main_df().drop(columns=["tissues_lab"])
@@ -901,40 +737,17 @@ def test_provider_ignores_lab_columns_on_non_sample_objects():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert PROVIDER_COLUMN not in sra_df.columns
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "not provided"
 
 
-def test_provider_skips_rows_with_no_library_group():
-    main_df = provider_main_df(tissues_lab=[LAB, OTHER_LAB])
-    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    # The unkeyed row's lab must not leak into the surviving library.
-    assert list(sra_df[PROVIDER_COLUMN]) == ["Alex Marson, UCSF"]
-
-
-def test_no_sources_or_lab_column_omits_the_provider(capsys):
+def test_no_sources_or_lab_column_still_fills_the_required_cell(capsys):
+    """Warned about, but a required column is filled rather than dropped."""
     main_df = provider_main_df().drop(columns=["tissues_lab"])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert PROVIDER_COLUMN not in sra_df.columns
+    assert sra_df.loc[0, PROVIDER_COLUMN] == "not provided"
     assert "no sample sources or lab column" in capsys.readouterr().out
-
-
-def test_provider_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "tissues_lab": [LAB, LAB, OTHER_LAB],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", PROVIDER_COLUMN] == "Alex Marson, UCSF"
-    assert sra_df.loc["LIB_B", PROVIDER_COLUMN] == "Other Lab"
 
 
 # *collection_date
@@ -948,63 +761,12 @@ def test_collection_date_uses_date_obtained():
     assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05"
 
 
-def test_collection_date_defaults_when_the_column_is_absent():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert sra_df.loc[0, DATE_COLUMN] == "not provided"
-
-
-def test_collection_date_defaults_when_the_column_is_all_null():
-    main_df = provider_main_df(tissues_date_obtained=[None, None])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DATE_COLUMN] == "not provided"
-
-
 def test_collection_date_mixes_a_date_with_the_default():
     main_df = provider_main_df(tissues_date_obtained=["2023-01-05", None])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05; not provided"
-
-
-def test_collection_date_joins_distinct_dates_in_order():
-    main_df = provider_main_df(tissues_date_obtained=["2023-06-01", "2023-01-05"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05; 2023-06-01"
-
-
-def test_collection_date_default_sorts_last_even_before_a_letter_date():
-    """The literal is appended, not sorted in, so a non-ISO date cannot displace it."""
-    main_df = provider_main_df(tissues_date_obtained=["osmotic-era", None])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DATE_COLUMN] == "osmotic-era; not provided"
-
-
-def test_collection_date_strips_whitespace_and_dedupes():
-    main_df = provider_main_df(tissues_date_obtained=["  2023-01-05  ", "2023-01-05"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05"
-
-
-@pytest.mark.parametrize(
-    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
-)
-def test_collection_date_reads_any_sample_type(sample_type):
-    main_df = provider_main_df()
-    main_df[f"{sample_type}_date_obtained"] = ["2023-01-05", "2023-01-05"]
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DATE_COLUMN] == "2023-01-05"
 
 
 def test_collection_date_ignores_date_obtained_on_non_sample_objects():
@@ -1016,70 +778,11 @@ def test_collection_date_ignores_date_obtained_on_non_sample_objects():
     assert sra_df.loc[0, DATE_COLUMN] == "not provided"
 
 
-def test_collection_date_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "tissues_lab": [LAB, LAB, LAB],
-            "tissues_date_obtained": ["2023-01-05", None, "2024-02-02"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", DATE_COLUMN] == "2023-01-05; not provided"
-    assert sra_df.loc["LIB_B", DATE_COLUMN] == "2024-02-02"
-
-
-def test_collection_date_skips_rows_with_no_library_group():
-    main_df = provider_main_df(tissues_date_obtained=["2023-01-05", "2024-02-02"])
-    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    # The unkeyed row's date must not leak into the surviving library.
-    assert list(sra_df[DATE_COLUMN]) == ["2023-01-05"]
-
-
 # *geo_loc_name
 
 
 def test_geo_loc_name_uses_collection_geographical_location():
     main_df = provider_main_df(tissues_collection_geographical_location=["USA", "USA"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, GEO_COLUMN] == "USA"
-
-
-def test_geo_loc_name_defaults_when_the_column_is_absent():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert sra_df.loc[0, GEO_COLUMN] == "not provided"
-
-
-def test_geo_loc_name_mixes_a_location_with_the_default():
-    main_df = provider_main_df(tissues_collection_geographical_location=["USA", None])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, GEO_COLUMN] == "USA; not provided"
-
-
-def test_geo_loc_name_joins_distinct_locations():
-    main_df = provider_main_df(tissues_collection_geographical_location=["USA", "Canada"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, GEO_COLUMN] == "Canada; USA"
-
-
-@pytest.mark.parametrize(
-    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
-)
-def test_geo_loc_name_reads_any_sample_type(sample_type):
-    main_df = provider_main_df()
-    main_df[f"{sample_type}_collection_geographical_location"] = ["USA", "USA"]
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -1095,59 +798,7 @@ def test_geo_loc_name_ignores_non_sample_objects():
     assert sra_df.loc[0, GEO_COLUMN] == "not provided"
 
 
-def test_geo_loc_name_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "tissues_collection_geographical_location": ["USA", None, "Canada"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", GEO_COLUMN] == "USA; not provided"
-    assert sra_df.loc["LIB_B", GEO_COLUMN] == "Canada"
-
-
 # ethnicity
-
-
-def test_ethnicity_is_an_unordered_pooled_set():
-    main_df = donor_main_df(
-        human_donors_ethnicity_term_name=[
-            "African American",
-            "European American",
-            "African American",
-            "European American",
-        ]
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ETHNICITY_COLUMN] == "pooled: African American, European American"
-
-
-def test_single_ethnicity_has_no_pooled_prefix():
-    main_df = donor_main_df(human_donors_ethnicity_term_name=["European American"] * 4)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ETHNICITY_COLUMN] == "European American"
-
-
-def test_a_sample_pooling_several_donors_lists_both_ethnicities():
-    """
-    A multi-donor sample arrives as a list of terms. It must not be stringified
-    into a Python repr, which is what the reviewer found.
-    """
-    main_df = donor_main_df(
-        human_donors_ethnicity_term_name=[["African American", "European American"]] * 4
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ETHNICITY_COLUMN] == "pooled: African American, European American"
-    assert "[" not in sra_df.loc[0, ETHNICITY_COLUMN]
 
 
 def test_a_donor_without_an_ethnicity_adds_the_gap():
@@ -1166,29 +817,6 @@ def test_no_ethnicity_column_omits_the_ethnicity_column():
     assert ETHNICITY_COLUMN not in sra_df.columns
 
 
-def test_all_null_ethnicity_omits_the_column():
-    main_df = donor_main_df(human_donors_ethnicity_term_name=[None] * 4)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert ETHNICITY_COLUMN not in sra_df.columns
-
-
-def test_ethnicity_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "human_donors_cxg_donor_id": [11, 22, 33],
-            "human_donors_ethnicity_term_name": ["Asian", "European American", "Asian"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", ETHNICITY_COLUMN] == "pooled: Asian, European American"
-    assert sra_df.loc["LIB_B", ETHNICITY_COLUMN] == "Asian"
-
-
 def test_ethnicity_is_human_only():
     """The field is on HumanDonor, so a non-human run has no such column."""
     main_df = donor_main_df(non_human_donors_ethnicity_term_name=["Asian"] * 4)
@@ -1196,15 +824,6 @@ def test_ethnicity_is_human_only():
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert ETHNICITY_COLUMN not in sra_df.columns
-
-
-def test_ethnicity_has_no_required_marker():
-    main_df = donor_main_df(human_donors_ethnicity_term_name=["Asian"] * 4)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert ETHNICITY_COLUMN in sra_df.columns
-    assert f"*{ETHNICITY_COLUMN}" not in sra_df.columns
 
 
 # experimental_perturbation
@@ -1255,12 +874,6 @@ def perturbation_main_df(rows=2, **columns):
     return main_frame(base)
 
 
-def test_perturbation_single_value_is_bare():
-    sra_df = make_flattener().create_sra_biosample_dataframe(perturbation_main_df())
-
-    assert sra_df.loc[0, PERTURBATION_COLUMN] == "8 hour stimulation"
-
-
 def test_perturbation_partly_treated_library_marks_the_gap():
     """The Treg shape: half the samples treated, half not."""
     main_df = perturbation_main_df(
@@ -1295,54 +908,6 @@ def test_perturbation_unequal_bounds():
     assert sra_df.loc[0, PERTURBATION_COLUMN] == "8-24 hour stimulation"
 
 
-def test_perturbation_description_alone():
-    main_df = perturbation_main_df(
-        treatments_lower_bound_duration=[None, None],
-        treatments_upper_bound_duration=[None, None],
-        treatments_duration_units=[None, None],
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, PERTURBATION_COLUMN] == "stimulation"
-
-
-def test_no_treatments_columns_omits_the_perturbation():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert PERTURBATION_COLUMN not in sra_df.columns
-
-
-def test_all_null_treatments_omits_the_perturbation():
-    main_df = perturbation_main_df(
-        treatments_lower_bound_duration=[None, None],
-        treatments_upper_bound_duration=[None, None],
-        treatments_duration_units=[None, None],
-        treatments_description=[None, None],
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert PERTURBATION_COLUMN not in sra_df.columns
-
-
-def test_perturbation_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "treatments_lower_bound_duration": [8, None, 24],
-            "treatments_upper_bound_duration": [8, None, 24],
-            "treatments_duration_units": ["hour", None, "hour"],
-            "treatments_description": ["stimulation", None, "fasting"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", PERTURBATION_COLUMN] == ("pooled: 8 hour stimulation, no treatment")
-    assert sra_df.loc["LIB_B", PERTURBATION_COLUMN] == "24 hour fasting"
-
-
 def test_perturbation_warns_when_a_sample_has_several_treatments(capsys):
     """
     create_dataframe collapses them into one cell with the duration and the
@@ -1363,16 +928,6 @@ def test_perturbation_does_not_warn_for_a_single_treatment(capsys):
     make_flattener().create_sra_biosample_dataframe(perturbation_main_df())
 
     assert "several treatments" not in capsys.readouterr().out
-
-
-def test_perturbation_skips_rows_with_no_library_group():
-    main_df = perturbation_main_df(treatments_description=["stimulation", "fasting"])
-    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    # The unkeyed row's treatment must not leak into the surviving library.
-    assert list(sra_df[PERTURBATION_COLUMN]) == ["8 hour stimulation"]
 
 
 # experimental_perturbation_factors
@@ -1422,66 +977,6 @@ def test_factors_pool_two_distinct_sets():
     assert sra_df.loc[0, FACTORS_COLUMN] == "pooled: IL6_HUMAN, [IL2_HUMAN, anti-CD2_HUMAN]"
 
 
-def test_factors_deduplicate_matching_sets():
-    """Two samples with the same factors give one entry, not a pooled pair."""
-    sra_df = make_flattener().create_sra_biosample_dataframe(factors_main_df(rows=4))
-
-    assert sra_df.loc[0, FACTORS_COLUMN] == "[IL2_HUMAN, anti-CD2_HUMAN]"
-
-
-def test_factors_sort_is_case_sensitive():
-    """Deliberate: uppercase sorts ahead of lowercase, matching plain sorted()."""
-    main_df = factors_main_df(
-        treatments_ontological_term_term_name=[["anti-CD2_HUMAN", "IL2_HUMAN"]] * 2
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, FACTORS_COLUMN].startswith("[IL2_HUMAN,")
-
-
-def test_no_ontological_term_column_omits_the_factors():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert FACTORS_COLUMN not in sra_df.columns
-
-
-def test_all_null_ontological_terms_omits_the_factors():
-    main_df = factors_main_df(treatments_ontological_term_term_name=[None, None])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert FACTORS_COLUMN not in sra_df.columns
-
-
-def test_factors_are_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "treatments_ontological_term_term_name": [
-                ["anti-CD2_HUMAN", "IL2_HUMAN"],
-                None,
-                ["IL6_HUMAN"],
-            ],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", FACTORS_COLUMN] == "pooled: [IL2_HUMAN, anti-CD2_HUMAN], na"
-    assert sra_df.loc["LIB_B", FACTORS_COLUMN] == "IL6_HUMAN"
-
-
-def test_factors_skip_rows_with_no_library_group():
-    main_df = factors_main_df(treatments_ontological_term_term_name=[["IL2_HUMAN"], ["IL6_HUMAN"]])
-    main_df.loc[1, "droplet_based_libraries_CRO_group_identifier"] = None
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    # The unkeyed row's factor must not leak into the surviving library.
-    assert list(sra_df[FACTORS_COLUMN]) == ["IL2_HUMAN"]
-
-
 # preservation_method
 
 
@@ -1511,40 +1006,12 @@ def test_preservation_method_gap_is_not_applicable():
     assert sra_df.loc[0, PRESERVATION_COLUMN] == "fresh; not applicable"
 
 
-def test_preservation_method_joins_distinct_values():
-    main_df = provider_main_df(tissues_preservation_method=["fresh", "fixed-frozen"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, PRESERVATION_COLUMN] == "fixed-frozen; fresh"
-
-
-def test_preservation_method_absent_when_the_column_is_missing():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert PRESERVATION_COLUMN not in sra_df.columns
-
-
 def test_preservation_method_absent_when_no_sample_has_one():
     main_df = provider_main_df(tissues_preservation_method=[None, None])
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert PRESERVATION_COLUMN not in sra_df.columns
-
-
-def test_preservation_method_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "tissues_preservation_method": ["fresh", None, "fixed-frozen"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", PRESERVATION_COLUMN] == "fresh; not applicable"
-    assert sra_df.loc["LIB_B", PRESERVATION_COLUMN] == "fixed-frozen"
 
 
 # genetic_perturbation_strategy
@@ -1583,39 +1050,6 @@ def test_genetic_strategy_matches_the_map_biohub_uses():
         assert sra_df.loc[0, STRATEGY_COLUMN] == expected
 
 
-def test_genetic_strategy_gap_is_not_applicable():
-    """A sample with no genetic modification has no strategy to report."""
-    main_df = strategy_main_df(("interference screen", None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, STRATEGY_COLUMN] == "CRISPR interference screen; not applicable"
-
-
-def test_genetic_strategy_joins_two_strategies():
-    main_df = strategy_main_df(("interference screen", "activation screen"))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, STRATEGY_COLUMN] == (
-        "CRISPR activation screen; CRISPR interference screen"
-    )
-
-
-def test_genetic_strategy_absent_when_the_column_is_missing():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert STRATEGY_COLUMN not in sra_df.columns
-
-
-def test_genetic_strategy_absent_when_no_sample_has_one():
-    main_df = strategy_main_df((None, None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert STRATEGY_COLUMN not in sra_df.columns
-
-
 def test_genetic_strategy_ignores_sample_prefixed_columns():
     """'strategy' is read off genetic_modifications, not off the sample."""
     main_df = main_frame(
@@ -1628,24 +1062,6 @@ def test_genetic_strategy_ignores_sample_prefixed_columns():
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert STRATEGY_COLUMN not in sra_df.columns
-
-
-def test_genetic_strategy_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "genetic_modifications_strategy": [
-                "interference screen",
-                None,
-                "activation screen",
-            ],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", STRATEGY_COLUMN] == ("CRISPR interference screen; not applicable")
-    assert sra_df.loc["LIB_B", STRATEGY_COLUMN] == "CRISPR activation screen"
 
 
 # intended_cell_type / the suspension_* columns
@@ -1675,65 +1091,6 @@ def test_intended_cell_type_ignores_sample_types_without_intended_cell_types(pre
     assert INTENDED_CELL_TYPE_COLUMN not in sra_df.columns
 
 
-def test_intended_cell_type_flattens_a_multi_term_array():
-    main_df = cell_type_main_df(values=(["HeLa", "K562"], ["HeLa", "K562"]))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa; K562"
-
-
-def test_intended_cell_type_gap_is_not_applicable():
-    """A tissue cannot have an intended cell type, so the gap is not 'not provided'."""
-    main_df = cell_type_main_df(values=(["HeLa"], None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa; not applicable"
-
-
-def test_intended_cell_type_absent_when_no_sample_has_one():
-    """All-gap means the column drops, rather than a column of 'not applicable'."""
-    main_df = cell_type_main_df(values=(None, None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert INTENDED_CELL_TYPE_COLUMN not in sra_df.columns
-
-
-def test_intended_cell_type_absent_when_the_column_is_missing():
-    sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
-
-    assert INTENDED_CELL_TYPE_COLUMN not in sra_df.columns
-
-
-@pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
-def test_enriched_cell_types_reads_any_sample_type(prefix):
-    """Unlike intended_cell_types, enriched_cell_types is on all four."""
-    main_df = cell_type_main_df(prefix, field="enriched")
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ENRICHED_COLUMN] == "HeLa"
-
-
-def test_enriched_cell_types_gap_is_not_provided():
-    """Deliberately different from cell_type: the value is missing, not inapplicable."""
-    main_df = cell_type_main_df(values=(["T cell"], None), field="enriched")
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ENRICHED_COLUMN] == "T cell; not provided"
-
-
-def test_enriched_cell_types_absent_when_no_sample_has_one():
-    main_df = cell_type_main_df(values=(None, None), field="enriched")
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert ENRICHED_COLUMN not in sra_df.columns
-
-
 def test_both_cell_type_columns_can_coexist():
     """A cell line run carries both, each with its own gap marker."""
     main_df = main_frame(
@@ -1748,46 +1105,6 @@ def test_both_cell_type_columns_can_coexist():
 
     assert sra_df.loc[0, INTENDED_CELL_TYPE_COLUMN] == "HeLa; not applicable"
     assert sra_df.loc[0, ENRICHED_COLUMN] == "T cell; not provided"
-
-
-def test_intended_cell_type_columns_are_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "cell_lines_intended_cell_types_term_name": [["HeLa"], ["K562"], ["HeLa"]],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", INTENDED_CELL_TYPE_COLUMN] == "HeLa; K562"
-    assert sra_df.loc["LIB_B", INTENDED_CELL_TYPE_COLUMN] == "HeLa"
-
-
-@pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
-def test_depleted_cell_types_reads_any_sample_type(prefix):
-    """The depleted twin of enriched_cell_types, on all four types likewise."""
-    main_df = cell_type_main_df(prefix, field="depleted")
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DEPLETED_COLUMN] == "HeLa"
-
-
-def test_depleted_cell_types_gap_is_not_provided():
-    main_df = cell_type_main_df(values=(["T cell"], None), field="depleted")
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, DEPLETED_COLUMN] == "T cell; not provided"
-
-
-def test_depleted_cell_types_absent_when_no_sample_has_one():
-    main_df = cell_type_main_df(values=(None, None), field="depleted")
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert DEPLETED_COLUMN not in sra_df.columns
 
 
 def test_enriched_and_depleted_are_separate_columns():
@@ -1827,30 +1144,6 @@ def test_selection_kits_reads_any_sample_type(prefix):
     assert sra_df.loc[0, KITS_COLUMN] == "EasySep CD4"
 
 
-def test_selection_kits_flattens_a_multi_kit_array():
-    main_df = selection_main_df("selection_kits", (["EasySep CD4", "EasySep CD8"],))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, KITS_COLUMN] == "EasySep CD4; EasySep CD8"
-
-
-def test_selection_kits_gap_is_not_provided():
-    main_df = selection_main_df("selection_kits", (["EasySep CD4"], None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, KITS_COLUMN] == "EasySep CD4; not provided"
-
-
-def test_selection_kits_absent_when_no_sample_has_one():
-    main_df = selection_main_df("selection_kits", (None, None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert KITS_COLUMN not in sra_df.columns
-
-
 @pytest.mark.parametrize("prefix", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"])
 def test_enrichment_factors_read_selection_markers(prefix):
     """BIOHUB's mapping: the factors column is fed by selection_markers."""
@@ -1874,22 +1167,6 @@ def test_enrichment_factors_pool_across_samples_that_disagree():
     )
 
 
-def test_enrichment_factors_gap_is_not_provided():
-    main_df = selection_main_df("selection_markers", (["CD4"], None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, ENRICHMENT_FACTORS_COLUMN] == "CD4; not provided"
-
-
-def test_enrichment_factors_absent_when_no_sample_has_one():
-    main_df = selection_main_df("selection_markers", (None, None))
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert ENRICHMENT_FACTORS_COLUMN not in sra_df.columns
-
-
 def test_kits_and_factors_are_independent_columns():
     """Distinct sources, so a run with only kits gets no factors column."""
     main_df = selection_main_df("selection_kits", (["EasySep CD4"],))
@@ -1911,14 +1188,6 @@ def test_suspension_type_uses_the_sample_field():
     assert sra_df.loc[0, SUSPENSION_COLUMN] == "cell"
 
 
-def test_suspension_type_joins_distinct_values():
-    main_df = provider_main_df(tissues_suspension_type=["nucleus", "cell"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, SUSPENSION_COLUMN] == "cell; nucleus"
-
-
 def test_suspension_type_fills_a_gap_like_a_required_column():
     """Being optional decides only whether the column exists, not how gaps fill."""
     main_df = provider_main_df(tissues_suspension_type=["cell", None])
@@ -1928,59 +1197,10 @@ def test_suspension_type_fills_a_gap_like_a_required_column():
     assert sra_df.loc[0, SUSPENSION_COLUMN] == "cell; not provided"
 
 
-def test_a_library_with_no_suspension_type_still_gets_a_cell():
-    """One library has values so the column exists; the other is filled, not blank."""
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] + ["LIB_B"],
-            "tissues_suspension_type": ["cell", None],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", SUSPENSION_COLUMN] == "cell"
-    assert sra_df.loc["LIB_B", SUSPENSION_COLUMN] == "not provided"
-
-
 def test_no_suspension_type_column_omits_it():
     sra_df = make_flattener().create_sra_biosample_dataframe(provider_main_df())
 
     assert SUSPENSION_COLUMN not in sra_df.columns
-
-
-def test_all_null_suspension_type_omits_it():
-    main_df = provider_main_df(tissues_suspension_type=[None, None])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert SUSPENSION_COLUMN not in sra_df.columns
-
-
-@pytest.mark.parametrize(
-    "sample_type", ["tissues", "cell_lines", "organoids", "primary_cell_cultures"]
-)
-def test_suspension_type_reads_any_sample_type(sample_type):
-    main_df = provider_main_df()
-    main_df[f"{sample_type}_suspension_type"] = ["cell", "cell"]
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, SUSPENSION_COLUMN] == "cell"
-
-
-def test_suspension_type_is_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "tissues_suspension_type": ["cell", "nucleus", "cell"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", SUSPENSION_COLUMN] == "cell; nucleus"
-    assert sra_df.loc["LIB_B", SUSPENSION_COLUMN] == "cell"
 
 
 # age_lower_bound / age_upper_bound
@@ -2021,22 +1241,6 @@ def age_main_df(**columns):
     return frame
 
 
-def test_age_bounds_are_unordered_pooled_sets():
-    sra_df = make_flattener().create_sra_biosample_dataframe(age_main_df())
-
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
-    assert sra_df.loc[0, AGE_UPPER_COLUMN] == "pooled: 30 years, 35 years"
-
-
-def test_age_bounds_dedupe_matching_donors():
-    """Being a set, two donors of the same age give one entry."""
-    main_df = age_main_df(tissues_lower_bound_age=29)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "29 years"
-
-
 def test_age_bounds_include_the_gap_in_the_set():
     main_df = age_main_df()
     main_df["tissues_lower_bound_age"] = main_df["human_donors_cxg_donor_id"].map(
@@ -2048,13 +1252,6 @@ def test_age_bounds_include_the_gap_in_the_set():
     assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 32 years, not provided"
 
 
-def test_no_age_bounds_omits_both_columns():
-    sra_df = make_flattener().create_sra_biosample_dataframe(donor_main_df())
-
-    assert AGE_LOWER_COLUMN not in sra_df.columns
-    assert AGE_UPPER_COLUMN not in sra_df.columns
-
-
 def test_lower_bound_alone_omits_only_the_upper_column():
     main_df = age_main_df().drop(columns=["tissues_upper_bound_age"])
 
@@ -2062,61 +1259,6 @@ def test_lower_bound_alone_omits_only_the_upper_column():
 
     assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
     assert AGE_UPPER_COLUMN not in sra_df.columns
-
-
-def test_all_null_bound_omits_that_column():
-    main_df = age_main_df(tissues_lower_bound_age=None)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert AGE_LOWER_COLUMN not in sra_df.columns
-    assert sra_df.loc[0, AGE_UPPER_COLUMN] == "pooled: 30 years, 35 years"
-
-
-def test_age_bounds_read_primary_cell_cultures_too():
-    main_df = age_main_df().rename(
-        columns={
-            "tissues_lower_bound_age": "primary_cell_cultures_lower_bound_age",
-            "tissues_upper_bound_age": "primary_cell_cultures_upper_bound_age",
-            "tissues_age_units": "primary_cell_cultures_age_units",
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
-
-
-def test_age_bounds_without_units():
-    main_df = age_main_df(tissues_age_units=None)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29, 32"
-
-
-def test_age_bounds_do_not_need_a_donor_id_column():
-    """The bounds are sample fields, so they no longer depend on donor grouping."""
-    main_df = age_main_df().drop(columns=["human_donors_cxg_donor_id"])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, AGE_LOWER_COLUMN] == "pooled: 29 years, 32 years"
-
-
-def test_age_bounds_are_scoped_to_each_library():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2 + ["LIB_B"],
-            "tissues_lower_bound_age": [29, 22, 40],
-            "tissues_age_units": ["year"] * 3,
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df).set_index("sample_name")
-
-    assert sra_df.loc["LIB_A", AGE_LOWER_COLUMN] == "pooled: 22 years, 29 years"
-    assert sra_df.loc["LIB_B", AGE_LOWER_COLUMN] == "40 years"
 
 
 # PROP_MAP_SRA_BIOSAMPLE

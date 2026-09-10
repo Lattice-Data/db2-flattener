@@ -18,7 +18,7 @@ from db2_flattener.schema.constants import (
     Configs,
 )
 from db2_flattener.utils import (
-    age_from_developmental_stage,
+    ages_from_developmental_stages,
     collapse_dataframe,
     collapse_duplicate_columns,
     combine_bound_columns,
@@ -436,7 +436,6 @@ class DB2Flattener:
             "sex",
             prefixes=donor_prefixes,
             split_joined=True,
-            gap=None,
             formatter=self._format_pooled_sex,
         )
         ethnicity = self._sample_field_by_library(
@@ -452,7 +451,7 @@ class DB2Flattener:
             main_df,
             sra_df["sample_name"],
             "developmental_stages_term_name",
-            transform=age_from_developmental_stage,
+            transform=ages_from_developmental_stages,
             formatter=self._format_pooled_values,
         )
         age_lower = self._sample_field_by_library(
@@ -564,56 +563,44 @@ class DB2Flattener:
             sra_df = collapse_dataframe(sra_df, group_col="sample_name")
 
         # Beside sample_name rather than at the end: this is what identifies the
-        # row's libraries, now the key names their group instead
+        # row's libraries, now the key names their group instead. Positional, so
+        # it cannot join the append-ordered lists below.
         if library_id:
             sra_df.insert(1, "library_id", sra_df["sample_name"].map(library_id))
 
-        if isolate:
-            sra_df["*isolate"] = sra_df["sample_name"].map(isolate)
-        if age:
-            sra_df["*age"] = sra_df["sample_name"].map(age)
-        if sex:
-            sra_df["*sex"] = sra_df["sample_name"].map(sex)
-        if tissue:
-            sra_df["*tissue"] = sra_df["sample_name"].map(tissue)
-        if provider:
-            sra_df["*biomaterial_provider"] = sra_df["sample_name"].map(provider)
-        sra_df["*collection_date"] = sra_df["sample_name"].map(collection_date)
-        sra_df["*geo_loc_name"] = sra_df["sample_name"].map(geo_loc_name)
-
-        # Optional: left out entirely when no library has a value
-        if suspension_type:
-            sra_df["suspension_type"] = sra_df["sample_name"].map(suspension_type)
-        if perturbation:
-            sra_df["experimental_perturbation"] = sra_df["sample_name"].map(perturbation)
-        if perturbation_factors:
-            sra_df["experimental_perturbation_factors"] = sra_df["sample_name"].map(
-                perturbation_factors
-            )
-        if intended_cell_type:
-            sra_df["intended_cell_type"] = sra_df["sample_name"].map(intended_cell_type)
-        if enriched_cell_types:
-            sra_df["suspension_enriched_cell_types"] = sra_df["sample_name"].map(
-                enriched_cell_types
-            )
-        if depleted_cell_types:
-            sra_df["suspension_depleted_cell_types"] = sra_df["sample_name"].map(
-                depleted_cell_types
-            )
-        if selection_kits:
-            sra_df["suspension_selection_kits"] = sra_df["sample_name"].map(selection_kits)
-        if enrichment_factors:
-            sra_df["suspension_enrichment_factors"] = sra_df["sample_name"].map(enrichment_factors)
-        if genetic_strategy:
-            sra_df["genetic_perturbation_strategy"] = sra_df["sample_name"].map(genetic_strategy)
-        if preservation_method:
-            sra_df["preservation_method"] = sra_df["sample_name"].map(preservation_method)
-        if ethnicity:
-            sra_df["ethnicity"] = sra_df["sample_name"].map(ethnicity)
-        if age_lower:
-            sra_df["age_lower_bound"] = sra_df["sample_name"].map(age_lower)
-        if age_upper:
-            sra_df["age_upper_bound"] = sra_df["sample_name"].map(age_upper)
+        # Required: every builder above seeds a cell for every group, so these
+        # are always assigned - a blank one would be rejected by BioSample
+        required = (
+            ("*isolate", isolate),
+            ("*age", age),
+            ("*sex", sex),
+            ("*tissue", tissue),
+            ("*biomaterial_provider", provider),
+            ("*collection_date", collection_date),
+            ("*geo_loc_name", geo_loc_name),
+        )
+        # Optional: the column is left out entirely when no group has a value,
+        # but once one does, every group gets a cell
+        optional = (
+            ("suspension_type", suspension_type),
+            ("experimental_perturbation", perturbation),
+            ("experimental_perturbation_factors", perturbation_factors),
+            ("intended_cell_type", intended_cell_type),
+            ("suspension_enriched_cell_types", enriched_cell_types),
+            ("suspension_depleted_cell_types", depleted_cell_types),
+            ("suspension_selection_kits", selection_kits),
+            ("suspension_enrichment_factors", enrichment_factors),
+            ("genetic_perturbation_strategy", genetic_strategy),
+            ("preservation_method", preservation_method),
+            ("ethnicity", ethnicity),
+            ("age_lower_bound", age_lower),
+            ("age_upper_bound", age_upper),
+        )
+        for column, cells in required:
+            sra_df[column] = sra_df["sample_name"].map(cells)
+        for column, cells in optional:
+            if cells:
+                sra_df[column] = sra_df["sample_name"].map(cells)
 
         return sra_df
 
@@ -845,6 +832,8 @@ class DB2Flattener:
 
         Falls back per row, not per column: a sample with no usable 'sources' uses
         its own 'lab' even where a sibling has one. Distinct titles join with '; '.
+        Missing columns are still warned about, but do not drop the column: this
+        one is required, so it fills with 'not provided' instead.
         """
         prefixes = SAMPLE_URL_PREFIXES
         sources = self._coalesce_columns(main_df, [f"{prefix}_sources" for prefix in prefixes])
@@ -852,9 +841,8 @@ class DB2Flattener:
         if sources is None and labs is None:
             print(
                 "Warning: MAIN has no sample sources or lab column; "
-                "SRA_BIOSAMPLE omits biomaterial_provider"
+                "SRA_BIOSAMPLE reports biomaterial_provider as 'not provided'"
             )
-            return {}
 
         empty = pd.Series(None, index=main_df.index, dtype=object)
         sources = empty if sources is None else sources
@@ -864,9 +852,11 @@ class DB2Flattener:
         for library, source, lab in zip(library_key, sources, labs, strict=True):
             if not isinstance(library, str):
                 continue
+            # Seeded for every group, so a group with nothing still gets a cell:
+            # this column is required, and a blank one would be rejected
+            found = titles_by_library.setdefault(library, set())
             titles = self._provider_titles(source) or self._provider_titles(lab)
-            if titles:
-                titles_by_library.setdefault(library, set()).update(titles)
+            found.update(titles or ["not provided"])
 
         return {library: "; ".join(sorted(titles)) for library, titles in titles_by_library.items()}
 
@@ -938,8 +928,9 @@ class DB2Flattener:
     def _field_texts(row, transform, split_joined, translate) -> list[str]:
         """One row's fields as zero or more cell values."""
         if transform:
-            text = transform(*row)
-            return [] if is_empty(text) else [str(text).strip()]
+            # to_items so a transform may return one value or several: a cell
+            # describing two subjects yields an age each, not just the first
+            return [str(text).strip() for text in to_items(transform(*row)) if not is_empty(text)]
 
         # numeric_text before the split, or str() stamps a float's '.0' on first
         texts = [numeric_text(item) for item in to_items(row[0])]
@@ -959,7 +950,10 @@ class DB2Flattener:
         A cell line or primary cell culture has no tissue, so it reports
         'not available'. A tissue or organoid reports its sample_terms, which is
         an array - each term becomes its own entry. A sample with no term at all
-        contributes nothing, which the schema should not allow anyway.
+        contributes 'not provided', a different thing from 'not available': the
+        schema should not allow it, but this column is required and cannot be
+        left blank. A MAIN with no sample_terms column at all fills the same way,
+        rather than dropping a required column.
         """
         tissueless = [
             main_df[f"{prefix}_@id"]
@@ -974,9 +968,6 @@ class DB2Flattener:
                 if prefix not in self.TISSUELESS_SAMPLE_TYPES
             ],
         )
-        if terms is None and not tissueless:
-            return {}
-
         empty = pd.Series(None, index=main_df.index, dtype=object)
         terms = empty if terms is None else terms
         # True where the row's sample is one of the tissueless types
@@ -989,11 +980,11 @@ class DB2Flattener:
         for library, term, tissueless_row in zip(library_key, terms, is_tissueless, strict=True):
             if not isinstance(library, str):
                 continue
+            found = by_library.setdefault(library, set())
             if tissueless_row:
-                by_library.setdefault(library, set()).add("not available")
+                found.add("not available")
                 continue
-            for item in to_items(term):
-                by_library.setdefault(library, set()).add(str(item).strip())
+            found.update([str(item).strip() for item in to_items(term)] or ["not provided"])
 
         return {library: "; ".join(sorted(values)) for library, values in by_library.items()}
 

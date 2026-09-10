@@ -27,22 +27,32 @@ DEVELOPMENTAL_STAGE_AGE = re.compile(r"(\d+)-(year|month|week|day)-old")
 DEVELOPMENTAL_STAGE_SUFFIX = re.compile(r"\s+(?:human\s+)?stage$")
 
 
-def age_from_developmental_stage(term_name):
+def ages_from_developmental_stages(term_name) -> list[str]:
     """
-    '29-year-old stage' -> '29 years'; 'adult stage' -> 'adult'.
+    '29-year-old stage' -> ['29 years']; 'adult stage' -> ['adult'].
 
-    A qualitative stage keeps its term name minus a trailing ' stage' or
-    ' human stage'. A numeric stage anywhere in a multi-stage cell wins.
+    Every stage in the cell contributes its own age, because a cell can cover
+    more than one subject and the caller pools them: ['adult stage',
+    '42-year-old stage'] gives ['42 years', 'adult'] rather than picking one.
+
+    A numeric stage becomes a count with units. Any other keeps its term name
+    minus a trailing ' stage' or ' human stage'.
     """
     texts = [name.strip() for name in to_items(term_name) if isinstance(name, str) and name.strip()]
+    # A single cell can hold several '; '-joined stages, which is how
+    # create_dataframe collapses a sample referencing more than one
+    texts = [part.strip() for text in texts for part in text.split(";") if part.strip()]
 
+    ages = []
     for text in texts:
         match = DEVELOPMENTAL_STAGE_AGE.search(text)
         if match:
             count, unit = match.group(1), match.group(2)
-            return f"{count} {unit}" if count == "1" else f"{count} {unit}s"
+            ages.append(f"{count} {unit}" if count == "1" else f"{count} {unit}s")
+        else:
+            ages.append(DEVELOPMENTAL_STAGE_SUFFIX.sub("", text))
 
-    return DEVELOPMENTAL_STAGE_SUFFIX.sub("", texts[0]) if texts else None
+    return list(dict.fromkeys(ages))
 
 
 def numeric_text(value) -> str:
