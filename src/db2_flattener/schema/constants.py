@@ -68,16 +68,30 @@ GUIDE_METADATA_COLUMNS = [
 
 # Keys use _term_name suffix for columns produced by DB2_utils.split_controlled_term_columns
 PROP_MAP_GEO = {
-    "droplet_based_libraries_CRO_group_identifier": "*library name",
-    "droplet_based_libraries_library_construction_technology_term_name": "*library strategy",
-    "non_human_donors_taxa": "*organism",
-    "tissues_sample_terms_term_name": "**tissue",
-    "organoids_sample_terms_term_name": "**tissue",
     "cell_lines_sample_terms_term_name": "**cell_line",
-    "tissues_enriched_cell_types_term_name": "**cell_type",
-    "primary_cell_cultures_enriched_cell_types_term_name": "**cell_type",
-    "raw_matrix_file_alias": "raw_file",
+    "droplet_based_libraries_CRO_group_identifier": "*library name",
+    "droplet_based_libraries_dbxrefs": "*SRA Experiment or Run",
     "droplet_based_libraries_library_cardinality": "single or paired-end",
+    "droplet_based_libraries_library_construction_technology_term_name": "library_protocol",
+    "genetic_modifications_strategy": "genetic_modifications_strategy",
+    "human_donors_cxg_donor_id": "donor_ids",
+    "human_donors_sex": "donor_sex",
+    "human_donors_taxa": "*organism",
+    "non_human_donors_cxg_donor_id": "donor_ids",
+    "non_human_donors_sex": "donor_sex",
+    "non_human_donors_taxa": "*organism",
+    "organoids_sample_terms_term_name": "**tissue",
+    "primary_cell_cultures_enriched_cell_types_term_name": "**cell_type",
+    "raw_file_samples": "samples",
+    "raw_matrix_file_alias": "processed data file",
+    "sequence_file_sets_sequencing_platform": "*instrument model",
+    "tissues_developmental_stages_term_name": "donor_dev_stage",
+    "tissues_enriched_cell_types_term_name": "**cell_type",
+    "tissues_sample_terms_term_name": "**tissue",
+    "tissues_sources_title": "source",
+    "tissues_selection_kits": "selection_kits",
+    "tissues_selection_markers": "selection_markers",
+    "tissues_selection_methods": "selection_methods",
 }
 
 PROP_MAP_BIOHUB = {
@@ -131,6 +145,62 @@ TISSUE_TYPE_MAP = {
     "PrimaryCellCulture": "primary cell culture",
     "Tissue": "tissue",
 }
+
+GEO_LIBRARY_CARDINALITY_MAP = {
+    "dual": "paired-end",
+}
+
+GEO_INSTRUMENT_MODEL_MAP = {
+    "Ultima Genomics UG 100": "UG 100",
+}
+
+GEO_EXPERIMENTAL_CONDITION_COLS = [
+    "experimental_conditions_condition",
+    "experimental_conditions_text_value",
+    "experimental_conditions_lower_bound_duration",
+    "experimental_conditions_upper_bound_duration",
+    "experimental_conditions_duration_units",
+]
+
+GEO_LIBRARY_STRATEGY_FEATURE_COL = "droplet_based_libraries_feature_types"
+GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL = "plate_based_libraries_feature_types"
+GEO_SUSPENSION_TYPE_COLS = [
+    "organoids_suspension_type",
+    "cell_lines_suspension_type",
+    "primary_cell_cultures_suspension_type",
+    "tissues_suspension_type",
+]
+GEO_LIBRARY_STRATEGY_SOURCE_COLS = [
+    GEO_LIBRARY_STRATEGY_FEATURE_COL,
+    GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
+    *GEO_SUSPENSION_TYPE_COLS,
+]
+GEO_LIBRARY_STRATEGY_MAP = {
+    ("Gene Expression", "nucleus"): "snRNA-seq",
+    ("Gene Expression", "cell"): "scRNA-seq",
+    ("ATAC", None): "scATAC-seq",
+}
+
+GEO_FLEX_LIBRARY_PROTOCOLS = {
+    "10x gene expression flex v1",
+    "10x gene expression flex",
+    "10x Flex Apex",
+    "10x GEM-X Flex v1",
+    "10x Next GEM Flex v1",
+}
+
+GEO_TREATMENT_COLS = [
+    "treatments_description",
+    "treatments_lower_bound_duration",
+    "treatments_duration_units",
+    "treatments_ontological_term_term_name",
+]
+GEO_TITLE_TREATMENT_COLS = [
+    "treatments_description",
+    "treatments_lower_bound_duration",
+    "treatments_upper_bound_duration",
+    "treatments_duration_units",
+]
 
 GENETIC_PERTURBATION_MAP = {
     "activation screen": "CRISPR activation screen",

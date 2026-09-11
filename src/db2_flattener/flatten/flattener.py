@@ -9,6 +9,17 @@ from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
     GENETIC_PERTURBATION_MAP,
+    GEO_EXPERIMENTAL_CONDITION_COLS,
+    GEO_FLEX_LIBRARY_PROTOCOLS,
+    GEO_INSTRUMENT_MODEL_MAP,
+    GEO_LIBRARY_CARDINALITY_MAP,
+    GEO_LIBRARY_STRATEGY_FEATURE_COL,
+    GEO_LIBRARY_STRATEGY_MAP,
+    GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
+    GEO_LIBRARY_STRATEGY_SOURCE_COLS,
+    GEO_SUSPENSION_TYPE_COLS,
+    GEO_TITLE_TREATMENT_COLS,
+    GEO_TREATMENT_COLS,
     GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
@@ -20,13 +31,16 @@ from db2_flattener.utils import (
     collapse_dataframe,
     collapse_duplicate_columns,
     combine_bound_columns,
+    expand_list_column,
     extract_references_from_field,
     get_config_obj_type,
     get_url_prefix_from_id,
+    is_empty,
     normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
+    to_items,
 )
 
 
@@ -176,6 +190,12 @@ class DB2Flattener:
                                     )
                                 field_name = f"{sample_type}_{field}"
                                 sample_metadata[sample_alias][field_name] = value
+                                if field == "sources":
+                                    titles = self._source_titles(value)
+                                    if titles:
+                                        sample_metadata[sample_alias][
+                                            f"{sample_type}_sources_title"
+                                        ] = self._join_unique(titles)
 
                         self._flatten_resolved_references(
                             sample_obj,
@@ -258,22 +278,23 @@ class DB2Flattener:
 
         return main_df, new_sample_df
 
-    def _row_is_gex(self, row) -> bool:
-        """Filter df to only GEX libraries"""
+    def _row_is_geo_library(self, row) -> bool:
+        """Filter df to GEX or ATAC libraries."""
         droplet_ft = row.get("droplet_based_libraries_feature_types")
         plate_ft = row.get("plate_based_libraries_feature_types")
 
-        def has_gex(ft):
+        def has_geo_feature(ft):
             if ft is None or (isinstance(ft, float) and pd.isna(ft)):
                 return None  # missing
             if isinstance(ft, str):
-                return "Gene Expression" in ft
+                return "Gene Expression" in ft or "ATAC" in ft
             if isinstance(ft, list):
-                return "Gene Expression" in ft
-            return "Gene Expression" in str(ft)
+                return "Gene Expression" in ft or "ATAC" in ft
+            text = str(ft)
+            return "Gene Expression" in text or "ATAC" in text
 
-        droplet = has_gex(droplet_ft)
-        plate = has_gex(plate_ft)
+        droplet = has_geo_feature(droplet_ft)
+        plate = has_geo_feature(plate_ft)
 
         if droplet is True or plate is True:
             return True
@@ -289,24 +310,319 @@ class DB2Flattener:
             row.get("droplet_based_libraries_CRO_group_identifier")
         ):
             return False
-        return True  # if no GEX found, keep all
+        return True  # if no GEX/ATAC found, keep all
 
     def create_geo_dataframe(self, main_df) -> pd.DataFrame:
         """
-        Build GEO submission dataframe from already-split main_df, taking GEX libraries only
+        Build GEO submission dataframe from already-split main_df, taking GEX and ATAC libraries.
 
         Expects _term_name columns (not raw dict columns).
         """
-        gex_mask = main_df.apply(self._row_is_gex, axis=1)
-        geo_source = main_df[gex_mask].copy()
-        print(f"GEO: filtered to {len(geo_source)} GEX rows out of {len(main_df)} MAIN rows")
+        geo_mask = main_df.apply(self._row_is_geo_library, axis=1)
+        geo_source = main_df[geo_mask].copy()
+        print(f"GEO: filtered to {len(geo_source)} GEX/ATAC rows out of {len(main_df)} MAIN rows")
 
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
+        subset_keys.extend(k for k in GEO_EXPERIMENTAL_CONDITION_COLS if k in geo_source.columns)
+        subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
+        subset_keys.extend(k for k in GEO_TREATMENT_COLS if k in geo_source.columns)
+        subset_keys.extend(
+            k for k in GEO_TITLE_TREATMENT_COLS if k in geo_source.columns and k not in subset_keys
+        )
+        subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
+        geo_df = strip_author_metadata_column_prefix(geo_df)
+        geo_df = collapse_duplicate_columns(geo_df)
+        geo_df = self._summarize_geo_experimental_condition(geo_df)
+        geo_df = self._summarize_geo_treatment(geo_df)
+        geo_df = self._add_geo_molecule(geo_df)
+        geo_df = self._add_geo_library_strategy(geo_df)
 
         group_col = "*library name"
-        return collapse_dataframe(geo_df, group_col=group_col)
+        geo_df = collapse_dataframe(geo_df, group_col=group_col)
+        col = "genetic_modifications_strategy"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].replace(GENETIC_PERTURBATION_MAP)
+        col = "donor_sex"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._pool_mixed_geo_sex)
+        geo_df = self._add_geo_title(geo_df)
+        col = "single or paired-end"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].replace(GEO_LIBRARY_CARDINALITY_MAP)
+        col = "*instrument model"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].replace(GEO_INSTRUMENT_MODEL_MAP)
+        col = "*SRA Experiment or Run"
+        if col in geo_df.columns:
+            # Both columns come from the same dbxrefs cell, so read BioSample out
+            # before the SRA accessions overwrite it.
+            biosample = geo_df[col].map(self._extract_geo_biosample)
+            geo_df[col] = geo_df[col].map(self._extract_geo_sra_accession)
+            geo_df.insert(geo_df.columns.get_loc(col) + 1, "*BioSample", biosample)
+        return expand_list_column(geo_df, "processed data file")
+
+    @staticmethod
+    def _extract_dbxref_accessions(val, prefix: str):
+        """Take unique accessions after a given prefix from a dbxref cell."""
+        accessions = []
+        for item in to_items(val):
+            text = str(item).strip()
+            if text.startswith(prefix):
+                accession = text[len(prefix) :]
+                if accession:
+                    accessions.append(accession)
+        unique = list(dict.fromkeys(accessions))
+        if not unique:
+            return pd.NA
+        return unique[0] if len(unique) == 1 else unique
+
+    @classmethod
+    def _extract_geo_sra_accession(cls, val):
+        """Take unique accessions after an SRA: prefix from a dbxref cell."""
+        return cls._extract_dbxref_accessions(val, "SRA:")
+
+    @classmethod
+    def _extract_geo_biosample(cls, val):
+        """Take unique accessions after a Biomaterial: prefix from a dbxref cell."""
+        return cls._extract_dbxref_accessions(val, "Biomaterial:")
+
+    @staticmethod
+    def _pool_mixed_geo_sex(val):
+        """Rewrite a list of male and female (either order) to a pooled label."""
+        if isinstance(val, (list, tuple)):
+            sexes = {str(item).strip().lower() for item in val if not is_empty(item)}
+            if sexes == {"male", "female"}:
+                return "pooled male and female"
+        return val
+
+    @staticmethod
+    def _summarize_geo_experimental_condition(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build experimental_condition from source cols, then drop those sources."""
+        source_cols = [c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in geo_df.columns]
+        if not source_cols:
+            return geo_df
+
+        geo_df = combine_bound_columns(
+            geo_df,
+            lower_col="experimental_conditions_lower_bound_duration",
+            upper_col="experimental_conditions_upper_bound_duration",
+            units_col="experimental_conditions_duration_units",
+            out_col="_exp_duration",
+        )
+
+        def _cell_text(val) -> str:
+            if val is pd.NA:
+                return ""
+            try:
+                if is_empty(val):
+                    return ""
+            except (TypeError, ValueError):
+                return ""
+            return str(val).strip()
+
+        def _summarize_row(row: pd.Series):
+            condition = _cell_text(row.get("experimental_conditions_condition"))
+            text_value = _cell_text(row.get("experimental_conditions_text_value"))
+            duration = _cell_text(row.get("_exp_duration"))
+            right = " ".join(part for part in (text_value, duration) if part)
+            if condition and right:
+                return f"{condition}; {right}"
+            return condition or right or pd.NA
+
+        geo_df["experimental_condition"] = geo_df.apply(_summarize_row, axis=1)
+        drop_cols = [
+            c
+            for c in (
+                *GEO_EXPERIMENTAL_CONDITION_COLS,
+                "_exp_duration",
+            )
+            if c in geo_df.columns
+        ]
+        return geo_df.drop(columns=drop_cols)
+
+    @staticmethod
+    def _summarize_geo_treatment(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build treatment from source cols. Empty rows become 'no treatment' if any row has a value."""
+        source_cols = [c for c in GEO_TREATMENT_COLS if c in geo_df.columns]
+        if not source_cols:
+            return geo_df
+
+        def _cell_text(val) -> str:
+            if val is pd.NA:
+                return ""
+            try:
+                if is_empty(val):
+                    return ""
+            except (TypeError, ValueError):
+                return ""
+            return str(val).strip()
+
+        def _duration(row: pd.Series, *, include_upper: bool) -> str:
+            lower = _cell_text(row.get("treatments_lower_bound_duration"))
+            upper = _cell_text(row.get("treatments_upper_bound_duration")) if include_upper else ""
+            if include_upper and lower and upper:
+                bounds = lower if lower == upper else f"{lower}-{upper}"
+            else:
+                bounds = lower or (upper if include_upper else "")
+            units = _cell_text(row.get("treatments_duration_units"))
+            return " ".join(part for part in (bounds, units) if part)
+
+        def _summarize_row(row: pd.Series):
+            term = _cell_text(row.get("treatments_ontological_term_term_name"))
+            description = _cell_text(row.get("treatments_description"))
+            duration = _duration(row, include_upper=False)
+            right = " ".join(part for part in (description, duration) if part)
+            if term and right:
+                return f"{term}; {right}"
+            return term or right or None
+
+        def _title_summarize_row(row: pd.Series):
+            description = _cell_text(row.get("treatments_description"))
+            duration = _duration(row, include_upper=True)
+            return " ".join(part for part in (description, duration) if part) or None
+
+        geo_df = geo_df.copy()
+        geo_df["treatment"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df["_title_treatment"] = geo_df.apply(_title_summarize_row, axis=1)
+        has_treatment = geo_df["treatment"].map(lambda v: bool(_cell_text(v)))
+        if has_treatment.any():
+            empty_treatment = ~has_treatment
+            geo_df.loc[empty_treatment, "treatment"] = "no treatment"
+            geo_df.loc[empty_treatment, "_title_treatment"] = "no treatment"
+        return geo_df
+
+    @staticmethod
+    def _add_geo_title(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build title from library, strategy, treatment, and genetic modification fields."""
+
+        def _cell_text(val) -> str:
+            if val is pd.NA:
+                return ""
+            try:
+                if is_empty(val):
+                    return ""
+            except (TypeError, ValueError):
+                return ""
+            return str(val).strip()
+
+        def _is_pooled(samples) -> bool:
+            if isinstance(samples, (list, tuple)):
+                return len([item for item in samples if not is_empty(item)]) > 1
+            text = _cell_text(samples)
+            if not text:
+                return False
+            return len([part for part in text.split("; ") if part]) > 1
+
+        def _treatment_segment(row: pd.Series) -> str:
+            summarized = row.get("_title_treatment")
+            if isinstance(summarized, (list, tuple)):
+                items = [item for item in summarized if not is_empty(item)]
+                return str(list(items)) if items else ""
+            return _cell_text(summarized)
+
+        def _summarize_row(row: pd.Series):
+            left = " ".join(
+                part
+                for part in (
+                    _cell_text(row.get("*library name")),
+                    _cell_text(row.get("library_strategy")),
+                )
+                if part
+            )
+            groups = [left]
+            if _is_pooled(row.get("samples")):
+                groups.append("pooled")
+            groups.extend(
+                [
+                    _treatment_segment(row),
+                    _cell_text(row.get("genetic_modifications_strategy")),
+                ]
+            )
+            return "; ".join(group for group in groups if group) or None
+
+        geo_df = geo_df.copy()
+        geo_df["title"] = geo_df.apply(_summarize_row, axis=1)
+        drop_cols = [
+            c
+            for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
+            if c in geo_df.columns
+        ]
+        return geo_df.drop(columns=drop_cols) if drop_cols else geo_df
+
+    @staticmethod
+    def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build *molecule from feature_types and library_protocol."""
+
+        def _has_feature(ft, name: str) -> bool:
+            if is_empty(ft):
+                return False
+            if isinstance(ft, list):
+                return name in ft
+            return name in str(ft)
+
+        def _map_row(row: pd.Series):
+            ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            if _has_feature(ft, "ATAC"):
+                return "genomic DNA"
+            if _has_feature(ft, "Gene Expression"):
+                protocol = row.get("library_protocol")
+                if protocol in GEO_FLEX_LIBRARY_PROTOCOLS:
+                    return "total RNA"
+                return "polyA RNA"
+            return None
+
+        geo_df = geo_df.copy()
+        geo_df["*molecule"] = geo_df.apply(_map_row, axis=1)
+        return geo_df
+
+    @staticmethod
+    def _add_geo_library_strategy(geo_df: pd.DataFrame) -> pd.DataFrame:
+        """Build library_strategy from feature_types and suspension_type, then drop sources."""
+        source_cols = [c for c in GEO_LIBRARY_STRATEGY_SOURCE_COLS if c in geo_df.columns]
+        if not source_cols:
+            return geo_df
+
+        def _feature_types(row: pd.Series):
+            droplet_ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            if not is_empty(droplet_ft):
+                return droplet_ft
+            return row.get(GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL)
+
+        def _has_feature(ft, name: str) -> bool:
+            if is_empty(ft):
+                return False
+            if isinstance(ft, list):
+                return name in ft
+            return name in str(ft)
+
+        def _suspension_types(row: pd.Series) -> list:
+            items = []
+            for col in GEO_SUSPENSION_TYPE_COLS:
+                if col in row.index:
+                    items.extend(to_items(row.get(col)))
+            return list(dict.fromkeys(items))
+
+        def _map_row(row: pd.Series):
+            ft = _feature_types(row)
+            if _has_feature(ft, "Gene Expression"):
+                strategies = []
+                for susp in _suspension_types(row):
+                    mapped = GEO_LIBRARY_STRATEGY_MAP.get(("Gene Expression", susp))
+                    if mapped:
+                        strategies.append(mapped)
+                unique = list(dict.fromkeys(strategies))
+                if not unique:
+                    return None
+                return unique[0] if len(unique) == 1 else unique
+            if _has_feature(ft, "ATAC"):
+                return GEO_LIBRARY_STRATEGY_MAP[("ATAC", None)]
+            return None
+
+        geo_df = geo_df.copy()
+        geo_df["library_strategy"] = geo_df.apply(_map_row, axis=1)
+        return geo_df.drop(columns=source_cols)
 
     def create_guide_metadata_dataframe(self, file_info):
         """
@@ -550,6 +866,20 @@ class DB2Flattener:
             ref_id = term_ref
 
         return resolved_controlled_terms.get(ref_id)
+
+    @staticmethod
+    def _source_titles(value):
+        """Collect title values from an embedded Source object or list of objects."""
+        if value is None or value == []:
+            return []
+        items = value if isinstance(value, list) else [value]
+        titles = []
+        for item in items:
+            if isinstance(item, dict):
+                title = item.get("title")
+                if title not in (None, ""):
+                    titles.append(title)
+        return titles
 
     @staticmethod
     def _is_controlled_term_field(field_name, references):

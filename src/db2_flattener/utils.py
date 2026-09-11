@@ -23,8 +23,8 @@ ONTOLOGY_TERM_ID_SUFFIX = "_ontology_term_id"
 
 
 def is_empty(val) -> bool:
-    """Return True for None, NaN, empty string, or empty list."""
-    if val is None:
+    """Return True for None, pd.NA, NaN, empty string, or empty list."""
+    if val is None or val is pd.NA:
         return True
     if isinstance(val, float) and pd.isna(val):
         return True
@@ -160,6 +160,32 @@ def collapse_dataframe(
     other_cols = columns or [c for c in df.columns if c != group_col]
     agg = {col: single_or_list for col in other_cols}
     return df.groupby(group_col, as_index=False).agg(agg)
+
+
+def expand_list_column(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    """
+    Replace a list-valued column with one column per item, all named col, on the right.
+
+    Scalar cells become a single column. Rows shorter than the widest list pad with pd.NA.
+    Missing col is a no-op.
+    """
+    if col not in df.columns:
+        return df
+
+    items = df[col].map(to_items)
+    lengths = items.map(len)
+    max_n = int(lengths.max()) if len(lengths) else 0
+    other = df.drop(columns=[col])
+    if max_n == 0:
+        other[col] = pd.NA
+        return other
+
+    expanded = pd.DataFrame(
+        {i: items.map(lambda xs, i=i: xs[i] if i < len(xs) else pd.NA) for i in range(max_n)},
+        index=df.index,
+    )
+    expanded.columns = [col] * max_n
+    return pd.concat([other, expanded], axis=1)
 
 
 def combine_bound_columns(
