@@ -10,7 +10,13 @@ UUID = "9b1c06e5-aaaa-bbbb-cccc-dddddddddddd"
 
 
 def make_flattener(sample_df):
-    main_df = pd.DataFrame({"raw_matrix_file_alias": ["rmf1"]})
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1"],
+            "sample_alias": ["s1"],
+            "droplet_based_libraries_aliases": [["alex-marson:lib1"]],
+        }
+    )
     f = DB2Flattener.__new__(DB2Flattener)
     f.connection = None
     f.configs = Configs(FIELD_TYPES={}, OBJECT_CONFIG={})
@@ -21,14 +27,14 @@ def make_flattener(sample_df):
     return f
 
 
-def test_output_prefix_names_all_four_csvs(tmp_path):
+def test_output_prefix_names_all_csvs(tmp_path):
     flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
     prefix = str(tmp_path / "myrun")
 
     result = flattener.flatten_matrix_file_set(UUID, output_prefix=prefix)
 
     assert result == f"{prefix}_MAIN.csv"
-    for suffix in ("MAIN", "BIOHUB", "GEO", "SAMPLES"):
+    for suffix in ("MAIN", "BIOHUB", "GEO", "SRA_BIOSAMPLE", "SAMPLES"):
         assert (tmp_path / f"myrun_{suffix}.csv").is_file()
 
 
@@ -46,7 +52,7 @@ def test_default_prefix_uses_uuid_and_timestamp(tmp_path, monkeypatch):
 
     prefix = f"MatrixFileSet_{UUID[:8]}_20260814_095000"
     assert result == f"{prefix}_MAIN.csv"
-    for suffix in ("MAIN", "BIOHUB", "GEO", "SAMPLES"):
+    for suffix in ("MAIN", "BIOHUB", "GEO", "SRA_BIOSAMPLE", "SAMPLES"):
         assert (tmp_path / f"{prefix}_{suffix}.csv").is_file()
 
 
@@ -60,6 +66,7 @@ def test_empty_sample_df_skips_samples_csv(tmp_path):
     assert (tmp_path / "myrun_MAIN.csv").is_file()
     assert (tmp_path / "myrun_BIOHUB.csv").is_file()
     assert (tmp_path / "myrun_GEO.csv").is_file()
+    assert (tmp_path / "myrun_SRA_BIOSAMPLE.csv").is_file()
     assert not (tmp_path / "myrun_SAMPLES.csv").exists()
     assert not (tmp_path / "myrun_GUIDE_METADATA.csv").exists()
 

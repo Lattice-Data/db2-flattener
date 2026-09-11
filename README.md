@@ -4,8 +4,8 @@
 [![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/db2-flattener/badge.svg?branch=main)](https://coveralls.io/github/Lattice-Data/db2-flattener?branch=main)
 
 Flattener utility for the [Lattice Database](https://data.lattice-data.org/).
-It gathers a MatrixFileSet from DB2 and writes MAIN, BIOHUB, GEO, SAMPLES, and
-GUIDE_METADATA CSVs.
+It gathers a MatrixFileSet from DB2 and writes MAIN, BIOHUB, GEO, SRA_BIOSAMPLE,
+SAMPLES, and GUIDE_METADATA CSVs.
 Ported from [lattice-tools](https://github.com/Lattice-Data/lattice-tools)
 `TOOLS-285-GEO-Flattener` at
 [`d4de994`](https://github.com/Lattice-Data/lattice-tools/commit/d4de994638e44e79c04dffed13e7a8b213955fd6).
@@ -42,9 +42,10 @@ python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo
 
 Optional `-o` sets a shared path prefix. CSVs are written as
 `{prefix}_MAIN.csv`, `{prefix}_BIOHUB.csv`, `{prefix}_GEO.csv`,
-`{prefix}_SAMPLES.csv`, and `{prefix}_GUIDE_METADATA.csv`. SAMPLES and
-GUIDE_METADATA are omitted when there is nothing to write. Without `-o`,
-the prefix is `MatrixFileSet_{uuid}_{timestamp}`.
+`{prefix}_SRA_BIOSAMPLE.csv`, `{prefix}_SAMPLES.csv`, and
+`{prefix}_GUIDE_METADATA.csv`. SAMPLES and GUIDE_METADATA are omitted when
+there is nothing to write. Without `-o`, the prefix is
+`MatrixFileSet_{uuid}_{timestamp}`.
 
 ## Fetch latest schema from Lattice
 
