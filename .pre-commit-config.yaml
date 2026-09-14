@@ -31,7 +31,7 @@ repos:
         name: ruff format
         entry: ruff format .
         language: python
-        additional_dependencies: ["ruff==0.16.1"]
+        additional_dependencies: ["ruff==0.16.5"]
         pass_filenames: false
 
   # 2) Ruff lint (same command as CI: ruff check .)
@@ -41,5 +41,5 @@ repos:
         name: ruff check
         entry: ruff check .
         language: python
-        additional_dependencies: ["ruff==0.16.1"]
+        additional_dependencies: ["ruff==0.16.5"]
         pass_filenames: false
