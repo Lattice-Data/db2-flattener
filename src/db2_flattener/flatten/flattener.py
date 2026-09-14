@@ -309,6 +309,39 @@ class DB2Flattener:
 
         return main_df, new_sample_df
 
+    def _row_is_gex(self, row) -> bool:
+        """Filter df to only GEX libraries"""
+        droplet_ft = row.get("droplet_based_libraries_feature_types")
+        plate_ft = row.get("plate_based_libraries_feature_types")
+
+        def has_gex(ft):
+            if ft is None or (isinstance(ft, float) and pd.isna(ft)):
+                return None  # missing
+            if isinstance(ft, str):
+                return "Gene Expression" in ft
+            if isinstance(ft, list):
+                return "Gene Expression" in ft
+            return "Gene Expression" in str(ft)
+
+        droplet = has_gex(droplet_ft)
+        plate = has_gex(plate_ft)
+
+        if droplet is True or plate is True:
+            return True
+        if droplet is False or plate is False:
+            return False
+
+        # Missing feature_types: plate assumed GEX, droplet assumed non-GEX
+        if pd.notna(row.get("plate_based_libraries_@id")) or pd.notna(
+            row.get("plate_based_libraries_CRO_group_identifier")
+        ):
+            return True
+        if pd.notna(row.get("droplet_based_libraries_@id")) or pd.notna(
+            row.get("droplet_based_libraries_CRO_group_identifier")
+        ):
+            return False
+        return True  # if no GEX found, keep all
+
     def _row_is_geo_library(self, row) -> bool:
         """Filter df to GEX or ATAC libraries."""
         droplet_ft = row.get("droplet_based_libraries_feature_types")
