@@ -347,6 +347,9 @@ class DB2Flattener:
         col = "donor_sex"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_sex)
+        for col in ("treatment", "_title_treatment"):
+            if col in geo_df.columns:
+                geo_df[col] = geo_df[col].map(self._sort_geo_list)
         geo_df = self._add_geo_title(geo_df)
         col = "single or paired-end"
         if col in geo_df.columns:
@@ -395,6 +398,13 @@ class DB2Flattener:
             sexes = {str(item).strip().lower() for item in val if not is_empty(item)}
             if sexes == {"male", "female"}:
                 return "pooled male and female"
+        return val
+
+    @staticmethod
+    def _sort_geo_list(val):
+        """Sort a collapsed list cell; leave scalars unchanged."""
+        if isinstance(val, (list, tuple)):
+            return sorted(val, key=lambda item: str(item))
         return val
 
     @staticmethod

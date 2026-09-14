@@ -793,3 +793,21 @@ def test_create_geo_dataframe_title_lists_mixed_treatments_same_library():
     ]
     assert list(geo_df["title"]) == ["libA scRNA-seq; ['LPS stimulation 4 hours', 'no treatment']"]
     assert all("lipopolysaccharide" not in title for title in geo_df["title"])
+
+
+def test_create_geo_dataframe_sorts_collapsed_treatment_values():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(treatments_description="zeta"),
+            gex_row(
+                raw_matrix_file_alias="libA-2.h5",
+                treatments_description="alpha",
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["treatment"]) == [["alpha", "zeta"]]
+    assert list(geo_df["title"]) == ["libA; ['alpha', 'zeta']"]
