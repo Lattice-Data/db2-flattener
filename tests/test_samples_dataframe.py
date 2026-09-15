@@ -32,7 +32,7 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["cell_lines_intended_cell_types_term_name"] == "intended_cell_types"
     assert PROP_MAP_SAMPLES["cell_lines_sample_terms_term_name"] == "**cell_line"
     assert PROP_MAP_SAMPLES["tissues_sample_terms_term_name"] == "tissue"
-    assert PROP_MAP_SAMPLES["tissues_enriched_cell_types_term_name"] == "enriched_cell_tye"
+    assert PROP_MAP_SAMPLES["tissues_enriched_cell_types_term_name"] == "enriched_cell_type"
     assert PROP_MAP_SAMPLES["tissues_multiplexing_barcodes"] == "sample_probe_barcode"
     assert PROP_MAP_SAMPLES["tissues_selection_kits"] == "selection_kits"
     assert PROP_MAP_SAMPLES["tissues_selection_markers"] == "selection_markers"
@@ -90,7 +90,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert list(result["intended_cell_types"]) == ["hepatocyte"]
     assert list(result["**cell_line"]) == ["HeLa"]
     assert list(result["tissue"]) == ["liver"]
-    assert list(result["enriched_cell_tye"]) == ["hepatocyte"]
+    assert list(result["enriched_cell_type"]) == ["hepatocyte"]
     assert list(result["sample_probe_barcode"]) == ["BC001|CR001"]
     assert list(result["selection_kits"]) == ["EasySep"]
     assert list(result["selection_markers"]) == ["CD4"]

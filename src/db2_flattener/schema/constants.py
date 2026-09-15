@@ -147,7 +147,7 @@ PROP_MAP_SAMPLES = {
     "cell_lines_intended_cell_types_term_name": "intended_cell_types",
     "cell_lines_sample_terms_term_name": "**cell_line",
     "tissues_sample_terms_term_name": "tissue",
-    "tissues_enriched_cell_types_term_name": "enriched_cell_tye",
+    "tissues_enriched_cell_types_term_name": "enriched_cell_type",
     "tissues_multiplexing_barcodes": "sample_probe_barcode",
     "tissues_selection_kits": "selection_kits",
     "tissues_selection_markers": "selection_markers",
