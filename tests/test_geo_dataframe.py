@@ -158,9 +158,7 @@ def test_create_geo_dataframe_omits_donor_ethnicity_for_cell_line():
 
 def test_create_geo_dataframe_includes_intended_cell_types():
     flattener = make_flattener()
-    main_df = pd.DataFrame(
-        [gex_row(cell_lines_intended_cell_types_term_name="hepatocyte")]
-    )
+    main_df = pd.DataFrame([gex_row(cell_lines_intended_cell_types_term_name="hepatocyte")])
 
     geo_df = flattener.create_geo_dataframe(main_df)
 

@@ -329,9 +329,7 @@ class DB2Flattener:
         )
         columns_to_keep = [k for k in PROP_MAP_SAMPLES if k in sample_df.columns]
         columns_to_keep.extend(c for c in duration_cols if c in sample_df.columns)
-        columns_to_keep.extend(
-            c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in sample_df.columns
-        )
+        columns_to_keep.extend(c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in sample_df.columns)
         columns_to_keep.extend(
             c
             for c in ("human_donors_ethnicity_term_name", "tissues_@id")
