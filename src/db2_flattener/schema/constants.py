@@ -68,6 +68,7 @@ GUIDE_METADATA_COLUMNS = [
 
 # Keys use _term_name suffix for columns produced by DB2_utils.split_controlled_term_columns
 PROP_MAP_GEO = {
+    "cell_lines_intended_cell_types_term_name": "intended_cell_types",
     "cell_lines_sample_terms_term_name": "**cell_line",
     "droplet_based_libraries_CRO_group_identifier": "*library name",
     "droplet_based_libraries_dbxrefs": "*SRA Experiment or Run",
@@ -143,12 +144,16 @@ PROP_MAP_SAMPLES = {
     "non_human_donors_sex": "donor_sex",
     "human_donors_taxa": "organism",
     "non_human_donors_taxa": "organism",
-    "human_donors_ethnicity_term_id": "self_reported_ethnicity",
+    "cell_lines_intended_cell_types_term_name": "intended_cell_types",
+    "cell_lines_sample_terms_term_name": "**cell_line",
     "tissues_sample_terms_term_name": "tissue",
     "tissues_enriched_cell_types_term_name": "enriched_cell_tye",
     "tissues_multiplexing_barcodes": "sample_probe_barcode",
     "tissues_selection_kits": "selection_kits",
+    "tissues_selection_markers": "selection_markers",
+    "tissues_selection_methods": "selection_methods",
     "tissues_developmental_stages_term_name": "donor_dev_stage",
+    "tissues_sources_title": "source",
     "treatments_ontological_term_term_name": "treatment",
     "treatments_description": "treatment_description",
     "genetic_modifications_strategy": "genetic_modifications_strategy",

@@ -62,6 +62,7 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["tissues_selection_methods"] == "selection_methods"
     assert PROP_MAP_GEO["droplet_based_libraries_dbxrefs"] == "*SRA Experiment or Run"
     assert PROP_MAP_GEO["tissues_sources_title"] == "source"
+    assert PROP_MAP_GEO["cell_lines_intended_cell_types_term_name"] == "intended_cell_types"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -93,6 +94,78 @@ def test_create_geo_dataframe_adds_new_columns():
     assert "selection_kits" not in geo_df.columns
     assert "selection_markers" not in geo_df.columns
     assert "selection_methods" not in geo_df.columns
+
+
+def test_create_geo_dataframe_donor_ethnicity_for_tissue():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                **{
+                    "tissues_@id": "/tissues/t1/",
+                    "human_donors_ethnicity_term_name": "European",
+                }
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["donor_ethnicity"]) == ["European"]
+
+
+def test_create_geo_dataframe_donor_ethnicity_pools_and_gaps():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                **{
+                    "tissues_@id": "/tissues/t1/",
+                    "human_donors_ethnicity_term_name": "European",
+                }
+            ),
+            gex_row(
+                **{
+                    "tissues_@id": "/tissues/t2/",
+                    "human_donors_ethnicity_term_name": None,
+                }
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["donor_ethnicity"]) == ["pooled: European, not provided"]
+
+
+def test_create_geo_dataframe_omits_donor_ethnicity_for_cell_line():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                **{
+                    "cell_lines_@id": "/cell_lines/c1/",
+                    "human_donors_ethnicity_term_name": "European",
+                }
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert "donor_ethnicity" not in geo_df.columns
+
+
+def test_create_geo_dataframe_includes_intended_cell_types():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(cell_lines_intended_cell_types_term_name="hepatocyte")]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["intended_cell_types"]) == ["hepatocyte"]
+    assert "cell_lines_intended_cell_types_term_name" not in geo_df.columns
 
 
 def test_create_geo_dataframe_includes_tissue_selection_columns():
