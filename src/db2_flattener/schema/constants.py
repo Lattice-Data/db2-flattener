@@ -134,6 +134,26 @@ PROP_MAP_BIOHUB = {
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
 }
 
+PROP_MAP_SAMPLES = {
+    "raw_matrix_file_alias": "processed data file",
+    "sample_alias": "pre_pooled_sample",
+    "human_donors_cxg_donor_id": "donor_id",
+    "non_human_donors_cxg_donor_id": "donor_id",
+    "human_donors_sex": "donor_sex",
+    "non_human_donors_sex": "donor_sex",
+    "human_donors_taxa": "organism",
+    "non_human_donors_taxa": "organism",
+    "human_donors_ethnicity_term_id": "self_reported_ethnicity",
+    "tissues_sample_terms_term_name": "tissue",
+    "tissues_enriched_cell_types_term_name": "enriched_cell_tye",
+    "tissues_multiplexing_barcodes": "sample_probe_barcode",
+    "tissues_selection_kits": "selection_kits",
+    "tissues_developmental_stages_term_name": "donor_dev_stage",
+    "treatments_ontological_term_term_name": "treatment",
+    "treatments_description": "treatment_description",
+    "genetic_modifications_strategy": "genetic_modifications_strategy",
+}
+
 # Only renames belong here; the derived columns are named in the flattener
 # The reason these are not derived is because there's no value transform, gap markers
 # or multiple source columns

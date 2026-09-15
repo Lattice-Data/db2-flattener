@@ -233,6 +233,17 @@ def expand_list_column(df: pd.DataFrame, col: str) -> pd.DataFrame:
     return pd.concat([other, expanded], axis=1)
 
 
+def join_sequence_column(df: pd.DataFrame, col: str, sep: str = "|") -> pd.DataFrame:
+    """Join list/tuple cells in col with sep; leave scalars unchanged."""
+    if col not in df.columns:
+        return df
+    df = df.copy()
+    df[col] = df[col].apply(
+        lambda x: sep.join(map(str, x)) if isinstance(x, (list, tuple)) else x
+    )
+    return df
+
+
 def combine_bound_columns(
     df: pd.DataFrame,
     *,

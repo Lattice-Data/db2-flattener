@@ -8,6 +8,7 @@ from db2_flattener.utils import (
     combine_bound_columns,
     expand_list_column,
     extract_controlled_term_id,
+    join_sequence_column,
     normalize_guide_rna_file_refs,
     sort_ontology_term_id_column,
     split_term_cell,
@@ -172,6 +173,19 @@ def test_collapse_duplicate_columns_mixed_with_unique():
     assert list(result.columns) == ["a", "b"]
     assert result["a"].iloc[0] == ["x", "y"]
     assert result["b"].iloc[0] == "keep"
+
+
+def test_join_sequence_column_joins_lists_and_tuples():
+    df = pd.DataFrame({"sample_probe_barcode": [["BC1", "BC2"], ("BC3",), "BC4", None]})
+    result = join_sequence_column(df, "sample_probe_barcode")
+    assert list(result["sample_probe_barcode"].iloc[:3]) == ["BC1|BC2", "BC3", "BC4"]
+    assert pd.isna(result["sample_probe_barcode"].iloc[3])
+
+
+def test_join_sequence_column_missing_col_unchanged():
+    df = pd.DataFrame({"sample_alias": ["s1"]})
+    result = join_sequence_column(df, "sample_probe_barcode")
+    pd.testing.assert_frame_equal(result, df)
 
 
 def test_strip_author_metadata_column_prefix_renames():
