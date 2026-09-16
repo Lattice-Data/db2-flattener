@@ -34,11 +34,13 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["tissues_sample_terms_term_name"] == "tissue"
     assert PROP_MAP_SAMPLES["tissues_enriched_cell_types_term_name"] == "enriched_cell_type"
     assert PROP_MAP_SAMPLES["tissues_multiplexing_barcodes"] == "sample_probe_barcode"
+    assert PROP_MAP_SAMPLES["cell_lines_multiplexing_barcodes"] == "sample_probe_barcode"
     assert PROP_MAP_SAMPLES["tissues_selection_kits"] == "selection_kits"
     assert PROP_MAP_SAMPLES["tissues_selection_markers"] == "selection_markers"
     assert PROP_MAP_SAMPLES["tissues_selection_methods"] == "selection_methods"
     assert PROP_MAP_SAMPLES["tissues_developmental_stages_term_name"] == "donor_dev_stage"
     assert PROP_MAP_SAMPLES["tissues_sources_title"] == "source"
+    assert PROP_MAP_SAMPLES["cell_lines_sources_title"] == "source"
     assert PROP_MAP_SAMPLES["treatments_ontological_term_term_name"] == "treatment"
     assert PROP_MAP_SAMPLES["treatments_description"] == "treatment_description"
     assert PROP_MAP_SAMPLES["genetic_modifications_strategy"] == "genetic_modifications_strategy"
@@ -104,6 +106,24 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert "raw_file_samples" not in result.columns
     assert "tissues_@id" not in result.columns
     assert "sample_alias" not in result.columns
+
+
+def test_create_samples_dataframe_maps_cell_line_source_and_barcodes():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["cl1"],
+            "cell_lines_sources_title": ["ATCC"],
+            "cell_lines_multiplexing_barcodes": [["BC010", "CR010"]],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert list(result["source"]) == ["ATCC"]
+    assert list(result["sample_probe_barcode"]) == ["BC010|CR010"]
+    assert "cell_lines_sources_title" not in result.columns
+    assert "cell_lines_multiplexing_barcodes" not in result.columns
 
 
 def test_create_samples_dataframe_maps_genetic_modifications_strategy():
