@@ -29,10 +29,11 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["human_donors_taxa"] == "organism"
     assert PROP_MAP_SAMPLES["non_human_donors_taxa"] == "organism"
     assert "human_donors_ethnicity_term_name" not in PROP_MAP_SAMPLES
-    assert PROP_MAP_SAMPLES["cell_lines_intended_cell_types_term_name"] == "intended_cell_types"
+    assert PROP_MAP_SAMPLES["cell_lines_intended_cell_types_term_name"] == "**cell type"
     assert PROP_MAP_SAMPLES["cell_lines_sample_terms_term_name"] == "**cell_line"
     assert PROP_MAP_SAMPLES["tissues_sample_terms_term_name"] == "tissue"
-    assert PROP_MAP_SAMPLES["tissues_enriched_cell_types_term_name"] == "enriched_cell_type"
+    assert PROP_MAP_SAMPLES["tissues_enriched_cell_types_term_name"] == "**cell type"
+    assert PROP_MAP_SAMPLES["primary_cell_cultures_enriched_cell_types_term_name"] == "**cell type"
     assert PROP_MAP_SAMPLES["tissues_multiplexing_barcodes"] == "sample_probe_barcode"
     assert PROP_MAP_SAMPLES["cell_lines_multiplexing_barcodes"] == "sample_probe_barcode"
     assert PROP_MAP_SAMPLES["tissues_selection_kits"] == "selection_kits"
@@ -89,10 +90,10 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert list(result["donor_ethnicity"]) == ["European"]
     assert "human_donors_ethnicity_term_name" not in result.columns
     assert "tissues_@id" not in result.columns
-    assert list(result["intended_cell_types"]) == ["hepatocyte"]
+    assert list(result["**cell type"]) == ["hepatocyte"]
+    assert "enriched_cell_type" not in result.columns
     assert list(result["**cell_line"]) == ["HeLa"]
     assert list(result["tissue"]) == ["liver"]
-    assert list(result["enriched_cell_type"]) == ["hepatocyte"]
     assert list(result["sample_probe_barcode"]) == ["BC001|CR001"]
     assert list(result["selection_kits"]) == ["EasySep"]
     assert list(result["selection_markers"]) == ["CD4"]
@@ -106,6 +107,22 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert "raw_file_samples" not in result.columns
     assert "tissues_@id" not in result.columns
     assert "sample_alias" not in result.columns
+
+
+def test_create_samples_dataframe_maps_pcc_enriched_to_cell_type():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["p1"],
+            "primary_cell_cultures_enriched_cell_types_term_name": ["T cell"],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert list(result["**cell type"]) == ["T cell"]
+    assert "primary_cell_cultures_enriched_cell_types_term_name" not in result.columns
+    assert "enriched_cell_type" not in result.columns
 
 
 def test_create_samples_dataframe_maps_cell_line_source_and_barcodes():

@@ -700,7 +700,7 @@ class DB2Flattener:
                 part
                 for part in (
                     _cell_text(row.get("*library name")),
-                    _cell_text(row.get("library_strategy")),
+                    _cell_text(row.get("*library strategy")),
                 )
                 if part
             )
@@ -716,7 +716,7 @@ class DB2Flattener:
             return "; ".join(group for group in groups if group) or None
 
         geo_df = geo_df.copy()
-        geo_df["title"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df["*title"] = geo_df.apply(_summarize_row, axis=1)
         drop_cols = [
             c
             for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
@@ -752,7 +752,7 @@ class DB2Flattener:
 
     @staticmethod
     def _add_geo_library_strategy(geo_df: pd.DataFrame) -> pd.DataFrame:
-        """Build library_strategy from feature_types and suspension_type, then drop sources."""
+        """Build *library strategy from feature_types and suspension_type, then drop sources."""
         source_cols = [c for c in GEO_LIBRARY_STRATEGY_SOURCE_COLS if c in geo_df.columns]
         if not source_cols:
             return geo_df
@@ -794,7 +794,7 @@ class DB2Flattener:
             return None
 
         geo_df = geo_df.copy()
-        geo_df["library_strategy"] = geo_df.apply(_map_row, axis=1)
+        geo_df["*library strategy"] = geo_df.apply(_map_row, axis=1)
         return geo_df.drop(columns=source_cols)
 
     def _sample_probe_barcode_map(self, library_samples):
