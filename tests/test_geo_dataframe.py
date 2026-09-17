@@ -62,6 +62,9 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["tissues_selection_methods"] == "selection_methods"
     assert PROP_MAP_GEO["droplet_based_libraries_dbxrefs"] == "*SRA Experiment or Run"
     assert PROP_MAP_GEO["tissues_sources_title"] == "source"
+    assert PROP_MAP_GEO["cell_lines_intended_cell_types_term_name"] == "**cell type"
+    assert PROP_MAP_GEO["tissues_enriched_cell_types_term_name"] == "**cell type"
+    assert PROP_MAP_GEO["primary_cell_cultures_enriched_cell_types_term_name"] == "**cell type"
 
 
 def test_create_geo_dataframe_adds_new_columns():
@@ -80,19 +83,91 @@ def test_create_geo_dataframe_adds_new_columns():
     geo_df = flattener.create_geo_dataframe(main_df)
 
     assert "library_protocol" in geo_df.columns
-    assert "*library strategy" not in geo_df.columns
+    assert "*library strategy" in geo_df.columns
+    assert "*title" in geo_df.columns
     assert list(geo_df["donor_ids"]) == ["H1"]
     assert list(geo_df["donor_sex"]) == ["female"]
     assert list(geo_df["*organism"]) == ["Homo sapiens"]
     assert list(geo_df["samples"]) == ["sample1"]
     assert list(geo_df["donor_dev_stage"]) == ["adult"]
     assert list(geo_df["**tissue"]) == ["liver"]
-    assert list(geo_df["**cell_type"]) == ["hepatocyte"]
+    assert list(geo_df["**cell type"]) == ["hepatocyte"]
     assert list(geo_df["single or paired-end"]) == ["paired"]
     assert list(geo_df["*instrument model"]) == ["Illumina NovaSeq 6000"]
     assert "selection_kits" not in geo_df.columns
     assert "selection_markers" not in geo_df.columns
     assert "selection_methods" not in geo_df.columns
+
+
+def test_create_geo_dataframe_donor_ethnicity_for_tissue():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                **{
+                    "tissues_@id": "/tissues/t1/",
+                    "human_donors_ethnicity_term_name": "European",
+                }
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["donor_ethnicity"]) == ["European"]
+
+
+def test_create_geo_dataframe_donor_ethnicity_pools_and_gaps():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                **{
+                    "tissues_@id": "/tissues/t1/",
+                    "human_donors_ethnicity_term_name": "European",
+                }
+            ),
+            gex_row(
+                **{
+                    "tissues_@id": "/tissues/t2/",
+                    "human_donors_ethnicity_term_name": None,
+                }
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["donor_ethnicity"]) == ["pooled: European, not provided"]
+
+
+def test_create_geo_dataframe_omits_donor_ethnicity_for_cell_line():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                **{
+                    "cell_lines_@id": "/cell_lines/c1/",
+                    "human_donors_ethnicity_term_name": "European",
+                }
+            )
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert "donor_ethnicity" not in geo_df.columns
+
+
+def test_create_geo_dataframe_includes_intended_cell_types():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(cell_lines_intended_cell_types_term_name="hepatocyte")])
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["**cell type"]) == ["hepatocyte"]
+    assert "intended_cell_types" not in geo_df.columns
+    assert "cell_lines_intended_cell_types_term_name" not in geo_df.columns
 
 
 def test_create_geo_dataframe_includes_tissue_selection_columns():
@@ -407,7 +482,7 @@ def test_create_geo_dataframe_library_strategy_scrna_seq():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
+    assert list(geo_df["*library strategy"]) == ["scRNA-seq"]
     assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
     _assert_no_library_strategy_source_cols(geo_df)
 
@@ -418,7 +493,7 @@ def test_create_geo_dataframe_library_strategy_snrna_seq():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["library_strategy"]) == ["snRNA-seq"]
+    assert list(geo_df["*library strategy"]) == ["snRNA-seq"]
     assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
     _assert_no_library_strategy_source_cols(geo_df)
 
@@ -437,7 +512,7 @@ def test_create_geo_dataframe_library_strategy_scatac_seq_keeps_atac_row():
     geo_df = flattener.create_geo_dataframe(main_df)
 
     assert len(geo_df) == 1
-    assert list(geo_df["library_strategy"]) == ["scATAC-seq"]
+    assert list(geo_df["*library strategy"]) == ["scATAC-seq"]
     assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
     _assert_no_library_strategy_source_cols(geo_df)
 
@@ -457,7 +532,7 @@ def test_create_geo_dataframe_library_strategy_collapses_suspension_sources():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
+    assert list(geo_df["*library strategy"]) == ["scRNA-seq"]
     _assert_no_library_strategy_source_cols(geo_df)
 
 
@@ -623,11 +698,11 @@ def test_create_geo_dataframe_title_full_set():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["title"]) == [
+    assert list(geo_df["*title"]) == [
         "libA scRNA-seq; LPS stimulation 4 hours; CRISPR knockout screen"
     ]
-    assert all("lipopolysaccharide" not in title for title in geo_df["title"])
-    assert list(geo_df["library_strategy"]) == ["scRNA-seq"]
+    assert all("lipopolysaccharide" not in title for title in geo_df["*title"])
+    assert list(geo_df["*library strategy"]) == ["scRNA-seq"]
     assert list(geo_df["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
     assert "treatments_schema_version" not in geo_df.columns
     assert "treatments_ontological_term_term_name" not in geo_df.columns
@@ -651,7 +726,7 @@ def test_create_geo_dataframe_title_unequal_duration():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["title"]) == ["libA scRNA-seq; LPS stimulation 2-4 hours"]
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; LPS stimulation 2-4 hours"]
     _assert_no_treatment_source_cols(geo_df)
 
 
@@ -661,8 +736,8 @@ def test_create_geo_dataframe_title_skips_empty_fields():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["title"]) == ["libA scRNA-seq"]
-    assert all("no treatment" not in title for title in geo_df["title"])
+    assert list(geo_df["*title"]) == ["libA scRNA-seq"]
+    assert all("no treatment" not in title for title in geo_df["*title"])
     if "treatment" in geo_df.columns:
         assert list(geo_df["treatment"]) != ["no treatment"]
     assert "selection_kits" not in geo_df.columns
@@ -686,7 +761,7 @@ def test_create_geo_dataframe_title_pooled_when_samples_list():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["title"]) == ["libA scRNA-seq; pooled; LPS stimulation 4 hours"]
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled; LPS stimulation 4 hours"]
 
 
 def test_create_geo_dataframe_title_pooled_when_joined_samples():
@@ -697,8 +772,8 @@ def test_create_geo_dataframe_title_pooled_when_joined_samples():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["title"]) == ["libA scRNA-seq; pooled"]
-    assert all("no treatment" not in title for title in geo_df["title"])
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled"]
+    assert all("no treatment" not in title for title in geo_df["*title"])
     if "treatment" in geo_df.columns:
         assert list(geo_df["treatment"]) != ["no treatment"]
 
@@ -727,8 +802,8 @@ def test_create_geo_dataframe_treatment_stays_empty_when_no_row_has_treatment():
 
     assert "treatment" in geo_df.columns
     assert all(val is pd.NA or pd.isna(val) or val != "no treatment" for val in geo_df["treatment"])
-    assert list(geo_df["title"]) == ["libA scRNA-seq", "libB scRNA-seq"]
-    assert all("no treatment" not in title for title in geo_df["title"])
+    assert list(geo_df["*title"]) == ["libA scRNA-seq", "libB scRNA-seq"]
+    assert all("no treatment" not in title for title in geo_df["*title"])
 
 
 def test_create_geo_dataframe_treatment_no_treatment_when_other_library_has_treatment():
@@ -758,9 +833,9 @@ def test_create_geo_dataframe_treatment_no_treatment_when_other_library_has_trea
     geo_df = geo_df.set_index("*library name")
 
     assert geo_df.loc["libA", "treatment"] == "lipopolysaccharide; LPS stimulation 4 hours"
-    assert geo_df.loc["libA", "title"] == "libA scRNA-seq; LPS stimulation 4 hours"
+    assert geo_df.loc["libA", "*title"] == "libA scRNA-seq; LPS stimulation 4 hours"
     assert geo_df.loc["libB", "treatment"] == "no treatment"
-    assert geo_df.loc["libB", "title"] == "libB scRNA-seq; no treatment"
+    assert geo_df.loc["libB", "*title"] == "libB scRNA-seq; no treatment"
 
 
 def test_create_geo_dataframe_title_lists_mixed_treatments_same_library():
@@ -791,8 +866,8 @@ def test_create_geo_dataframe_title_lists_mixed_treatments_same_library():
     assert list(geo_df["treatment"]) == [
         ["lipopolysaccharide; LPS stimulation 4 hours", "no treatment"]
     ]
-    assert list(geo_df["title"]) == ["libA scRNA-seq; ['LPS stimulation 4 hours', 'no treatment']"]
-    assert all("lipopolysaccharide" not in title for title in geo_df["title"])
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; ['LPS stimulation 4 hours', 'no treatment']"]
+    assert all("lipopolysaccharide" not in title for title in geo_df["*title"])
 
 
 def test_create_geo_dataframe_sorts_collapsed_treatment_values():
@@ -810,4 +885,4 @@ def test_create_geo_dataframe_sorts_collapsed_treatment_values():
     geo_df = flattener.create_geo_dataframe(main_df)
 
     assert list(geo_df["treatment"]) == [["alpha", "zeta"]]
-    assert list(geo_df["title"]) == ["libA; ['alpha', 'zeta']"]
+    assert list(geo_df["*title"]) == ["libA; ['alpha', 'zeta']"]

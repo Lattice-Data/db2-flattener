@@ -23,6 +23,7 @@ from db2_flattener.schema.constants import (
     GUIDE_METADATA_COLUMNS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
+    PROP_MAP_SAMPLES,
     PROP_MAP_SRA_BIOSAMPLE,
     REFORMAT_LIST,
     TISSUE_TYPE_MAP,
@@ -38,6 +39,7 @@ from db2_flattener.utils import (
     get_config_obj_type,
     get_url_prefix_from_id,
     is_empty,
+    join_sequence_column,
     normalize_guide_rna_file_refs,
     numeric_text,
     sort_ontology_term_id_column,
@@ -102,12 +104,14 @@ class DB2Flattener:
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
         main_df = main_df.dropna(axis=1, how="all")
-        sample_df = sample_df.dropna(axis=1, how="all")
+        if sample_df is not None:
+            sample_df = sample_df.dropna(axis=1, how="all")
 
         # Split dict columns into _term_id / _term_name before writing CSV
         main_df = split_controlled_term_columns(main_df)
         if sample_df is not None and not sample_df.empty:
             sample_df = split_controlled_term_columns(sample_df)
+            sample_df = self.create_samples_dataframe(sample_df)
 
         # Save main DataFrame to CSV
         print(f"Saving main DataFrame to {main_output}...")
@@ -149,7 +153,7 @@ class DB2Flattener:
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
             print(f"Saving sample DataFrame to {sample_output}...")
-            sample_df.to_csv(sample_output, index=True)
+            sample_df.to_csv(sample_output, index=False)
 
             print(f"✅ Sample CSV file created: {sample_output}")
             print(f"   Rows: {len(sample_df)}")
@@ -309,6 +313,86 @@ class DB2Flattener:
 
         return main_df, new_sample_df
 
+    def create_samples_dataframe(self, sample_df) -> pd.DataFrame:
+        """
+        Build the SAMPLES sheet from post-merge sample_df: keep mapped columns,
+        rename them, and fold duration into treatment_description.
+        """
+        sample_df = sample_df.copy()
+        if sample_df.index.name == "raw_matrix_file_alias":
+            sample_df = sample_df.reset_index()
+
+        duration_cols = (
+            "treatments_lower_bound_duration",
+            "treatments_upper_bound_duration",
+            "treatments_duration_units",
+        )
+        columns_to_keep = [k for k in PROP_MAP_SAMPLES if k in sample_df.columns]
+        columns_to_keep.extend(c for c in duration_cols if c in sample_df.columns)
+        columns_to_keep.extend(c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in sample_df.columns)
+        columns_to_keep.extend(
+            c
+            for c in ("human_donors_ethnicity_term_name", "tissues_@id")
+            if c in sample_df.columns and c not in columns_to_keep
+        )
+        columns_to_keep.extend(
+            c
+            for c in sample_df.columns
+            if re.search("_author_metadata_", c) and c not in columns_to_keep
+        )
+        sample_df = sample_df[columns_to_keep].copy()
+
+        sample_df = self._summarize_geo_experimental_condition(sample_df)
+
+        sample_df = combine_bound_columns(
+            sample_df,
+            lower_col="treatments_lower_bound_duration",
+            upper_col="treatments_upper_bound_duration",
+            units_col="treatments_duration_units",
+            out_col="treatment_duration",
+        )
+        leftover_duration = [c for c in duration_cols if c in sample_df.columns]
+        if leftover_duration:
+            sample_df = sample_df.drop(columns=leftover_duration)
+
+        sample_df.rename(columns=PROP_MAP_SAMPLES, inplace=True)
+        sample_df = strip_author_metadata_column_prefix(sample_df)
+        sample_df = collapse_duplicate_columns(sample_df)
+
+        col = "genetic_modifications_strategy"
+        if col in sample_df.columns:
+            sample_df[col] = sample_df[col].replace(GENETIC_PERTURBATION_MAP)
+
+        if "treatment" in sample_df.columns:
+            sample_df["treatment"] = sample_df["treatment"].map(
+                lambda v: "no treatment" if is_empty(v) else v
+            )
+
+        has_desc = "treatment_description" in sample_df.columns
+        has_dur = "treatment_duration" in sample_df.columns
+        if has_desc or has_dur:
+            empty = pd.Series("", index=sample_df.index)
+            desc = sample_df["treatment_description"] if has_desc else empty
+            duration = sample_df["treatment_duration"] if has_dur else empty
+
+            def _combine_description(description, duration_text):
+                parts = [
+                    str(part).strip()
+                    for part in (description, duration_text)
+                    if not is_empty(part) and str(part).strip()
+                ]
+                return "; ".join(parts) if parts else "na"
+
+            sample_df["treatment_description"] = [
+                _combine_description(description, duration_text)
+                for description, duration_text in zip(desc, duration, strict=True)
+            ]
+            if has_dur:
+                sample_df = sample_df.drop(columns=["treatment_duration"])
+
+        sample_df = self._add_samples_donor_ethnicity(sample_df)
+        return join_sequence_column(sample_df, "sample_probe_barcode")
+
     def _row_is_gex(self, row) -> bool:
         """Filter df to only GEX libraries"""
         droplet_ft = row.get("droplet_based_libraries_feature_types")
@@ -403,8 +487,23 @@ class DB2Flattener:
         geo_df = self._add_geo_molecule(geo_df)
         geo_df = self._add_geo_library_strategy(geo_df)
 
+        ethnicity = {}
+        if "*library name" in geo_df.columns:
+            ethnicity = self._sample_field_by_library(
+                geo_source,
+                geo_df["*library name"],
+                "ethnicity_term_name",
+                prefixes=("human_donors",),
+                optional=True,
+                split_joined=True,
+                formatter=self._format_pooled_values,
+                include=self._tissue_row_mask(geo_source),
+            )
+
         group_col = "*library name"
         geo_df = collapse_dataframe(geo_df, group_col=group_col)
+        if ethnicity:
+            geo_df["donor_ethnicity"] = geo_df["*library name"].map(ethnicity)
         col = "genetic_modifications_strategy"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GENETIC_PERTURBATION_MAP)
@@ -601,7 +700,7 @@ class DB2Flattener:
                 part
                 for part in (
                     _cell_text(row.get("*library name")),
-                    _cell_text(row.get("library_strategy")),
+                    _cell_text(row.get("*library strategy")),
                 )
                 if part
             )
@@ -617,7 +716,7 @@ class DB2Flattener:
             return "; ".join(group for group in groups if group) or None
 
         geo_df = geo_df.copy()
-        geo_df["title"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df["*title"] = geo_df.apply(_summarize_row, axis=1)
         drop_cols = [
             c
             for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
@@ -653,7 +752,7 @@ class DB2Flattener:
 
     @staticmethod
     def _add_geo_library_strategy(geo_df: pd.DataFrame) -> pd.DataFrame:
-        """Build library_strategy from feature_types and suspension_type, then drop sources."""
+        """Build *library strategy from feature_types and suspension_type, then drop sources."""
         source_cols = [c for c in GEO_LIBRARY_STRATEGY_SOURCE_COLS if c in geo_df.columns]
         if not source_cols:
             return geo_df
@@ -695,7 +794,7 @@ class DB2Flattener:
             return None
 
         geo_df = geo_df.copy()
-        geo_df["library_strategy"] = geo_df.apply(_map_row, axis=1)
+        geo_df["*library strategy"] = geo_df.apply(_map_row, axis=1)
         return geo_df.drop(columns=source_cols)
 
     def _sample_probe_barcode_map(self, library_samples):
@@ -803,6 +902,7 @@ class DB2Flattener:
             optional=True,
             split_joined=True,
             formatter=self._format_pooled_values,
+            include=self._tissue_row_mask(main_df),
         )
         age = self._sample_field_by_library(
             main_df,
@@ -1217,6 +1317,34 @@ class DB2Flattener:
 
         return {library: "; ".join(sorted(titles)) for library, titles in titles_by_library.items()}
 
+    @staticmethod
+    def _tissue_row_mask(df) -> pd.Series:
+        """True where the row is a Tissue (ethnicity is tissue-only)."""
+        col = "tissues_@id"
+        if col not in df.columns:
+            return pd.Series(False, index=df.index)
+        return df[col].map(lambda v: not is_empty(v))
+
+    def _add_samples_donor_ethnicity(self, sample_df) -> pd.DataFrame:
+        """SRA-style pooled ethnicity for tissue rows only; drop source columns."""
+        source = "human_donors_ethnicity_term_name"
+        tissue = self._tissue_row_mask(sample_df)
+        drop = [c for c in (source, "tissues_@id") if c in sample_df.columns]
+        if source not in sample_df.columns:
+            return sample_df.drop(columns=drop) if drop else sample_df
+
+        def _cell(val):
+            texts = self._field_texts((val,), None, True, None)
+            return self._format_pooled_values(sorted(texts)) if texts else None
+
+        values = sample_df[source].map(_cell).where(tissue)
+        sample_df = sample_df.drop(columns=drop)
+        if not values.notna().any():
+            return sample_df
+        values = values.mask(tissue & values.isna(), "not provided")
+        sample_df["donor_ethnicity"] = values
+        return sample_df
+
     def _sample_field_by_library(
         self,
         main_df,
@@ -1229,6 +1357,7 @@ class DB2Flattener:
         split_joined=False,
         transform=None,
         formatter=None,
+        include=None,
     ):
         """
         Per-library cell for a field on the sample or on something it links to.
@@ -1248,6 +1377,8 @@ class DB2Flattener:
         'formatter' renders the finished list, defaulting to a '; ' join.
         'optional' decides only whether the column exists: nothing anywhere means
         nothing is returned and the column drops.
+        'include' is an optional row mask: False skips that row so it neither
+        contributes a value nor the gap.
         """
         empty = pd.Series(None, index=main_df.index, dtype=object)
         sources = []
@@ -1257,10 +1388,13 @@ class DB2Flattener:
             )
             sources.append(empty if found_column is None else found_column)
 
+        include_flags = (
+            [True] * len(main_df) if include is None else [bool(flag) for flag in include]
+        )
         found: dict[str, set[str]] = {}
         missing: set[str] = set()
-        for library, *row in zip(library_key, *sources, strict=True):
-            if not isinstance(library, str):
+        for library, keep, *row in zip(library_key, include_flags, *sources, strict=True):
+            if not keep or not isinstance(library, str):
                 continue
             found.setdefault(library, set())
             texts = self._field_texts(row, transform, split_joined, translate)
@@ -1496,10 +1630,7 @@ class DB2Flattener:
                 "genetic_perturbation_strategy"
             ].replace(GENETIC_PERTURBATION_MAP)
         for field in REFORMAT_LIST:
-            if field in biohub_df.columns:
-                biohub_df[field] = biohub_df[field].apply(
-                    lambda x: "|".join(map(str, x)) if isinstance(x, (list, tuple)) else x
-                )
+            biohub_df = join_sequence_column(biohub_df, field)
 
         return biohub_df
 

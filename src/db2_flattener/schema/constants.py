@@ -68,6 +68,7 @@ GUIDE_METADATA_COLUMNS = [
 
 # Keys use _term_name suffix for columns produced by DB2_utils.split_controlled_term_columns
 PROP_MAP_GEO = {
+    "cell_lines_intended_cell_types_term_name": "**cell type",
     "cell_lines_sample_terms_term_name": "**cell_line",
     "droplet_based_libraries_CRO_group_identifier": "*library name",
     "droplet_based_libraries_dbxrefs": "*SRA Experiment or Run",
@@ -81,12 +82,12 @@ PROP_MAP_GEO = {
     "non_human_donors_sex": "donor_sex",
     "non_human_donors_taxa": "*organism",
     "organoids_sample_terms_term_name": "**tissue",
-    "primary_cell_cultures_enriched_cell_types_term_name": "**cell_type",
+    "primary_cell_cultures_enriched_cell_types_term_name": "**cell type",
     "raw_file_samples": "samples",
     "raw_matrix_file_alias": "processed data file",
     "sequence_file_sets_sequencing_platform": "*instrument model",
     "tissues_developmental_stages_term_name": "donor_dev_stage",
-    "tissues_enriched_cell_types_term_name": "**cell_type",
+    "tissues_enriched_cell_types_term_name": "**cell type",
     "tissues_sample_terms_term_name": "**tissue",
     "tissues_sources_title": "source",
     "tissues_selection_kits": "selection_kits",
@@ -132,6 +133,33 @@ PROP_MAP_BIOHUB = {
     "experimental_conditions_duration_units": "experimental_conditions_duration_units",
     "genetic_modifications_strategy": "genetic_perturbation_strategy",
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
+}
+
+PROP_MAP_SAMPLES = {
+    "raw_matrix_file_alias": "processed data file",
+    "sample_alias": "pre_pooled_sample",
+    "human_donors_cxg_donor_id": "donor_id",
+    "non_human_donors_cxg_donor_id": "donor_id",
+    "human_donors_sex": "donor_sex",
+    "non_human_donors_sex": "donor_sex",
+    "human_donors_taxa": "organism",
+    "non_human_donors_taxa": "organism",
+    "cell_lines_intended_cell_types_term_name": "**cell type",
+    "cell_lines_sample_terms_term_name": "**cell_line",
+    "tissues_sample_terms_term_name": "tissue",
+    "tissues_enriched_cell_types_term_name": "**cell type",
+    "primary_cell_cultures_enriched_cell_types_term_name": "**cell type",
+    "tissues_multiplexing_barcodes": "sample_probe_barcode",
+    "cell_lines_multiplexing_barcodes": "sample_probe_barcode",
+    "tissues_selection_kits": "selection_kits",
+    "tissues_selection_markers": "selection_markers",
+    "tissues_selection_methods": "selection_methods",
+    "tissues_developmental_stages_term_name": "donor_dev_stage",
+    "tissues_sources_title": "source",
+    "cell_lines_sources_title": "source",
+    "treatments_ontological_term_term_name": "treatment",
+    "treatments_description": "treatment_description",
+    "genetic_modifications_strategy": "genetic_modifications_strategy",
 }
 
 # Only renames belong here; the derived columns are named in the flattener

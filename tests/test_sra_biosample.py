@@ -446,6 +446,7 @@ def donor_main_df(**columns):
         "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
         "human_donors_cxg_donor_id": [889081306, 889023040, 889081306, 889023040],
         "human_donors_sex": ["male", "female", "male", "female"],
+        "tissues_@id": ["/tissues/t1/", "/tissues/t2/", "/tissues/t1/", "/tissues/t2/"],
         "tissues_developmental_stages_term_name": [
             "29-year-old stage",
             "32-year-old stage",
@@ -820,6 +821,24 @@ def test_no_ethnicity_column_omits_the_ethnicity_column():
 def test_ethnicity_is_human_only():
     """The field is on HumanDonor, so a non-human run has no such column."""
     main_df = donor_main_df(non_human_donors_ethnicity_term_name=["Asian"] * 4)
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert ETHNICITY_COLUMN not in sra_df.columns
+
+
+@pytest.mark.parametrize(
+    "id_col",
+    ["cell_lines_@id", "organoids_@id", "primary_cell_cultures_@id"],
+)
+def test_ethnicity_omitted_for_non_tissue_sample_types(id_col):
+    main_df = donor_main_df(
+        human_donors_ethnicity_term_name=["European"] * 4,
+        **{
+            "tissues_@id": [None] * 4,
+            id_col: [f"/{id_col.split('_@id')[0]}/x1/"] * 4,
+        },
+    )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
