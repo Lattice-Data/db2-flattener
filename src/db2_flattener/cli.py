@@ -30,7 +30,8 @@ def main() -> None:
         "-o",
         help="Output path prefix (optional). Writes {prefix}_MAIN.csv, "
         "{prefix}_BIOHUB.csv, {prefix}_GEO.csv, {prefix}_SRA_BIOSAMPLE.csv, "
-        "{prefix}_SAMPLES.csv, and {prefix}_GUIDE_METADATA.csv. "
+        "{prefix}_SRA_FILE.csv, {prefix}_SAMPLES.csv, and "
+        "{prefix}_GUIDE_METADATA.csv. "
         "Defaults to MatrixFileSet_{uuid}_{timestamp}",
     )
     args = parser.parse_args()

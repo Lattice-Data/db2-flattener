@@ -25,7 +25,9 @@ from db2_flattener.schema.constants import (
     PROP_MAP_GEO,
     PROP_MAP_SAMPLES,
     PROP_MAP_SRA_BIOSAMPLE,
+    PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
+    SRA_FILE_LIBRARY_STRATEGY_MAP,
     TISSUE_TYPE_MAP,
     Configs,
 )
@@ -98,6 +100,7 @@ class DB2Flattener:
         biohub_output = f"{prefix}_BIOHUB.csv"
         geo_output = f"{prefix}_GEO.csv"
         sra_biosample_output = f"{prefix}_SRA_BIOSAMPLE.csv"
+        sra_file_output = f"{prefix}_SRA_FILE.csv"
         sample_output = f"{prefix}_SAMPLES.csv"
         guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
@@ -140,6 +143,14 @@ class DB2Flattener:
         print(f"✅ SRA/BioSample CSV file created: {sra_biosample_output}")
         print(f"   Rows: {len(sra_biosample_df)}")
         print(f"   Columns: {len(sra_biosample_df.columns)}")
+
+        # Create SRA file DataFrame from main DataFrame
+        sra_files_df = self.create_sra_files_dataframe(main_df)
+        print(f"Saving SRA file DataFrame to {sra_file_output}...")
+        sra_files_df.to_csv(sra_file_output, index=False)
+        print(f"✅ SRA file CSV file created: {sra_file_output}")
+        print(f"   Rows: {len(sra_files_df)}")
+        print(f"   Columns: {len(sra_files_df.columns)}")
 
         guide_file = self._resolve_guide_rna_file(complete_data)
         guide_df = self.create_guide_metadata_dataframe(guide_file)
@@ -1060,6 +1071,95 @@ class DB2Flattener:
                 sra_df[column] = sra_df["sample_name"].map(cells)
 
         return sra_df
+
+    def create_sra_files_dataframe(self, main_df) -> pd.DataFrame:
+        """
+        Build the SRA file dataframe from main_df: one row per CRO group × library.
+
+        sample_name is the same CRO_group_identifier as SRA_BIOSAMPLE. Unlike that
+        sheet, every library in the group gets its own row, including non-GEX.
+        Duplicate MAIN rows (same library on more than one raw matrix file)
+        collapse to one.
+        """
+        group_cols = [
+            col
+            for col in (
+                "droplet_based_libraries_CRO_group_identifier",
+                "plate_based_libraries_CRO_group_identifier",
+            )
+            if col in main_df.columns
+        ]
+        if not group_cols:
+            print(
+                "Warning: MAIN has no library CRO group identifier column; SRA_FILE will be empty"
+            )
+            return pd.DataFrame()
+
+        if main_df.empty:
+            return pd.DataFrame()
+
+        columns_to_keep = [k for k in PROP_MAP_SRA_FILE if k in main_df.columns]
+        sra_df = main_df[columns_to_keep].copy()
+        sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
+        sra_df = collapse_duplicate_columns(sra_df)
+
+        aliases = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_aliases" for kind in ("droplet", "plate")]
+        )
+        library_atid = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_@id" for kind in ("droplet", "plate")]
+        )
+        if aliases is None:
+            print("Warning: MAIN has no library aliases column; SRA_FILE omits library_ID")
+        else:
+            sra_df["library_ID"] = aliases.map(
+                lambda alias: self._get_clean_alias({"aliases": to_items(alias)})
+            )
+
+        feature_types = self._coalesce_columns(
+            main_df,
+            [f"{kind}_based_libraries_feature_types" for kind in ("droplet", "plate")],
+        )
+        if feature_types is None:
+            sra_df["library_strategy"] = None
+        else:
+            sra_df["library_strategy"] = feature_types.map(self._map_sra_library_strategy)
+
+        if library_atid is not None:
+            dedup_key = library_atid
+            if "library_ID" in sra_df.columns:
+                dedup_key = dedup_key.fillna(sra_df["library_ID"])
+            sra_df["_dedup"] = dedup_key
+        elif "library_ID" in sra_df.columns:
+            sra_df["_dedup"] = sra_df["library_ID"]
+
+        unnamed = int(sra_df["sample_name"].isna().sum())
+        if unnamed:
+            print(
+                f"Warning: dropping {unnamed} of {len(sra_df)} MAIN row(s) with no library "
+                "CRO group identifier from SRA_FILE"
+            )
+            sra_df = sra_df[sra_df["sample_name"].notna()]
+
+        if sra_df.empty:
+            return sra_df.drop(columns=["_dedup"], errors="ignore").reset_index(drop=True)
+
+        if "_dedup" in sra_df.columns:
+            sra_df = sra_df.drop_duplicates(subset=["sample_name", "_dedup"], keep="first")
+            sra_df = sra_df.drop(columns=["_dedup"])
+        else:
+            sra_df = sra_df.drop_duplicates(subset=["sample_name"], keep="first")
+
+        return sra_df.reset_index(drop=True)
+
+    @staticmethod
+    def _map_sra_library_strategy(ft):
+        """Map library feature_types to an SRA library_strategy, or None if unmapped."""
+        for item in to_items(ft):
+            mapped = SRA_FILE_LIBRARY_STRATEGY_MAP.get(item)
+            if mapped:
+                return mapped
+        return None
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")

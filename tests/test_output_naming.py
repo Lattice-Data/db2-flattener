@@ -34,7 +34,7 @@ def test_output_prefix_names_all_csvs(tmp_path):
     result = flattener.flatten_matrix_file_set(UUID, output_prefix=prefix)
 
     assert result == f"{prefix}_MAIN.csv"
-    for suffix in ("MAIN", "BIOHUB", "GEO", "SRA_BIOSAMPLE", "SAMPLES"):
+    for suffix in ("MAIN", "BIOHUB", "GEO", "SRA_BIOSAMPLE", "SRA_FILE", "SAMPLES"):
         assert (tmp_path / f"myrun_{suffix}.csv").is_file()
 
 
@@ -52,7 +52,7 @@ def test_default_prefix_uses_uuid_and_timestamp(tmp_path, monkeypatch):
 
     prefix = f"MatrixFileSet_{UUID[:8]}_20260814_095000"
     assert result == f"{prefix}_MAIN.csv"
-    for suffix in ("MAIN", "BIOHUB", "GEO", "SRA_BIOSAMPLE", "SAMPLES"):
+    for suffix in ("MAIN", "BIOHUB", "GEO", "SRA_BIOSAMPLE", "SRA_FILE", "SAMPLES"):
         assert (tmp_path / f"{prefix}_{suffix}.csv").is_file()
 
 
@@ -67,6 +67,7 @@ def test_empty_sample_df_skips_samples_csv(tmp_path):
     assert (tmp_path / "myrun_BIOHUB.csv").is_file()
     assert (tmp_path / "myrun_GEO.csv").is_file()
     assert (tmp_path / "myrun_SRA_BIOSAMPLE.csv").is_file()
+    assert (tmp_path / "myrun_SRA_FILE.csv").is_file()
     assert not (tmp_path / "myrun_SAMPLES.csv").exists()
     assert not (tmp_path / "myrun_GUIDE_METADATA.csv").exists()
 

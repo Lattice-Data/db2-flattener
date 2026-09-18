@@ -172,6 +172,19 @@ PROP_MAP_SRA_BIOSAMPLE = {
     "human_donors_taxa": "*organism",
 }
 
+# library_ID and library_strategy are derived, not renames
+PROP_MAP_SRA_FILE = {
+    "droplet_based_libraries_CRO_group_identifier": "sample_name",
+    "plate_based_libraries_CRO_group_identifier": "sample_name",
+}
+
+SRA_FILE_LIBRARY_STRATEGY_MAP = {
+    "Gene Expression": "RNA-Seq",
+    "CRISPR Guide Capture": "OTHER",
+    "Multiplexing Capture": "OTHER",
+    "ATAC": "ATAC-seq",
+}
+
 BIOHUB_SORT_ONTOLOGY_IDS = [
     "experimental_condition_ontology_term_id",
     "self_reported_ethnicity_ontology_term_id",
