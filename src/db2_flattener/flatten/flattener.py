@@ -678,7 +678,13 @@ class DB2Flattener:
         return geo_df
 
     @staticmethod
-    def _add_geo_title(geo_df: pd.DataFrame) -> pd.DataFrame:
+    def _add_geo_title(
+        geo_df: pd.DataFrame,
+        *,
+        name_col: str = "*library name",
+        strategy_col: str = "*library strategy",
+        title_col: str = "*title",
+    ) -> pd.DataFrame:
         """Build title from library, strategy, treatment, and genetic modification fields."""
 
         def _cell_text(val) -> str:
@@ -710,8 +716,8 @@ class DB2Flattener:
             left = " ".join(
                 part
                 for part in (
-                    _cell_text(row.get("*library name")),
-                    _cell_text(row.get("*library strategy")),
+                    _cell_text(row.get(name_col)),
+                    _cell_text(row.get(strategy_col)),
                 )
                 if part
             )
@@ -727,7 +733,7 @@ class DB2Flattener:
             return "; ".join(group for group in groups if group) or None
 
         geo_df = geo_df.copy()
-        geo_df["*title"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df[title_col] = geo_df.apply(_summarize_row, axis=1)
         drop_cols = [
             c
             for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
@@ -1098,9 +1104,24 @@ class DB2Flattener:
         if main_df.empty:
             return pd.DataFrame()
 
+        title_source_cols = []
+        seen = set()
+        for col in (
+            "raw_file_samples",
+            "genetic_modifications_strategy",
+            *GEO_TREATMENT_COLS,
+            *GEO_TITLE_TREATMENT_COLS,
+        ):
+            if col in main_df.columns and col not in seen:
+                seen.add(col)
+                title_source_cols.append(col)
+
         columns_to_keep = [k for k in PROP_MAP_SRA_FILE if k in main_df.columns]
+        columns_to_keep.extend(title_source_cols)
         sra_df = main_df[columns_to_keep].copy()
         sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
+        if "raw_file_samples" in sra_df.columns:
+            sra_df.rename(columns={"raw_file_samples": "samples"}, inplace=True)
         sra_df = collapse_duplicate_columns(sra_df)
 
         aliases = self._coalesce_columns(
@@ -1122,8 +1143,10 @@ class DB2Flattener:
         )
         if feature_types is None:
             sra_df["library_strategy"] = None
+            sra_df["_feature_types"] = None
         else:
             sra_df["library_strategy"] = feature_types.map(self._map_sra_library_strategy)
+            sra_df["_feature_types"] = feature_types
 
         if library_atid is not None:
             dedup_key = library_atid
@@ -1144,13 +1167,50 @@ class DB2Flattener:
         if sra_df.empty:
             return sra_df.drop(columns=["_dedup"], errors="ignore").reset_index(drop=True)
 
+        sra_df = self._summarize_geo_treatment(sra_df)
         if "_dedup" in sra_df.columns:
-            sra_df = sra_df.drop_duplicates(subset=["sample_name", "_dedup"], keep="first")
+            sra_df["_dedup"] = sra_df["_dedup"].fillna(sra_df["sample_name"])
+            sra_df = collapse_dataframe(sra_df, group_col="_dedup", sort=False)
             sra_df = sra_df.drop(columns=["_dedup"])
         else:
-            sra_df = sra_df.drop_duplicates(subset=["sample_name"], keep="first")
+            sra_df = collapse_dataframe(sra_df, group_col="sample_name", sort=False)
 
-        return sra_df.reset_index(drop=True)
+        col = "genetic_modifications_strategy"
+        if col in sra_df.columns:
+            sra_df[col] = sra_df[col].replace(GENETIC_PERTURBATION_MAP)
+        for col in ("treatment", "_title_treatment"):
+            if col in sra_df.columns:
+                sra_df[col] = sra_df[col].map(self._sort_geo_list)
+
+        sra_df = self._add_geo_title(
+            sra_df,
+            name_col="sample_name",
+            strategy_col="library_strategy",
+            title_col="title",
+        )
+        sra_df["title"] = sra_df.apply(self._append_sra_title_feature_types, axis=1)
+
+        drop_cols = [
+            c
+            for c in (
+                "samples",
+                "treatment",
+                "genetic_modifications_strategy",
+                "_feature_types",
+                *GEO_TREATMENT_COLS,
+                *GEO_TITLE_TREATMENT_COLS,
+            )
+            if c in sra_df.columns
+        ]
+        if drop_cols:
+            sra_df = sra_df.drop(columns=drop_cols)
+
+        ordered = [
+            c
+            for c in ("sample_name", "library_ID", "library_strategy", "title")
+            if c in sra_df.columns
+        ]
+        return sra_df[ordered].reset_index(drop=True)
 
     @staticmethod
     def _map_sra_library_strategy(ft):
@@ -1160,6 +1220,21 @@ class DB2Flattener:
             if mapped:
                 return mapped
         return None
+
+    @staticmethod
+    def _append_sra_title_feature_types(row: pd.Series):
+        """Append feature_types to the GEO-style title, joined with '; '."""
+        items = [
+            str(item).strip()
+            for item in to_items(row.get("_feature_types"))
+            if not is_empty(item)
+        ]
+        suffix = "; ".join(item for item in items if item)
+        title = row.get("title")
+        title_text = "" if is_empty(title) else str(title).strip()
+        if suffix and title_text:
+            return f"{title_text}; {suffix}"
+        return suffix or title_text or None
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")

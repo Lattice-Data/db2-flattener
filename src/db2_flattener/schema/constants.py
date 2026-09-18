@@ -172,7 +172,7 @@ PROP_MAP_SRA_BIOSAMPLE = {
     "human_donors_taxa": "*organism",
 }
 
-# library_ID and library_strategy are derived, not renames
+# library_ID, library_strategy, and title are derived, not renames
 PROP_MAP_SRA_FILE = {
     "droplet_based_libraries_CRO_group_identifier": "sample_name",
     "plate_based_libraries_CRO_group_identifier": "sample_name",

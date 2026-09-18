@@ -2,16 +2,24 @@
 SRA file sheet: one row per CRO group × library, keyed on the library's
 CRO_group_identifier under the name 'sample_name' and the cleaned library
 alias under 'library_ID'. library_strategy is derived from feature_types.
+title follows GEO *title concatenation, then appends feature_types.
 Every library is kept, including non-GEX.
 """
 
 import pandas as pd
 
 from db2_flattener.flatten.flattener import DB2Flattener
-from db2_flattener.schema.constants import PROP_MAP_SRA_FILE, Configs
+from db2_flattener.schema.constants import (
+    GEO_TITLE_TREATMENT_COLS,
+    GEO_TREATMENT_COLS,
+    PROP_MAP_SRA_FILE,
+    Configs,
+)
 
 LIBRARY_ID_COLUMN = "library_ID"
 LIBRARY_STRATEGY_COLUMN = "library_strategy"
+TITLE_COLUMN = "title"
+SRA_FILE_COLUMNS = ["sample_name", LIBRARY_ID_COLUMN, LIBRARY_STRATEGY_COLUMN, TITLE_COLUMN]
 
 
 def make_flattener():
@@ -44,10 +52,15 @@ def test_paired_libraries_each_get_a_row():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == ["sample_name", LIBRARY_ID_COLUMN, LIBRARY_STRATEGY_COLUMN]
+    assert list(sra_df.columns) == SRA_FILE_COLUMNS
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_A"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER"]
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; Gene Expression",
+        "LIB_A OTHER; CRISPR Guide Capture",
+    ]
+    _assert_no_title_source_cols(sra_df)
 
 
 def test_crispr_only_group_is_kept():
@@ -74,6 +87,10 @@ def test_crispr_only_group_is_kept():
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_B"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_B_CRI"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER"]
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; Gene Expression",
+        "LIB_B OTHER; CRISPR Guide Capture",
+    ]
 
 
 def test_plate_library_columns_are_used_when_droplet_is_absent():
@@ -91,6 +108,7 @@ def test_plate_library_columns_are_used_when_droplet_is_absent():
     assert list(sra_df["sample_name"]) == ["PLATE_1"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["PLATE_1_GEX"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq"]
+    assert list(sra_df[TITLE_COLUMN]) == ["PLATE_1 RNA-Seq; Gene Expression"]
 
 
 def test_duplicate_rmf_rows_for_the_same_library_collapse_to_one():
@@ -115,6 +133,7 @@ def test_duplicate_rmf_rows_for_the_same_library_collapse_to_one():
     assert sra_df.loc[0, "sample_name"] == "LIB_A"
     assert sra_df.loc[0, LIBRARY_ID_COLUMN] == "LIB_A_GEX"
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
+    assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
 def test_missing_library_group_column_returns_empty_frame(capsys):
@@ -175,6 +194,7 @@ def test_missing_aliases_column_omits_library_id(capsys):
     assert list(sra_df["sample_name"]) == ["LIB_A"]
     assert LIBRARY_ID_COLUMN not in sra_df.columns
     assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
+    assert TITLE_COLUMN in sra_df.columns
     assert "no library aliases column" in capsys.readouterr().out
 
 
@@ -211,6 +231,12 @@ def test_library_strategy_maps_feature_types():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER", "OTHER", "ATAC-seq"]
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_GEX RNA-Seq; Gene Expression",
+        "LIB_CRI OTHER; CRISPR Guide Capture",
+        "LIB_MUX OTHER; Multiplexing Capture",
+        "LIB_ATAC ATAC-seq; ATAC",
+    ]
     assert "droplet_based_libraries_feature_types" not in sra_df.columns
 
 
@@ -227,6 +253,7 @@ def test_library_strategy_maps_string_feature_types():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq"]
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; Gene Expression"]
 
 
 def test_library_strategy_is_blank_when_feature_types_are_missing_or_unmapped():
@@ -244,8 +271,9 @@ def test_library_strategy_is_blank_when_feature_types_are_missing_or_unmapped():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == ["sample_name", LIBRARY_ID_COLUMN, LIBRARY_STRATEGY_COLUMN]
+    assert list(sra_df.columns) == SRA_FILE_COLUMNS
     assert sra_df[LIBRARY_STRATEGY_COLUMN].isna().all()
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A", "LIB_B; Antibody Capture"]
 
 
 def test_library_strategy_is_blank_when_feature_types_column_is_absent():
@@ -261,6 +289,7 @@ def test_library_strategy_is_blank_when_feature_types_column_is_absent():
 
     assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
+    assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
 def test_prop_map_sends_both_library_types_to_sample_name():
@@ -273,9 +302,130 @@ def test_prop_map_sends_both_library_types_to_sample_name():
     assert not PROP_MAP_SRA_FILE[droplet_key].startswith("*")
     assert LIBRARY_ID_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert LIBRARY_STRATEGY_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert TITLE_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert "raw_file_samples" not in PROP_MAP_SRA_FILE
+    assert "genetic_modifications_strategy" not in PROP_MAP_SRA_FILE
 
 
 def test_empty_main_df_returns_empty_frame():
     main_df = pd.DataFrame(columns=["droplet_based_libraries_CRO_group_identifier"])
 
     assert make_flattener().create_sra_files_dataframe(main_df).empty
+
+
+def _assert_no_title_source_cols(sra_df):
+    leaked = [
+        "samples",
+        "raw_file_samples",
+        "treatment",
+        "_title_treatment",
+        "genetic_modifications_strategy",
+        "_feature_types",
+        *GEO_TREATMENT_COLS,
+        *GEO_TITLE_TREATMENT_COLS,
+    ]
+    for col in leaked:
+        assert col not in sra_df.columns
+
+
+def test_title_matches_geo_recipe_with_sra_strategy_and_feature_types():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "raw_file_samples": ["sample1; sample2"],
+            "treatments_description": ["LPS stimulation"],
+            "treatments_lower_bound_duration": [4],
+            "treatments_upper_bound_duration": [4],
+            "treatments_duration_units": ["hours"],
+            "genetic_modifications_strategy": ["knockout screen"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; pooled; LPS stimulation 4 hours; CRISPR knockout screen; Gene Expression"
+    ]
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_title_marks_pooled_samples_from_a_list():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "raw_file_samples": [["sample1", "sample2"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; pooled; Gene Expression"]
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_title_uses_treatment_duration_range():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "treatments_description": ["LPS stimulation"],
+            "treatments_lower_bound_duration": [2],
+            "treatments_upper_bound_duration": [4],
+            "treatments_duration_units": ["hours"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; LPS stimulation 2-4 hours; Gene Expression"]
+
+
+def test_title_uses_no_treatment_when_another_library_has_treatment():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"], ["lab:LIB_B_CRI"]],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/gex/",
+                "/droplet_based_libraries/cri/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+            "treatments_description": ["LPS stimulation", None],
+            "treatments_lower_bound_duration": ["4", None],
+            "treatments_duration_units": ["hours", None],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; LPS stimulation 4 hours; Gene Expression",
+        "LIB_B OTHER; no treatment; CRISPR Guide Capture",
+    ]
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_title_skips_feature_types_suffix_when_missing():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A"]
+    assert "Gene Expression" not in sra_df.loc[0, TITLE_COLUMN]
