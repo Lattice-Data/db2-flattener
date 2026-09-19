@@ -2,8 +2,12 @@
 SRA file sheet: one row per CRO group × library, keyed on the library's
 CRO_group_identifier under the name 'sample_name' and the cleaned library
 alias under 'library_ID'. library_strategy, library_source, and
-library_selection are derived from feature_types. title follows GEO *title
-concatenation, then appends feature_types.
+library_selection are derived from feature_types. library_layout is derived
+from sequence_file_sets_run_cardinality. platform is derived from
+sequence_file_sets_sequencing_platform; instrument_model is that same
+field without a value transform. filetype is sequence_files_file_format
+without a value transform. title follows GEO *title concatenation, then
+appends feature_types.
 Every library is kept, including non-GEX.
 """
 
@@ -21,6 +25,10 @@ LIBRARY_ID_COLUMN = "library_ID"
 LIBRARY_STRATEGY_COLUMN = "library_strategy"
 LIBRARY_SOURCE_COLUMN = "library_source"
 LIBRARY_SELECTION_COLUMN = "library_selection"
+LIBRARY_LAYOUT_COLUMN = "library_layout"
+PLATFORM_COLUMN = "platform"
+INSTRUMENT_MODEL_COLUMN = "instrument_model"
+FILETYPE_COLUMN = "filetype"
 TITLE_COLUMN = "title"
 SRA_FILE_COLUMNS = [
     "sample_name",
@@ -28,6 +36,10 @@ SRA_FILE_COLUMNS = [
     LIBRARY_STRATEGY_COLUMN,
     LIBRARY_SOURCE_COLUMN,
     LIBRARY_SELECTION_COLUMN,
+    LIBRARY_LAYOUT_COLUMN,
+    PLATFORM_COLUMN,
+    INSTRUMENT_MODEL_COLUMN,
+    FILETYPE_COLUMN,
     TITLE_COLUMN,
 ]
 
@@ -157,6 +169,10 @@ def test_duplicate_rmf_rows_for_the_same_library_collapse_to_one():
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
     assert pd.isna(sra_df.loc[0, LIBRARY_SOURCE_COLUMN])
     assert pd.isna(sra_df.loc[0, LIBRARY_SELECTION_COLUMN])
+    assert pd.isna(sra_df.loc[0, LIBRARY_LAYOUT_COLUMN])
+    assert pd.isna(sra_df.loc[0, PLATFORM_COLUMN])
+    assert pd.isna(sra_df.loc[0, INSTRUMENT_MODEL_COLUMN])
+    assert pd.isna(sra_df.loc[0, FILETYPE_COLUMN])
     assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
@@ -220,6 +236,10 @@ def test_missing_aliases_column_omits_library_id(capsys):
     assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
     assert LIBRARY_SOURCE_COLUMN in sra_df.columns
     assert LIBRARY_SELECTION_COLUMN in sra_df.columns
+    assert LIBRARY_LAYOUT_COLUMN in sra_df.columns
+    assert PLATFORM_COLUMN in sra_df.columns
+    assert INSTRUMENT_MODEL_COLUMN in sra_df.columns
+    assert FILETYPE_COLUMN in sra_df.columns
     assert TITLE_COLUMN in sra_df.columns
     assert "no library aliases column" in capsys.readouterr().out
 
@@ -310,6 +330,10 @@ def test_library_strategy_is_blank_when_feature_types_are_missing_or_unmapped():
     assert sra_df[LIBRARY_STRATEGY_COLUMN].isna().all()
     assert sra_df[LIBRARY_SOURCE_COLUMN].isna().all()
     assert sra_df[LIBRARY_SELECTION_COLUMN].isna().all()
+    assert sra_df[LIBRARY_LAYOUT_COLUMN].isna().all()
+    assert sra_df[PLATFORM_COLUMN].isna().all()
+    assert sra_df[INSTRUMENT_MODEL_COLUMN].isna().all()
+    assert sra_df[FILETYPE_COLUMN].isna().all()
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A", "LIB_B; Antibody Capture"]
 
 
@@ -327,9 +351,17 @@ def test_library_strategy_is_blank_when_feature_types_column_is_absent():
     assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
     assert LIBRARY_SOURCE_COLUMN in sra_df.columns
     assert LIBRARY_SELECTION_COLUMN in sra_df.columns
+    assert LIBRARY_LAYOUT_COLUMN in sra_df.columns
+    assert PLATFORM_COLUMN in sra_df.columns
+    assert INSTRUMENT_MODEL_COLUMN in sra_df.columns
+    assert FILETYPE_COLUMN in sra_df.columns
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
     assert pd.isna(sra_df.loc[0, LIBRARY_SOURCE_COLUMN])
     assert pd.isna(sra_df.loc[0, LIBRARY_SELECTION_COLUMN])
+    assert pd.isna(sra_df.loc[0, LIBRARY_LAYOUT_COLUMN])
+    assert pd.isna(sra_df.loc[0, PLATFORM_COLUMN])
+    assert pd.isna(sra_df.loc[0, INSTRUMENT_MODEL_COLUMN])
+    assert pd.isna(sra_df.loc[0, FILETYPE_COLUMN])
     assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
@@ -345,8 +377,13 @@ def test_prop_map_sends_both_library_types_to_sample_name():
     assert LIBRARY_STRATEGY_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert LIBRARY_SOURCE_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert LIBRARY_SELECTION_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert LIBRARY_LAYOUT_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert PLATFORM_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert TITLE_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert PROP_MAP_SRA_FILE["sequence_file_sets_sequencing_platform"] == INSTRUMENT_MODEL_COLUMN
+    assert PROP_MAP_SRA_FILE["sequence_files_file_format"] == FILETYPE_COLUMN
     assert "raw_file_samples" not in PROP_MAP_SRA_FILE
+    assert "sequence_file_sets_run_cardinality" not in PROP_MAP_SRA_FILE
     assert "genetic_modifications_strategy" not in PROP_MAP_SRA_FILE
 
 
@@ -364,6 +401,9 @@ def _assert_no_title_source_cols(sra_df):
         "_title_treatment",
         "genetic_modifications_strategy",
         "_feature_types",
+        "sequence_file_sets_run_cardinality",
+        "sequence_file_sets_sequencing_platform",
+        "sequence_files_file_format",
         *GEO_TREATMENT_COLS,
         *GEO_TITLE_TREATMENT_COLS,
     ]
@@ -472,3 +512,144 @@ def test_title_skips_feature_types_suffix_when_missing():
 
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A"]
     assert "Gene Expression" not in sra_df.loc[0, TITLE_COLUMN]
+
+
+def test_library_layout_maps_run_cardinality():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": [
+                "LIB_PAIRED",
+                "LIB_SINGLE",
+                "LIB_INDEX",
+                "LIB_DUAL",
+            ],
+            "droplet_based_libraries_aliases": [
+                ["lab:LIB_PAIRED"],
+                ["lab:LIB_SINGLE"],
+                ["lab:LIB_INDEX"],
+                ["lab:LIB_DUAL"],
+            ],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/b/",
+                "/droplet_based_libraries/c/",
+                "/droplet_based_libraries/d/",
+            ],
+            "sequence_file_sets_run_cardinality": [
+                "paired-end",
+                "single-end",
+                "paired-end-with-index",
+                "paired-end-with-dual-index",
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[LIBRARY_LAYOUT_COLUMN]) == ["paired", "single", "paired", "paired"]
+    assert "sequence_file_sets_run_cardinality" not in sra_df.columns
+
+
+def test_library_layout_collapses_equivalent_paired_cardinalities():
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf2"],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A"],
+            "droplet_based_libraries_aliases": [
+                ["lab:LIB_A_GEX"],
+                ["lab:LIB_A_GEX"],
+            ],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/gex/",
+                "/droplet_based_libraries/gex/",
+            ],
+            "sequence_file_sets_run_cardinality": [
+                "paired-end",
+                "paired-end-with-index",
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert len(sra_df) == 1
+    assert sra_df.loc[0, LIBRARY_LAYOUT_COLUMN] == "paired"
+
+
+def test_library_layout_is_blank_when_run_cardinality_is_unmapped():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_file_sets_run_cardinality": ["unknown"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert pd.isna(sra_df.loc[0, LIBRARY_LAYOUT_COLUMN])
+
+
+def test_platform_maps_sequencing_platform_prefix():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": [
+                "LIB_ILLUMINA",
+                "LIB_ULTIMA",
+            ],
+            "droplet_based_libraries_aliases": [
+                ["lab:LIB_ILLUMINA"],
+                ["lab:LIB_ULTIMA"],
+            ],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/b/",
+            ],
+            "sequence_file_sets_sequencing_platform": [
+                "Illumina NovaSeq 6000",
+                "Ultima Genomics UG 100",
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[PLATFORM_COLUMN]) == ["ILLUMINA", "ULTIMA"]
+    assert list(sra_df[INSTRUMENT_MODEL_COLUMN]) == [
+        "Illumina NovaSeq 6000",
+        "Ultima Genomics UG 100",
+    ]
+    assert "sequence_file_sets_sequencing_platform" not in sra_df.columns
+
+
+def test_platform_is_blank_when_sequencing_platform_is_unmapped():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_file_sets_sequencing_platform": ["PacBio Revio"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert pd.isna(sra_df.loc[0, PLATFORM_COLUMN])
+    assert list(sra_df[INSTRUMENT_MODEL_COLUMN]) == ["PacBio Revio"]
+
+
+def test_filetype_maps_sequence_file_format():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_files_file_format": ["fastq"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[FILETYPE_COLUMN]) == ["fastq"]
+    assert "sequence_files_file_format" not in sra_df.columns

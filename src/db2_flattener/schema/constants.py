@@ -172,11 +172,13 @@ PROP_MAP_SRA_BIOSAMPLE = {
     "human_donors_taxa": "*organism",
 }
 
-# library_ID, library_strategy, library_source, library_selection, and title
-# are derived, not renames
+# library_ID, library_strategy, library_source, library_selection,
+# library_layout, platform, and title are derived, not renames
 PROP_MAP_SRA_FILE = {
     "droplet_based_libraries_CRO_group_identifier": "sample_name",
     "plate_based_libraries_CRO_group_identifier": "sample_name",
+    "sequence_file_sets_sequencing_platform": "instrument_model",
+    "sequence_files_file_format": "filetype",
 }
 
 SRA_FILE_LIBRARY_STRATEGY_MAP = {
@@ -199,6 +201,18 @@ SRA_FILE_LIBRARY_SELECTION_MAP = {
     "Multiplexing Capture": "OTHER",
     "ATAC": "OTHER",
 }
+
+SRA_FILE_LIBRARY_LAYOUT_MAP = {
+    "paired-end": "paired",
+    "single-end": "single",
+    "paired-end-with-index": "paired",
+    "paired-end-with-dual-index": "paired",
+}
+
+SRA_FILE_PLATFORM_PREFIXES = (
+    ("Illumina", "ILLUMINA"),
+    ("Ultima", "ULTIMA"),
+)
 
 BIOHUB_SORT_ONTOLOGY_IDS = [
     "experimental_condition_ontology_term_id",

@@ -27,9 +27,11 @@ from db2_flattener.schema.constants import (
     PROP_MAP_SRA_BIOSAMPLE,
     PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
+    SRA_FILE_LIBRARY_LAYOUT_MAP,
     SRA_FILE_LIBRARY_SELECTION_MAP,
     SRA_FILE_LIBRARY_SOURCE_MAP,
     SRA_FILE_LIBRARY_STRATEGY_MAP,
+    SRA_FILE_PLATFORM_PREFIXES,
     TISSUE_TYPE_MAP,
     Configs,
 )
@@ -1154,6 +1156,22 @@ class DB2Flattener:
             sra_df["library_selection"] = feature_types.map(self._map_sra_library_selection)
             sra_df["_feature_types"] = feature_types
 
+        run_cardinality = main_df.get("sequence_file_sets_run_cardinality")
+        if run_cardinality is None:
+            sra_df["library_layout"] = None
+        else:
+            sra_df["library_layout"] = run_cardinality.map(self._map_sra_library_layout)
+
+        sequencing_platform = main_df.get("sequence_file_sets_sequencing_platform")
+        if sequencing_platform is None:
+            sra_df["platform"] = None
+        else:
+            sra_df["platform"] = sequencing_platform.map(self._map_sra_platform)
+        if "instrument_model" not in sra_df.columns:
+            sra_df["instrument_model"] = None
+        if "filetype" not in sra_df.columns:
+            sra_df["filetype"] = None
+
         if library_atid is not None:
             dedup_key = library_atid
             if "library_ID" in sra_df.columns:
@@ -1219,6 +1237,10 @@ class DB2Flattener:
                 "library_strategy",
                 "library_source",
                 "library_selection",
+                "library_layout",
+                "platform",
+                "instrument_model",
+                "filetype",
                 "title",
             )
             if c in sra_df.columns
@@ -1248,6 +1270,23 @@ class DB2Flattener:
     def _map_sra_library_selection(cls, ft):
         """Map library feature_types to an SRA library_selection, or None if unmapped."""
         return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SELECTION_MAP)
+
+    @classmethod
+    def _map_sra_library_layout(cls, val):
+        """Map sequence file set run_cardinality to an SRA library_layout, or None."""
+        return cls._map_sra_feature_type(val, SRA_FILE_LIBRARY_LAYOUT_MAP)
+
+    @staticmethod
+    def _map_sra_platform(val):
+        """Map sequencing_platform to an SRA platform by vendor prefix, or None."""
+        for item in to_items(val):
+            if is_empty(item):
+                continue
+            text = str(item)
+            for prefix, platform in SRA_FILE_PLATFORM_PREFIXES:
+                if text.startswith(prefix):
+                    return platform
+        return None
 
     @staticmethod
     def _append_sra_title_feature_types(row: pd.Series):
