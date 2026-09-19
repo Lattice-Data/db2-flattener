@@ -172,7 +172,8 @@ PROP_MAP_SRA_BIOSAMPLE = {
     "human_donors_taxa": "*organism",
 }
 
-# library_ID, library_strategy, and title are derived, not renames
+# library_ID, library_strategy, library_source, library_selection, and title
+# are derived, not renames
 PROP_MAP_SRA_FILE = {
     "droplet_based_libraries_CRO_group_identifier": "sample_name",
     "plate_based_libraries_CRO_group_identifier": "sample_name",
@@ -183,6 +184,20 @@ SRA_FILE_LIBRARY_STRATEGY_MAP = {
     "CRISPR Guide Capture": "OTHER",
     "Multiplexing Capture": "OTHER",
     "ATAC": "ATAC-seq",
+}
+
+SRA_FILE_LIBRARY_SOURCE_MAP = {
+    "Gene Expression": "TRANSCRIPTOMIC SINGLE CELL",
+    "CRISPR Guide Capture": "OTHER",
+    "Multiplexing Capture": "OTHER",
+    "ATAC": "GENOMIC SINGLE CELL",
+}
+
+SRA_FILE_LIBRARY_SELECTION_MAP = {
+    "Gene Expression": "cDNA",
+    "CRISPR Guide Capture": "PCR",
+    "Multiplexing Capture": "OTHER",
+    "ATAC": "OTHER",
 }
 
 BIOHUB_SORT_ONTOLOGY_IDS = [

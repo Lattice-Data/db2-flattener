@@ -27,6 +27,8 @@ from db2_flattener.schema.constants import (
     PROP_MAP_SRA_BIOSAMPLE,
     PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
+    SRA_FILE_LIBRARY_SELECTION_MAP,
+    SRA_FILE_LIBRARY_SOURCE_MAP,
     SRA_FILE_LIBRARY_STRATEGY_MAP,
     TISSUE_TYPE_MAP,
     Configs,
@@ -1143,9 +1145,13 @@ class DB2Flattener:
         )
         if feature_types is None:
             sra_df["library_strategy"] = None
+            sra_df["library_source"] = None
+            sra_df["library_selection"] = None
             sra_df["_feature_types"] = None
         else:
             sra_df["library_strategy"] = feature_types.map(self._map_sra_library_strategy)
+            sra_df["library_source"] = feature_types.map(self._map_sra_library_source)
+            sra_df["library_selection"] = feature_types.map(self._map_sra_library_selection)
             sra_df["_feature_types"] = feature_types
 
         if library_atid is not None:
@@ -1207,19 +1213,41 @@ class DB2Flattener:
 
         ordered = [
             c
-            for c in ("sample_name", "library_ID", "library_strategy", "title")
+            for c in (
+                "sample_name",
+                "library_ID",
+                "library_strategy",
+                "library_source",
+                "library_selection",
+                "title",
+            )
             if c in sra_df.columns
         ]
         return sra_df[ordered].reset_index(drop=True)
 
     @staticmethod
-    def _map_sra_library_strategy(ft):
-        """Map library feature_types to an SRA library_strategy, or None if unmapped."""
+    def _map_sra_feature_type(ft, mapping):
+        """Map the first listed feature type through mapping, or None if unmapped."""
         for item in to_items(ft):
-            mapped = SRA_FILE_LIBRARY_STRATEGY_MAP.get(item)
+            mapped = mapping.get(item)
             if mapped:
                 return mapped
         return None
+
+    @classmethod
+    def _map_sra_library_strategy(cls, ft):
+        """Map library feature_types to an SRA library_strategy, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_STRATEGY_MAP)
+
+    @classmethod
+    def _map_sra_library_source(cls, ft):
+        """Map library feature_types to an SRA library_source, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SOURCE_MAP)
+
+    @classmethod
+    def _map_sra_library_selection(cls, ft):
+        """Map library feature_types to an SRA library_selection, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SELECTION_MAP)
 
     @staticmethod
     def _append_sra_title_feature_types(row: pd.Series):

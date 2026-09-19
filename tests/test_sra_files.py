@@ -1,8 +1,9 @@
 """
 SRA file sheet: one row per CRO group × library, keyed on the library's
 CRO_group_identifier under the name 'sample_name' and the cleaned library
-alias under 'library_ID'. library_strategy is derived from feature_types.
-title follows GEO *title concatenation, then appends feature_types.
+alias under 'library_ID'. library_strategy, library_source, and
+library_selection are derived from feature_types. title follows GEO *title
+concatenation, then appends feature_types.
 Every library is kept, including non-GEX.
 """
 
@@ -18,8 +19,17 @@ from db2_flattener.schema.constants import (
 
 LIBRARY_ID_COLUMN = "library_ID"
 LIBRARY_STRATEGY_COLUMN = "library_strategy"
+LIBRARY_SOURCE_COLUMN = "library_source"
+LIBRARY_SELECTION_COLUMN = "library_selection"
 TITLE_COLUMN = "title"
-SRA_FILE_COLUMNS = ["sample_name", LIBRARY_ID_COLUMN, LIBRARY_STRATEGY_COLUMN, TITLE_COLUMN]
+SRA_FILE_COLUMNS = [
+    "sample_name",
+    LIBRARY_ID_COLUMN,
+    LIBRARY_STRATEGY_COLUMN,
+    LIBRARY_SOURCE_COLUMN,
+    LIBRARY_SELECTION_COLUMN,
+    TITLE_COLUMN,
+]
 
 
 def make_flattener():
@@ -56,6 +66,11 @@ def test_paired_libraries_each_get_a_row():
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_A"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER"]
+    assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == [
+        "TRANSCRIPTOMIC SINGLE CELL",
+        "OTHER",
+    ]
+    assert list(sra_df[LIBRARY_SELECTION_COLUMN]) == ["cDNA", "PCR"]
     assert list(sra_df[TITLE_COLUMN]) == [
         "LIB_A RNA-Seq; Gene Expression",
         "LIB_A OTHER; CRISPR Guide Capture",
@@ -87,6 +102,11 @@ def test_crispr_only_group_is_kept():
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_B"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_B_CRI"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER"]
+    assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == [
+        "TRANSCRIPTOMIC SINGLE CELL",
+        "OTHER",
+    ]
+    assert list(sra_df[LIBRARY_SELECTION_COLUMN]) == ["cDNA", "PCR"]
     assert list(sra_df[TITLE_COLUMN]) == [
         "LIB_A RNA-Seq; Gene Expression",
         "LIB_B OTHER; CRISPR Guide Capture",
@@ -108,6 +128,8 @@ def test_plate_library_columns_are_used_when_droplet_is_absent():
     assert list(sra_df["sample_name"]) == ["PLATE_1"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["PLATE_1_GEX"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq"]
+    assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == ["TRANSCRIPTOMIC SINGLE CELL"]
+    assert list(sra_df[LIBRARY_SELECTION_COLUMN]) == ["cDNA"]
     assert list(sra_df[TITLE_COLUMN]) == ["PLATE_1 RNA-Seq; Gene Expression"]
 
 
@@ -133,6 +155,8 @@ def test_duplicate_rmf_rows_for_the_same_library_collapse_to_one():
     assert sra_df.loc[0, "sample_name"] == "LIB_A"
     assert sra_df.loc[0, LIBRARY_ID_COLUMN] == "LIB_A_GEX"
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
+    assert pd.isna(sra_df.loc[0, LIBRARY_SOURCE_COLUMN])
+    assert pd.isna(sra_df.loc[0, LIBRARY_SELECTION_COLUMN])
     assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
@@ -194,6 +218,8 @@ def test_missing_aliases_column_omits_library_id(capsys):
     assert list(sra_df["sample_name"]) == ["LIB_A"]
     assert LIBRARY_ID_COLUMN not in sra_df.columns
     assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
+    assert LIBRARY_SOURCE_COLUMN in sra_df.columns
+    assert LIBRARY_SELECTION_COLUMN in sra_df.columns
     assert TITLE_COLUMN in sra_df.columns
     assert "no library aliases column" in capsys.readouterr().out
 
@@ -231,6 +257,13 @@ def test_library_strategy_maps_feature_types():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER", "OTHER", "ATAC-seq"]
+    assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == [
+        "TRANSCRIPTOMIC SINGLE CELL",
+        "OTHER",
+        "OTHER",
+        "GENOMIC SINGLE CELL",
+    ]
+    assert list(sra_df[LIBRARY_SELECTION_COLUMN]) == ["cDNA", "PCR", "OTHER", "OTHER"]
     assert list(sra_df[TITLE_COLUMN]) == [
         "LIB_GEX RNA-Seq; Gene Expression",
         "LIB_CRI OTHER; CRISPR Guide Capture",
@@ -253,6 +286,8 @@ def test_library_strategy_maps_string_feature_types():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq"]
+    assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == ["TRANSCRIPTOMIC SINGLE CELL"]
+    assert list(sra_df[LIBRARY_SELECTION_COLUMN]) == ["cDNA"]
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; Gene Expression"]
 
 
@@ -273,6 +308,8 @@ def test_library_strategy_is_blank_when_feature_types_are_missing_or_unmapped():
 
     assert list(sra_df.columns) == SRA_FILE_COLUMNS
     assert sra_df[LIBRARY_STRATEGY_COLUMN].isna().all()
+    assert sra_df[LIBRARY_SOURCE_COLUMN].isna().all()
+    assert sra_df[LIBRARY_SELECTION_COLUMN].isna().all()
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A", "LIB_B; Antibody Capture"]
 
 
@@ -288,7 +325,11 @@ def test_library_strategy_is_blank_when_feature_types_column_is_absent():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
+    assert LIBRARY_SOURCE_COLUMN in sra_df.columns
+    assert LIBRARY_SELECTION_COLUMN in sra_df.columns
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
+    assert pd.isna(sra_df.loc[0, LIBRARY_SOURCE_COLUMN])
+    assert pd.isna(sra_df.loc[0, LIBRARY_SELECTION_COLUMN])
     assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
@@ -302,6 +343,8 @@ def test_prop_map_sends_both_library_types_to_sample_name():
     assert not PROP_MAP_SRA_FILE[droplet_key].startswith("*")
     assert LIBRARY_ID_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert LIBRARY_STRATEGY_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert LIBRARY_SOURCE_COLUMN not in PROP_MAP_SRA_FILE.values()
+    assert LIBRARY_SELECTION_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert TITLE_COLUMN not in PROP_MAP_SRA_FILE.values()
     assert "raw_file_samples" not in PROP_MAP_SRA_FILE
     assert "genetic_modifications_strategy" not in PROP_MAP_SRA_FILE
