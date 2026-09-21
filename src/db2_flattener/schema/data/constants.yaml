@@ -1,5 +1,5 @@
 https://api.data.lattice-data.org/:
-  date_parsed: '2026-08-13'
+  date_parsed: '2026-09-08'
   field_types:
     '@id':
       type: string
@@ -337,7 +337,6 @@ https://api.data.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -353,6 +352,7 @@ https://api.data.lattice-data.org/:
       - libraries
       - multiplexing_barcodes
       - notes
+      - preservation_method
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -564,6 +564,7 @@ https://api.data.lattice-data.org/:
       - '@id'
       - '@type'
       - aliases
+      - dbxrefs
       - description
       - lab
       - notes
@@ -608,7 +609,6 @@ https://api.data.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -623,6 +623,7 @@ https://api.data.lattice-data.org/:
       - multiplexing_barcodes
       - notes
       - origin_cell_types
+      - preservation_method
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -717,7 +718,6 @@ https://api.data.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -732,6 +732,7 @@ https://api.data.lattice-data.org/:
       - multiplexing_barcodes
       - notes
       - passage_number
+      - preservation_method
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -846,6 +847,7 @@ https://api.data.lattice-data.org/:
       - '@type'
       - CRO_order
       - aliases
+      - dbxrefs
       - description
       - index1
       - index2
@@ -963,7 +965,6 @@ https://api.data.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -1058,9 +1059,9 @@ https://api.data.lattice-data.org/:
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: 853c00d52c4a4bafcf9f25ef042787aa15b000b85977698b8ca2810a29479eed
+  object_config_sha256: 984ad7e33d01e5a463d2bbba03aa6e556af42011c7bc3afe4728fe1bfb5d8cd9
 https://lattice-api-dev.demo.lattice-data.org/:
-  date_parsed: '2026-08-13'
+  date_parsed: '2026-09-10'
   field_types:
     '@id':
       type: string
@@ -1398,7 +1399,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -1414,6 +1414,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - libraries
       - multiplexing_barcodes
       - notes
+      - preservation_method
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1625,6 +1626,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - '@id'
       - '@type'
       - aliases
+      - dbxrefs
       - description
       - lab
       - notes
@@ -1669,7 +1671,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -1684,6 +1685,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - multiplexing_barcodes
       - notes
       - origin_cell_types
+      - preservation_method
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1778,7 +1780,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -1793,6 +1794,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - multiplexing_barcodes
       - notes
       - passage_number
+      - preservation_method
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1907,6 +1909,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - '@type'
       - CRO_order
       - aliases
+      - dbxrefs
       - description
       - index1
       - index2
@@ -2024,7 +2027,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - author_metadata
       - collection_geographical_location
       - date_obtained
-      - dbxrefs
       - depleted_cell_types
       - description
       - developmental_stages
@@ -2119,4 +2121,4 @@ https://lattice-api-dev.demo.lattice-data.org/:
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: 853c00d52c4a4bafcf9f25ef042787aa15b000b85977698b8ca2810a29479eed
+  object_config_sha256: 984ad7e33d01e5a463d2bbba03aa6e556af42011c7bc3afe4728fe1bfb5d8cd9
