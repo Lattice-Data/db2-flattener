@@ -1,6 +1,6 @@
 import pytest
 
-from db2_flattener import cli
+from db2_flattener import __version__, cli
 
 
 class FakeConnection:
@@ -33,14 +33,14 @@ def test_cli_version_exits_without_uuid(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 0
-    assert "0.1.0" in capsys.readouterr().out
+    assert __version__ in capsys.readouterr().out
 
 
 def test_cli_success_prints_path(monkeypatch, capsys):
     _stub_cli(monkeypatch)
     cli.main()
     out = capsys.readouterr().out
-    assert "db2-flattener 0.1.0" in out
+    assert f"db2-flattener {__version__}" in out
     assert "Success! CSV file created: myrun_MAIN.csv" in out
 
 
