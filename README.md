@@ -20,6 +20,14 @@ From the repository root:
 pip install -e ".[dev]"
 ```
 
+Pin a release (requires the `v0.1.0` tag on GitHub):
+
+```bash
+pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v0.1.0"
+```
+
+Check the running code with `db2-flattener --version`.
+
 Set Lattice API credentials as environment variables. Names follow the `--mode`
 value, which must start with `db2_` (for example `db2_demo`):
 

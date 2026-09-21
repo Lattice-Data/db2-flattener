@@ -3,6 +3,7 @@
 import argparse
 import sys
 
+from db2_flattener import __version__
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.gather.lattice import Connection
 from db2_flattener.schema.constants import Configs
@@ -11,7 +12,13 @@ from db2_flattener.schema.generate import load_and_return_constant_dicts
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Flatten MatrixFileSet data for DB2 processing and export to CSV"
+        prog="db2-flattener",
+        description="Flatten MatrixFileSet data for DB2 processing and export to CSV",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--uuid",
@@ -34,6 +41,7 @@ def main() -> None:
         "Defaults to MatrixFileSet_{uuid}_{timestamp}",
     )
     args = parser.parse_args()
+    print(f"{parser.prog} {__version__}")
 
     try:
         connection = Connection(args.mode)

@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from db2_flattener import __version__
 from db2_flattener.gather.lattice import Connection
 from db2_flattener.schema.constants import (
     EXCLUDED_FIELDS,
@@ -349,6 +350,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     parser.add_argument(
         "--demo",
         "-d",
