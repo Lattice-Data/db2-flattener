@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from db2_flattener import __version__
 from db2_flattener.schema.generate import (
     CONFIGS_TO_SAVE,
     DEFAULT_DEMO_MODE,
@@ -119,6 +120,13 @@ def test_parser_defaults_are_none_until_resolved():
 def test_parser_rejects_unknown_args():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--nope"])
+
+
+def test_parser_version_exits_without_mode(capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(["--version"])
+    assert exc.value.code == 0
+    assert __version__ in capsys.readouterr().out
 
 
 def test_configs_to_save_end_with_slash():
