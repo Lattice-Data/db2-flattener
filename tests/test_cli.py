@@ -28,10 +28,20 @@ def _stub_cli(monkeypatch, flattener_cls=FakeFlattener):
     monkeypatch.setattr("sys.argv", ["db2-flattener", "-u", "abc-uuid"])
 
 
+def test_cli_version_exits_without_uuid(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["db2-flattener", "--version"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert "0.1.0" in capsys.readouterr().out
+
+
 def test_cli_success_prints_path(monkeypatch, capsys):
     _stub_cli(monkeypatch)
     cli.main()
-    assert "Success! CSV file created: myrun_MAIN.csv" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "db2-flattener 0.1.0" in out
+    assert "Success! CSV file created: myrun_MAIN.csv" in out
 
 
 def test_cli_no_data_exits_1(monkeypatch, capsys):
