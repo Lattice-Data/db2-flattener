@@ -170,8 +170,7 @@ class DB2Flattener:
 
         rows = []
         sample_df = None
-        # One (raw matrix file, sample) pair per sample on each file
-        file_sample_pairs = []
+        new_sample_df = None
 
         # Raw matrix file-based rows - samples field is always present
         # First, collect all raw matrix files and their associated libraries
@@ -260,16 +259,6 @@ class DB2Flattener:
                 "raw_file_samples": self._join_unique(sample_aliases),
             }
 
-            # Recorded here, where the aliases are still separate values, rather
-            # than by splitting raw_file_samples back apart on '; ' afterwards
-            file_sample_pairs.extend(
-                {
-                    "raw_matrix_file_alias": shared["raw_matrix_file_alias"],
-                    "sample_alias": alias,
-                }
-                for alias in sample_aliases
-            )
-
             for entry in library_entries:
                 lib = entry["library"]
                 # This libraries scoped copy of the raw matrix file
@@ -295,35 +284,34 @@ class DB2Flattener:
 
         main_df = pd.DataFrame(rows)
 
-        # SAMPLES is one row per (raw matrix file, sample), which is what makes a
-        # multiplexed file readable. MAIN stays one row per (raw matrix file,
-        # library), so it takes a copy of that frame rolled up to one row per
-        # file: joining the exploded frame straight on would multiply every
-        # library row by the file's sample count.
+        # Merge sample metadata with main DataFrame columns
+        # Samples is one row per unique (raw matrix file + sample)
         sample_df = None
-        if sample_metadata and file_sample_pairs and not main_df.empty:
+        if sample_metadata and not main_df.empty:
             per_sample_df = pd.DataFrame.from_dict(sample_metadata, orient="index")
             per_sample_df.index.name = "sample_alias"
             per_sample_df = per_sample_df.reset_index()
 
-            pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates()
-            sample_df = pairs_df.merge(per_sample_df, on="sample_alias", how="left")
+            rmf_sample_keys = main_df[
+                ["raw_matrix_file_alias", "raw_file_samples"]
+            ].drop_duplicates()
 
-            rolled_up = sample_df.groupby("raw_matrix_file_alias", as_index=False).agg(
-                {
-                    column: self._combine_sample_values
-                    for column in sample_df.columns
-                    if column != "raw_matrix_file_alias"
-                }
+            sample_df = per_sample_df.merge(
+                rmf_sample_keys, left_on="sample_alias", right_on="raw_file_samples", how="right"
             )
-            main_df = main_df.merge(rolled_up, on="raw_matrix_file_alias", how="left")
+
+            new_sample_df = sample_df.set_index("raw_matrix_file_alias")
+
+            main_df = main_df.merge(
+                per_sample_df, left_on="raw_file_samples", right_on="sample_alias", how="left"
+            )
 
             print(
                 f"Creating sample DataFrame with {len(sample_df)} rows "
                 f"({sample_df['raw_matrix_file_alias'].nunique()} raw matrix files)..."
             )
 
-        return main_df, sample_df
+        return main_df, new_sample_df
 
     def create_samples_dataframe(self, sample_df) -> pd.DataFrame:
         """
@@ -331,6 +319,8 @@ class DB2Flattener:
         rename them, and fold duration into treatment_description.
         """
         sample_df = sample_df.copy()
+        if sample_df.index.name == "raw_matrix_file_alias":
+            sample_df = sample_df.reset_index()
 
         duration_cols = (
             "treatments_lower_bound_duration",
@@ -1788,41 +1778,6 @@ class DB2Flattener:
         if not resolved:
             return None
         return resolved if isinstance(value, list) else resolved[0]
-
-    def _combine_sample_values(self, values):
-        """
-        One column's values across the samples sharing a raw matrix file.
-
-        Mirrors how _flatten_resolved_references combines a field across several
-        referenced objects: controlled terms stay dicts, because _join_unique()
-        would str() them into the cell and split_controlled_term_columns() could
-        no longer split them into _term_id and _term_name.
-
-        A single distinct value passes through untouched - first, before any
-        combining - so a file carrying one sample, which is every file in a run
-        that is not multiplexed, keeps exactly the cell it had before: the same
-        type, and terms in their original order rather than sorted by id.
-        """
-        present = [value for value in values if not is_empty(value)]
-        if not present:
-            return None
-
-        unique = []
-        for value in present:
-            if value not in unique:
-                unique.append(value)
-        if len(unique) == 1:
-            return unique[0]
-
-        items = [item for value in unique for item in to_items(value)]
-        if any(isinstance(item, dict) for item in items):
-            # Only controlled terms can be deduped by id; anything else dict-
-            # shaped, such as an embedded 'sources', is kept as it is rather
-            # than dropped for having no '@id'
-            if all(isinstance(item, dict) and item.get("@id") for item in items):
-                return self._dedupe_terms(items)
-            return items
-        return self._join_unique(unique)
 
     @staticmethod
     def _dedupe_terms(values):
