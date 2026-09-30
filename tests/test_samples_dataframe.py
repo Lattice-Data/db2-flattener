@@ -78,7 +78,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
             "raw_file_samples": ["s1"],
             "tissues_@id": ["/tissues/s1/"],
         }
-    ).set_index("raw_matrix_file_alias")
+    )
 
     result = flattener.create_samples_dataframe(sample_df)
 
