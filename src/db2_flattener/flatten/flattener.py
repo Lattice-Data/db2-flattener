@@ -20,7 +20,7 @@ from db2_flattener.schema.constants import (
     GEO_SUSPENSION_TYPE_COLS,
     GEO_TITLE_TREATMENT_COLS,
     GEO_TREATMENT_COLS,
-    GUIDE_METADATA_COLUMNS,
+    GUIDE_METADATA_COLUMN_MAP,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
     PROP_MAP_SAMPLES,
@@ -1504,11 +1504,11 @@ class DB2Flattener:
             return None
 
         guide_df = DB2lattice.read_tabular_file(file_info, self.connection)
-        present = [col for col in GUIDE_METADATA_COLUMNS if col in guide_df.columns]
+        present = [col for col in GUIDE_METADATA_COLUMN_MAP if col in guide_df.columns]
         if not present:
             print("Warning: guide RNA file has none of the expected GUIDE_METADATA columns")
             return None
-        return guide_df[present].copy()
+        return guide_df[present].rename(columns=GUIDE_METADATA_COLUMN_MAP).copy()
 
     def _resolve_guide_rna_file(self, complete_data):
         """Return the single gathered guide TabularFile, or None."""
