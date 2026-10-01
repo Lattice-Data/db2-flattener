@@ -26,6 +26,7 @@ from db2_flattener.schema.constants import (
     PROP_MAP_SAMPLES,
     PROP_MAP_SRA_BIOSAMPLE,
     REFORMAT_LIST,
+    SEX_ONTOLOGY_MAP,
     TISSUE_TYPE_MAP,
     Configs,
 )
@@ -1563,35 +1564,43 @@ class DB2Flattener:
         biohub_df.drop_duplicates(inplace=True)
 
         # Add columns default values if not present
-        if "disease" not in biohub_df.columns:
-            biohub_df["disease"] = "normal"
+        if "disease_ontology_term_id" not in biohub_df.columns:
+            biohub_df["disease_ontology_term_id"] = "PATO:0000461"
         else:
-            biohub_df["disease"] = biohub_df["disease"].apply(
+            biohub_df["disease_ontology_term_id"] = biohub_df["disease_ontology_term_id"].apply(
                 lambda v: pd.NA if (v is None or v == "" or v == [] or v == ()) else v
             )
-            biohub_df["disease"] = biohub_df["disease"].fillna("normal")
+            biohub_df["disease_ontology_term_id"] = biohub_df["disease_ontology_term_id"].fillna(
+                "PATO:0000461"
+            )
 
-        if "self_reported_ethnicity" not in biohub_df.columns:
-            biohub_df["self_reported_ethnicity"] = np.where(
+        if "self_reported_ethnicity_ontology_term_id" not in biohub_df.columns:
+            biohub_df["self_reported_ethnicity_ontology_term_id"] = np.where(
                 biohub_df["organism"] == "Homo sapiens", "unknown", "na"
             )
         else:
             biohub_df.loc[
-                biohub_df["self_reported_ethnicity"].isna()
+                biohub_df["self_reported_ethnicity_ontology_term_id"].isna()
                 & (biohub_df["organism"] == "Homo sapiens"),
-                "self_reported_ethnicity",
+                "self_reported_ethnicity_ontology_term_id",
             ] = "unknown"
             biohub_df.loc[
-                biohub_df["self_reported_ethnicity"].isna()
+                biohub_df["self_reported_ethnicity_ontology_term_id"].isna()
                 & (biohub_df["organism"] != "Homo sapiens"),
-                "self_reported_ethnicity",
+                "self_reported_ethnicity_ontology_term_id",
             ] = "na"
+
+        if "preservation_method" not in biohub_df.columns:
+            biohub_df["preservation_method"] = "unknown"
+        else:
+            biohub_df["preservation_method"] = biohub_df["preservation_method"].apply(
+                lambda v: pd.NA if (v is None or v == "" or v == [] or v == ()) else v
+            )
+            biohub_df["preservation_method"] = biohub_df["preservation_method"].fillna("unknown")
 
         for col in BIOHUB_SORT_ONTOLOGY_IDS:
             if col in biohub_df.columns:
                 biohub_df = sort_ontology_term_id_column(biohub_df, col)
-        if "self_reported_ethnicity_ontology_term_id" in biohub_df.columns:
-            biohub_df.drop(columns=["self_reported_ethnicity_ontology_term_id"], inplace=True)
 
         # Combine multiple columns into one
         biohub_df = combine_bound_columns(
@@ -1610,21 +1619,30 @@ class DB2Flattener:
         )
 
         # Update values to match schema
+        if "sex_ontology_term_id" in biohub_df.columns:
+            biohub_df["sex_ontology_term_id"] = biohub_df["sex_ontology_term_id"].replace(
+                SEX_ONTOLOGY_MAP
+            )
         if "tissue_type" in biohub_df.columns:
             biohub_df["tissue_type"] = biohub_df["tissue_type"].apply(
                 lambda x: TISSUE_TYPE_MAP.get(x[0], x) if isinstance(x, (list, tuple)) else x
             )
             cell_line = biohub_df["tissue_type"] == "cell line"
-            for col in ("development_stage", "donor_id", "sex", "self_reported_ethnicity"):
+            for col in (
+                "development_stage_ontology_term_id",
+                "donor_id",
+                "sex_ontology_term_id",
+                "self_reported_ethnicity_ontology_term_id",
+            ):
                 if col not in biohub_df.columns:
                     biohub_df[col] = pd.NA
                 biohub_df.loc[cell_line, col] = "na"
-        if "development_stage" in biohub_df.columns:
-            biohub_df["development_stage"] = (
-                biohub_df["development_stage"].replace("", pd.NA).fillna("unknown")
+        if "development_stage_ontology_term_id" in biohub_df.columns:
+            biohub_df["development_stage_ontology_term_id"] = (
+                biohub_df["development_stage_ontology_term_id"]
+                .replace("", pd.NA)
+                .fillna("unknown")
             )
-        if "sex" in biohub_df.columns:
-            biohub_df["sex"] = biohub_df["sex"].replace("unspecified", "unknown")
         if "genetic_perturbation_strategy" in biohub_df.columns:
             biohub_df["genetic_perturbation_strategy"] = biohub_df[
                 "genetic_perturbation_strategy"

@@ -101,19 +101,18 @@ PROP_MAP_BIOHUB = {
     "human_donors_cxg_donor_id": "donor_id",
     "non_human_donors_taxa": "organism",
     "human_donors_taxa": "organism",
-    "non_human_donors_sex": "sex",
-    "human_donors_sex": "sex",
-    "human_donors_ethnicity_term_name": "self_reported_ethnicity",
+    "non_human_donors_sex": "sex_ontology_term_id",
+    "human_donors_sex": "sex_ontology_term_id",
     "human_donors_ethnicity_term_id": "self_reported_ethnicity_ontology_term_id",
-    "droplet_based_libraries_library_construction_technology_term_name": "assay",
+    "droplet_based_libraries_library_construction_technology_term_id": "assay_ontology_term_id",
     "tissues_upper_bound_age": "tissues_upper_bound_age",
     "tissues_lower_bound_age": "tissues_lower_bound_age",
     "tissues_age_units": "tissues_age_units",
-    "tissues_diseases_term_name": "disease",
+    "tissues_diseases_term_id": "disease_ontology_term_id",
     "tissues_enriched_cell_types_term_name": "suspension_enriched_cell_types",
-    "tissues_sample_terms_term_name": "tissue",
-    "cell_lines_sample_terms_term_id": "tissue",
-    "tissues_developmental_stages_term_name": "development_stage",
+    "tissues_sample_terms_term_id": "tissue_ontology_term_id",
+    "cell_lines_sample_terms_term_id": "tissue_ontology_term_id",
+    "tissues_developmental_stages_term_id": "development_stage_ontology_term_id",
     "tissues_multiplexing_barcodes": "sample_probe_barcode",
     "cell_lines_multiplexing_barcodes": "sample_probe_barcode",
     "tissues_@type": "tissue_type",
@@ -173,9 +172,18 @@ PROP_MAP_SRA_BIOSAMPLE = {
 }
 
 BIOHUB_SORT_ONTOLOGY_IDS = [
+    "disease_ontology_term_id",
     "experimental_condition_ontology_term_id",
     "self_reported_ethnicity_ontology_term_id",
 ]
+
+SEX_ONTOLOGY_MAP = {
+    "female": "PATO:0000383",
+    "male": "PATO:0000384",
+    "hermaphrodite": "PATO:0001340",
+    "unspecified": "unknown",
+    "mixed": "unknown",
+}
 
 TISSUE_TYPE_MAP = {
     "CellLine": "cell line",

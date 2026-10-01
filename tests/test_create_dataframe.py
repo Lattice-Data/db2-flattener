@@ -322,9 +322,9 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
                 ["CellLine", "Biosample", "Item"],
                 ["CellLine", "Biosample", "Item"],
             ],
-            "tissues_sample_terms_term_name": ["lung", None, "lung"],
+            "tissues_sample_terms_term_id": ["UBERON:0002048", None, "UBERON:0002048"],
             "cell_lines_sample_terms_term_id": [None, "CL:0000000", None],
-            "tissues_developmental_stages_term_name": ["adult", None, "adult"],
+            "tissues_developmental_stages_term_id": ["HsapDv:0000087", None, "HsapDv:0000087"],
             "tissues_multiplexing_barcodes": ["BC001", None, "BC003"],
             "cell_lines_multiplexing_barcodes": [None, "BC005", None],
             "tissues_suspension_type": ["cell", None, "cell"],
@@ -333,7 +333,7 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
             "cell_lines_preservation_method": [None, "frozen", None],
             "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
             "human_donors_sex": ["female", "male", "female"],
-            "human_donors_ethnicity_term_name": ["European", "Asian", "European"],
+            "human_donors_ethnicity_term_id": ["HANCESTRO:0005", "HANCESTRO:0008", "HANCESTRO:0005"],
             "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
         }
     )
@@ -341,11 +341,23 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
     biohub_df = f.create_biohub_dataframe(main_df)
 
     assert list(biohub_df["tissue_type"]) == ["tissue", "cell line", "tissue"]
-    assert list(biohub_df["tissue"]) == ["lung", "CL:0000000", "lung"]
-    assert list(biohub_df["development_stage"]) == ["adult", "na", "adult"]
+    assert list(biohub_df["tissue_ontology_term_id"]) == [
+        "UBERON:0002048",
+        "CL:0000000",
+        "UBERON:0002048",
+    ]
+    assert list(biohub_df["development_stage_ontology_term_id"]) == [
+        "HsapDv:0000087",
+        "na",
+        "HsapDv:0000087",
+    ]
     assert list(biohub_df["donor_id"]) == ["donor1", "na", "donor3"]
-    assert list(biohub_df["sex"]) == ["female", "na", "female"]
-    assert list(biohub_df["self_reported_ethnicity"]) == ["European", "na", "European"]
+    assert list(biohub_df["sex_ontology_term_id"]) == ["PATO:0000383", "na", "PATO:0000383"]
+    assert list(biohub_df["self_reported_ethnicity_ontology_term_id"]) == [
+        "HANCESTRO:0005",
+        "na",
+        "HANCESTRO:0005",
+    ]
     assert list(biohub_df["sample_probe_barcode"]) == ["BC001", "BC005", "BC003"]
     assert list(biohub_df["suspension_type"]) == ["cell", "cell", "cell"]
     assert list(biohub_df["preservation_method"]) == ["fresh", "frozen", "fresh"]
@@ -369,17 +381,23 @@ def test_biohub_empty_development_stage_defaults_to_unknown():
                 None,
                 ["CellLine", "Biosample", "Item"],
             ],
-            "tissues_sample_terms_term_name": ["lung", "lung", "lung", "lung", None],
+            "tissues_sample_terms_term_id": [
+                "UBERON:0002048",
+                "UBERON:0002048",
+                "UBERON:0002048",
+                "UBERON:0002048",
+                None,
+            ],
             "cell_lines_sample_terms_term_id": [None, None, None, None, "CL:0000000"],
-            "tissues_developmental_stages_term_name": ["", None, pd.NA, "adult", None],
+            "tissues_developmental_stages_term_id": ["", None, pd.NA, "HsapDv:0000087", None],
             "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3", "donor4", "donor5"],
             "human_donors_sex": ["female", "female", "female", "female", "male"],
-            "human_donors_ethnicity_term_name": [
-                "European",
-                "European",
-                "European",
-                "European",
-                "Asian",
+            "human_donors_ethnicity_term_id": [
+                "HANCESTRO:0005",
+                "HANCESTRO:0005",
+                "HANCESTRO:0005",
+                "HANCESTRO:0005",
+                "HANCESTRO:0008",
             ],
             "human_donors_taxa": [
                 "Homo sapiens",
@@ -400,20 +418,22 @@ def test_biohub_empty_development_stage_defaults_to_unknown():
         "tissue",
         "cell line",
     ]
-    assert list(biohub_df["development_stage"]) == [
+    assert list(biohub_df["development_stage_ontology_term_id"]) == [
         "unknown",
         "unknown",
         "unknown",
-        "adult",
+        "HsapDv:0000087",
         "na",
     ]
 
 
-def test_biohub_unspecified_sex_defaults_to_unknown():
+def test_biohub_sex_ontology_term_id_mapping():
     f = make_flattener()
     main_df = pd.DataFrame(
         {
             "tissues_@type": [
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
                 ["Tissue", "Biosample", "Item"],
                 ["Tissue", "Biosample", "Item"],
                 None,
@@ -421,19 +441,98 @@ def test_biohub_unspecified_sex_defaults_to_unknown():
             "cell_lines_@type": [
                 None,
                 None,
+                None,
+                None,
                 ["CellLine", "Biosample", "Item"],
             ],
-            "tissues_sample_terms_term_name": ["lung", "lung", None],
-            "cell_lines_sample_terms_term_id": [None, None, "CL:0000000"],
-            "tissues_developmental_stages_term_name": ["adult", "adult", None],
-            "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
-            "human_donors_sex": ["unspecified", "female", "unspecified"],
-            "human_donors_ethnicity_term_name": ["European", "European", "Asian"],
-            "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+            "tissues_sample_terms_term_id": [
+                "UBERON:0002048",
+                "UBERON:0002048",
+                "UBERON:0002048",
+                "UBERON:0002048",
+                None,
+            ],
+            "cell_lines_sample_terms_term_id": [None, None, None, None, "CL:0000000"],
+            "tissues_developmental_stages_term_id": [
+                "HsapDv:0000087",
+                "HsapDv:0000087",
+                "HsapDv:0000087",
+                "HsapDv:0000087",
+                None,
+            ],
+            "human_donors_cxg_donor_id": [
+                "donor1",
+                "donor2",
+                "donor3",
+                "donor4",
+                "donor5",
+            ],
+            "human_donors_sex": [
+                "unspecified",
+                "mixed",
+                "female",
+                "hermaphrodite",
+                "unspecified",
+            ],
+            "human_donors_ethnicity_term_id": [
+                "HANCESTRO:0005",
+                "HANCESTRO:0005",
+                "HANCESTRO:0005",
+                "HANCESTRO:0005",
+                "HANCESTRO:0008",
+            ],
+            "human_donors_taxa": [
+                "Homo sapiens",
+                "Homo sapiens",
+                "Homo sapiens",
+                "Homo sapiens",
+                "Homo sapiens",
+            ],
         }
     )
 
     biohub_df = f.create_biohub_dataframe(main_df)
 
-    assert list(biohub_df["tissue_type"]) == ["tissue", "tissue", "cell line"]
-    assert list(biohub_df["sex"]) == ["unknown", "female", "na"]
+    assert list(biohub_df["tissue_type"]) == [
+        "tissue",
+        "tissue",
+        "tissue",
+        "tissue",
+        "cell line",
+    ]
+    assert list(biohub_df["sex_ontology_term_id"]) == [
+        "unknown",
+        "unknown",
+        "PATO:0000383",
+        "PATO:0001340",
+        "na",
+    ]
+
+
+def test_biohub_preservation_method_defaults_to_unknown():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+            ],
+            "tissues_sample_terms_term_id": [
+                "UBERON:0002048",
+                "UBERON:0002048",
+                "UBERON:0002048",
+            ],
+            "tissues_preservation_method": ["fresh", None, ""],
+            "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
+            "human_donors_sex": ["female", "female", "female"],
+            "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["preservation_method"]) == ["fresh", "unknown", "unknown"]
+
+    main_df_no_preservation = main_df.drop(columns=["tissues_preservation_method"])
+    biohub_df_missing = f.create_biohub_dataframe(main_df_no_preservation)
+    assert list(biohub_df_missing["preservation_method"]) == ["unknown", "unknown", "unknown"]
