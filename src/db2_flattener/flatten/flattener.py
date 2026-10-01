@@ -1647,9 +1647,7 @@ class DB2Flattener:
                 biohub_df.loc[cell_line, col] = "na"
         if "development_stage_ontology_term_id" in biohub_df.columns:
             biohub_df["development_stage_ontology_term_id"] = (
-                biohub_df["development_stage_ontology_term_id"]
-                .replace("", pd.NA)
-                .fillna("unknown")
+                biohub_df["development_stage_ontology_term_id"].replace("", pd.NA).fillna("unknown")
             )
         if "genetic_perturbation_strategy" in biohub_df.columns:
             biohub_df["genetic_perturbation_strategy"] = biohub_df[

@@ -333,7 +333,11 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
             "cell_lines_preservation_method": [None, "frozen", None],
             "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
             "human_donors_sex": ["female", "male", "female"],
-            "human_donors_ethnicity_term_id": ["HANCESTRO:0005", "HANCESTRO:0008", "HANCESTRO:0005"],
+            "human_donors_ethnicity_term_id": [
+                "HANCESTRO:0005",
+                "HANCESTRO:0008",
+                "HANCESTRO:0005",
+            ],
             "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
         }
     )
