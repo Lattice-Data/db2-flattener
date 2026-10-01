@@ -1598,6 +1598,14 @@ class DB2Flattener:
             )
             biohub_df["preservation_method"] = biohub_df["preservation_method"].fillna("unknown")
 
+        if "experimental_condition_ontology_term_id" in biohub_df.columns:
+            biohub_df["experimental_condition_ontology_term_id"] = biohub_df[
+                "experimental_condition_ontology_term_id"
+            ].apply(lambda v: pd.NA if (v is None or v == "" or v == [] or v == ()) else v)
+            biohub_df["experimental_condition_ontology_term_id"] = biohub_df[
+                "experimental_condition_ontology_term_id"
+            ].fillna("na")
+
         for col in BIOHUB_SORT_ONTOLOGY_IDS:
             if col in biohub_df.columns:
                 biohub_df = sort_ontology_term_id_column(biohub_df, col)

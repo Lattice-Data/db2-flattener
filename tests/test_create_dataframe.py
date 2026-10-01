@@ -536,3 +536,38 @@ def test_biohub_preservation_method_defaults_to_unknown():
     main_df_no_preservation = main_df.drop(columns=["tissues_preservation_method"])
     biohub_df_missing = f.create_biohub_dataframe(main_df_no_preservation)
     assert list(biohub_df_missing["preservation_method"]) == ["unknown", "unknown", "unknown"]
+
+
+def test_biohub_experimental_condition_ontology_term_id_defaults():
+    f = make_flattener()
+    base = {
+        "tissues_@type": [
+            ["Tissue", "Biosample", "Item"],
+            ["Tissue", "Biosample", "Item"],
+            ["Tissue", "Biosample", "Item"],
+        ],
+        "tissues_sample_terms_term_id": [
+            "UBERON:0002048",
+            "UBERON:0002048",
+            "UBERON:0002048",
+        ],
+        "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
+        "human_donors_sex": ["female", "female", "female"],
+        "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+    }
+
+    biohub_absent = f.create_biohub_dataframe(pd.DataFrame(base))
+    assert "experimental_condition_ontology_term_id" not in biohub_absent.columns
+
+    main_df = pd.DataFrame(
+        {
+            **base,
+            "treatments_ontological_term_term_id": ["EFO:0000001", None, ""],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["experimental_condition_ontology_term_id"]) == [
+        "EFO:0000001",
+        "na",
+        "na",
+    ]
