@@ -440,9 +440,11 @@ def test_biohub_sex_ontology_term_id_mapping():
                 ["Tissue", "Biosample", "Item"],
                 ["Tissue", "Biosample", "Item"],
                 ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
                 None,
             ],
             "cell_lines_@type": [
+                None,
                 None,
                 None,
                 None,
@@ -454,10 +456,12 @@ def test_biohub_sex_ontology_term_id_mapping():
                 "UBERON:0002048",
                 "UBERON:0002048",
                 "UBERON:0002048",
+                "UBERON:0002048",
                 None,
             ],
-            "cell_lines_sample_terms_term_id": [None, None, None, None, "CL:0000000"],
+            "cell_lines_sample_terms_term_id": [None, None, None, None, None, "CL:0000000"],
             "tissues_developmental_stages_term_id": [
+                "HsapDv:0000087",
                 "HsapDv:0000087",
                 "HsapDv:0000087",
                 "HsapDv:0000087",
@@ -470,12 +474,14 @@ def test_biohub_sex_ontology_term_id_mapping():
                 "donor3",
                 "donor4",
                 "donor5",
+                "donor6",
             ],
             "human_donors_sex": [
                 "unspecified",
                 "mixed",
                 "female",
                 "hermaphrodite",
+                "female; male",
                 "unspecified",
             ],
             "human_donors_ethnicity_term_id": [
@@ -483,9 +489,11 @@ def test_biohub_sex_ontology_term_id_mapping():
                 "HANCESTRO:0005",
                 "HANCESTRO:0005",
                 "HANCESTRO:0005",
+                "HANCESTRO:0005",
                 "HANCESTRO:0008",
             ],
             "human_donors_taxa": [
+                "Homo sapiens",
                 "Homo sapiens",
                 "Homo sapiens",
                 "Homo sapiens",
@@ -502,6 +510,7 @@ def test_biohub_sex_ontology_term_id_mapping():
         "tissue",
         "tissue",
         "tissue",
+        "tissue",
         "cell line",
     ]
     assert list(biohub_df["sex_ontology_term_id"]) == [
@@ -509,6 +518,7 @@ def test_biohub_sex_ontology_term_id_mapping():
         "unknown",
         "PATO:0000383",
         "PATO:0001340",
+        "unknown",
         "na",
     ]
 
