@@ -754,6 +754,35 @@ def test_multiplexed_biohub_uses_sample_alias_for_sample_name():
     assert by_name.loc["S1; S2", "sample_probe_barcode"] == "BC003; BC004"
 
 
+def test_multiplexed_biohub_broadcasts_main_only_author_metadata():
+    """A MAIN-only author-metadata column is copied; a sample column is not replaced."""
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "raw_matrix_files_is_multiplexed": [True, True],
+            "raw_file_samples": ["H1; H2", "H1; H2"],
+            "human_donors_taxa": ["Mus musculus", "Mus musculus"],
+            "droplet_based_libraries_author_metadata_batch": ["JSS1", "JSS1"],
+            "tissues_author_metadata_note": ["note-a; note-b", "note-a; note-b"],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "sample_alias": ["H1", "H2"],
+            "human_donors_taxa": ["Mus musculus", "Mus musculus"],
+            "tissues_author_metadata_note": ["note-a", "note-b"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, sample_df))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert list(by_name.loc[["H1", "H2"], "batch"]) == ["JSS1", "JSS1"]
+    assert list(by_name.loc[["H1", "H2"], "note"]) == ["note-a", "note-b"]
+
+
 # --- _combine_sample_values ---
 
 

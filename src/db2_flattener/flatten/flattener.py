@@ -1605,6 +1605,9 @@ class DB2Flattener:
 
         # Library and file-set fields are not on the per-sample frame. Collapse
         # to one value per file first so two libraries do not repeat each sample.
+        # Author-metadata columns use the same selection as create_biohub_dataframe.
+        # A column already on the sample rows is left there, so per-sample values
+        # are not replaced by the rolled-up MAIN copy.
         extras = [
             column
             for column in PROP_MAP_BIOHUB
@@ -1612,6 +1615,13 @@ class DB2Flattener:
             and column in main_df.columns
             and column not in exploded.columns
         ]
+        extras.extend(
+            column
+            for column in main_df.columns
+            if re.search("_author_metadata_", column)
+            and column not in exploded.columns
+            and column not in extras
+        )
         if extras:
             file_level = main_df.loc[
                 main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),
