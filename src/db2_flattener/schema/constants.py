@@ -184,7 +184,6 @@ SEX_ONTOLOGY_MAP = {
     "hermaphrodite": "PATO:0001340",
     "unspecified": "unknown",
     "mixed": "unknown",
-    "female; male": "unknown",
 }
 
 TISSUE_TYPE_MAP = {

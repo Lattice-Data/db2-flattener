@@ -1628,8 +1628,8 @@ class DB2Flattener:
 
         # Update values to match schema
         if "sex_ontology_term_id" in biohub_df.columns:
-            biohub_df["sex_ontology_term_id"] = biohub_df["sex_ontology_term_id"].replace(
-                SEX_ONTOLOGY_MAP
+            biohub_df["sex_ontology_term_id"] = biohub_df["sex_ontology_term_id"].apply(
+                self._map_sex_ontology_term_id
             )
         if "tissue_type" in biohub_df.columns:
             biohub_df["tissue_type"] = biohub_df["tissue_type"].apply(
@@ -1657,6 +1657,21 @@ class DB2Flattener:
             biohub_df = join_sequence_column(biohub_df, field)
 
         return biohub_df
+
+    @staticmethod
+    def _map_sex_ontology_term_id(value):
+        """Map donor sex to a BIOHUB ontology term id; multi-value cells become unknown."""
+        if is_empty(value):
+            return value
+        if isinstance(value, (list, tuple, set)):
+            parts = [str(item).strip() for item in value if not is_empty(item)]
+        else:
+            parts = [part.strip() for part in str(value).split("; ") if part.strip()]
+        if len(parts) > 1:
+            return "unknown"
+        if len(parts) == 1:
+            return SEX_ONTOLOGY_MAP.get(parts[0], parts[0])
+        return value
 
     def _flatten_resolved_references(
         self, sample_obj, lib_data, sample_metadata, sample_alias, resolved_controlled_terms
