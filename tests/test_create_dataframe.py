@@ -3,6 +3,7 @@ import pytest
 
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.schema.constants import Configs
+from db2_flattener.utils import split_controlled_term_columns
 
 MIN_CONFIGS = Configs(
     FIELD_TYPES={},
@@ -644,6 +645,113 @@ def test_single_sample_file_passes_its_values_through_unchanged():
     assert len(sample_df) == 1
     assert main_df.loc[0, "tissues_selection_kits"] == ["EasySep A"]
     assert main_df.loc[0, "tissues_suspension_type"] == "cell"
+
+
+def test_multiplexed_biohub_uses_sample_alias_for_sample_name():
+    """Multiplexed files are one Biohub row per sample; other files stay on main."""
+    f = DB2Flattener.__new__(DB2Flattener)
+    f.connection = None
+    f.configs = Configs(
+        FIELD_TYPES={},
+        OBJECT_CONFIG={
+            "droplet_based_libraries": {
+                "api_type": "DropletBasedLibrary",
+                "fields": [
+                    "@id",
+                    "feature_types",
+                    "aliases",
+                    "library_construction_technology",
+                ],
+                "references": {},
+            },
+            "tissues": {
+                "api_type": "Tissue",
+                "fields": ["@id", "aliases", "suspension_type", "multiplexing_barcodes"],
+                "references": {},
+            },
+            "sequence_file_sets": {
+                "api_type": "SequenceFileSet",
+                "fields": ["is_pilot_order"],
+                "references": {},
+            },
+        },
+    )
+
+    def tissue(sample_id, alias, suspension_type, barcode):
+        return {
+            "@id": sample_id,
+            "@type": ["Tissue"],
+            "aliases": [alias],
+            "suspension_type": suspension_type,
+            "multiplexing_barcodes": barcode,
+        }
+
+    def assay_lib(lib_id, assay_name):
+        lib = _lib(lib_id, ["Gene Expression"])
+        lib["library_construction_technology"] = {"term_id": "EFO:1", "term_name": assay_name}
+        return lib
+
+    pooled = [
+        tissue("/tissues/s1/", "lab:H1", "cell", "BC001"),
+        tissue("/tissues/s2/", "lab:H2", "nucleus", "BC002"),
+    ]
+    pooled_file = {
+        "@id": "/raw_matrix_files/r1/",
+        "aliases": ["lab:rmf1"],
+        "samples": [sample["@id"] for sample in pooled],
+        "is_multiplexed": True,
+        "sequence_file_sets": [{"is_pilot_order": True}],
+    }
+    separate = [
+        tissue("/tissues/s3/", "lab:S1", "cell", "BC003"),
+        tissue("/tissues/s4/", "lab:S2", "nucleus", "BC004"),
+    ]
+    separate_file = {
+        "@id": "/raw_matrix_files/r2/",
+        "aliases": ["lab:rmf2"],
+        "samples": [sample["@id"] for sample in separate],
+        "is_multiplexed": False,
+        "sequence_file_sets": [{"is_pilot_order": False}],
+    }
+
+    main_df, sample_df = f.create_dataframe(
+        _complete_data(
+            [
+                (assay_lib("/droplet_based_libraries/a/", "assay-b"), [pooled_file], pooled),
+                (assay_lib("/droplet_based_libraries/b/", "assay-a"), [pooled_file], pooled),
+                (assay_lib("/droplet_based_libraries/c/", "assay-c"), [separate_file], separate),
+            ]
+        )
+    )
+    # create_biohub_dataframe reads organism; this fixture has no donors.
+    main_df["human_donors_taxa"] = "Mus musculus"
+    sample_df["human_donors_taxa"] = "Mus musculus"
+    main_df = split_controlled_term_columns(main_df)
+    sample_df = split_controlled_term_columns(sample_df)
+
+    biohub_samples = sample_df.copy()
+    samples_sheet = f.create_samples_dataframe(sample_df)
+    pd.testing.assert_frame_equal(sample_df, biohub_samples)
+    pooled_samples = samples_sheet.loc[
+        samples_sheet["processed data file"] == "rmf1", "pre_pooled_sample"
+    ]
+    assert list(pooled_samples) == ["H1", "H2"]
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, biohub_samples))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert set(by_name.index) == {"H1", "H2", "S1; S2"}
+    assert by_name.loc["H1", "suspension_type"] == "cell"
+    assert by_name.loc["H2", "suspension_type"] == "nucleus"
+    assert by_name.loc["H1", "sample_probe_barcode"] == "BC001"
+    assert by_name.loc["H2", "sample_probe_barcode"] == "BC002"
+    assert by_name.loc["H1", "assay"] == "assay-a; assay-b"
+    assert by_name.loc["H2", "assay"] == "assay-a; assay-b"
+    assert by_name.loc["H1", "is_pilot_data"] == "True"
+    assert by_name.loc["H2", "is_pilot_data"] == "True"
+    assert by_name.loc["S1; S2", "suspension_type"] == "cell; nucleus"
+    assert by_name.loc["S1; S2", "assay"] == "assay-c"
+    assert by_name.loc["S1; S2", "sample_probe_barcode"] == "BC003; BC004"
 
 
 # --- _combine_sample_values ---

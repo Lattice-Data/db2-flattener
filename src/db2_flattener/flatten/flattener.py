@@ -107,10 +107,14 @@ class DB2Flattener:
         if sample_df is not None:
             sample_df = sample_df.dropna(axis=1, how="all")
 
-        # Split dict columns into _term_id / _term_name before writing CSV
+        # Split dict columns into _term_id / _term_name before writing CSV.
+        # Biohub takes its own copy of the per-sample frame here, before
+        # create_samples_dataframe pares that frame down for the SAMPLES sheet.
         main_df = split_controlled_term_columns(main_df)
+        biohub_samples = None
         if sample_df is not None and not sample_df.empty:
             sample_df = split_controlled_term_columns(sample_df)
+            biohub_samples = sample_df.copy()
             sample_df = self.create_samples_dataframe(sample_df)
 
         # Save main DataFrame to CSV
@@ -121,8 +125,11 @@ class DB2Flattener:
         print(f"   Rows: {len(main_df)}")
         print(f"   Columns: {len(main_df.columns)}")
 
-        # Create Biohub DataFrame from main and sample df
-        biohub_df = self.create_biohub_dataframe(main_df)
+        # Multiplexed files contribute one Biohub row per sample. Other files
+        # still contribute their main_df rows.
+        biohub_df = self.create_biohub_dataframe(
+            self.biohub_source_dataframe(main_df, biohub_samples)
+        )
         print(f"Saving biohub DataFrame to {biohub_output}...")
         biohub_df.to_csv(biohub_output, index=False)
         print(f"✅ Biohub CSV file created: {biohub_output}")
@@ -1559,12 +1566,78 @@ class DB2Flattener:
                 unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
         return list(unique.values())
 
+    def biohub_source_dataframe(self, main_df, sample_df):
+        """
+        Rows create_biohub_dataframe should read.
+
+        Files with raw_matrix_files_is_multiplexed true contribute the per-sample
+        frame (one row per sample, sample_name from the cleaned sample_alias).
+        Every other file contributes its main_df rows, where sample_name still
+        comes from raw_file_samples. A flagged file with no sample rows stays
+        on main_df.
+        """
+        if (
+            sample_df is None
+            or sample_df.empty
+            or "raw_matrix_file_alias" not in main_df.columns
+            or "raw_matrix_file_alias" not in sample_df.columns
+            or "raw_matrix_files_is_multiplexed" not in main_df.columns
+        ):
+            return main_df
+
+        multiplexed = set(
+            main_df.loc[
+                main_df["raw_matrix_files_is_multiplexed"].eq(True),
+                "raw_matrix_file_alias",
+            ].dropna()
+        )
+        if not multiplexed:
+            return main_df
+
+        exploded = sample_df.loc[sample_df["raw_matrix_file_alias"].isin(multiplexed)].copy()
+        if exploded.empty:
+            return main_df
+
+        if "sample_alias" in exploded.columns:
+            exploded["sample_name"] = exploded["sample_alias"]
+        if "raw_file_samples" in exploded.columns:
+            exploded = exploded.drop(columns=["raw_file_samples"])
+
+        # Library and file-set fields are not on the per-sample frame. Collapse
+        # to one value per file first so two libraries do not repeat each sample.
+        extras = [
+            column
+            for column in PROP_MAP_BIOHUB
+            if column != "raw_file_samples"
+            and column in main_df.columns
+            and column not in exploded.columns
+        ]
+        if extras:
+            file_level = main_df.loc[
+                main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),
+                ["raw_matrix_file_alias", *extras],
+            ]
+            file_level = file_level.groupby("raw_matrix_file_alias", as_index=False).agg(
+                {column: self._combine_sample_values for column in extras}
+            )
+            exploded = exploded.merge(file_level, on="raw_matrix_file_alias", how="left")
+
+        plain = main_df.loc[
+            ~main_df["raw_matrix_file_alias"].isin(set(exploded["raw_matrix_file_alias"]))
+        ]
+        return pd.concat([plain, exploded], ignore_index=True)
+
     def create_biohub_dataframe(self, main_df) -> pd.DataFrame:
         """
         Build Biohub samples dataframe from main_df
         """
         columns_to_keep = [k for k in PROP_MAP_BIOHUB if k in main_df.columns]
         columns_to_keep.extend([k for k in main_df.columns if re.search("_author_metadata_", k)])
+        # Multiplexed rows already carry sample_name from sample_alias. Keeping
+        # it here lets collapse_duplicate_columns coalesce it with the
+        # raw_file_samples rename used by every other row.
+        if "sample_name" in main_df.columns and "sample_name" not in columns_to_keep:
+            columns_to_keep.append("sample_name")
         biohub_df = main_df[columns_to_keep].copy()
         biohub_df.rename(columns=PROP_MAP_BIOHUB, inplace=True)
         biohub_df = strip_author_metadata_column_prefix(biohub_df)
