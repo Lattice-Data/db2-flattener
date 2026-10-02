@@ -49,11 +49,22 @@ def _lib(lib_id, feature_types, cro="RSJS_fast_1", alias=None):
     }
 
 
-def _rmf(rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1", sample_id="/tissues/s1/"):
+def _rmf(rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1", sample_id="/tissues/s1/", **file_fields):
+    allowed = {
+        "is_multiplexed",
+        "file_format",
+        "file_size",
+        "software",
+        "software_version",
+    }
+    unknown = set(file_fields) - allowed
+    if unknown:
+        raise TypeError(f"unexpected raw matrix file fields: {sorted(unknown)}")
     return {
         "@id": rmf_id,
         "aliases": [alias],
         "samples": [sample_id],
+        **file_fields,
     }
 
 
@@ -306,6 +317,101 @@ def test_create_dataframe_keeps_is_pilot_order_false():
     )
 
     assert main_df.iloc[0]["sequence_file_sets_is_pilot_order"] == "False"
+
+
+RAW_MATRIX_FILE_COLUMNS = (
+    "raw_matrix_files_is_multiplexed",
+    "raw_matrix_files_file_format",
+    "raw_matrix_files_file_size",
+    "raw_matrix_files_software",
+    "raw_matrix_files_software_version",
+)
+
+
+def test_create_dataframe_copies_raw_matrix_file_fields():
+    """File-level fields stay typed: boolean False and integer file_size are not stringified."""
+    f = make_flattener()
+    sample = _tissue()
+    present = _rmf(
+        is_multiplexed=False,
+        file_format="hdf5",
+        file_size=4096,
+        software="cellranger",
+        software_version="7.1.0",
+    )
+    also_true = _rmf(
+        rmf_id="/raw_matrix_files/r2/",
+        alias="lab:rmf2",
+        is_multiplexed=True,
+        file_format="mtx",
+        file_size=8,
+        software="kallisto",
+        software_version="0.48.0",
+    )
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [present], [sample]),
+                (gex, [also_true], [sample]),
+            ]
+        )
+    )
+
+    by_alias = main_df.set_index("raw_matrix_file_alias")
+    false_row = by_alias.loc["rmf1"]
+    # Truthiness, not `is`: pandas may store these as numpy scalars. The string
+    # "False" from _join_unique() would be truthy, so this still catches that.
+    assert not false_row["raw_matrix_files_is_multiplexed"]
+    assert not isinstance(false_row["raw_matrix_files_is_multiplexed"], str)
+    assert false_row["raw_matrix_files_file_format"] == "hdf5"
+    assert false_row["raw_matrix_files_file_size"] == 4096
+    assert not isinstance(false_row["raw_matrix_files_file_size"], (str, float))
+    assert false_row["raw_matrix_files_software"] == "cellranger"
+    assert false_row["raw_matrix_files_software_version"] == "7.1.0"
+    assert by_alias.loc["rmf2", "raw_matrix_files_is_multiplexed"]
+
+
+def test_create_dataframe_nulls_omitted_raw_matrix_file_fields():
+    f = make_flattener()
+    sample = _tissue()
+    omitted = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [omitted], [sample])]))
+
+    for column in RAW_MATRIX_FILE_COLUMNS:
+        assert pd.isna(main_df.iloc[0][column])
+
+
+def test_create_dataframe_shares_raw_matrix_file_fields_across_libraries():
+    f = make_flattener()
+    sample = _tissue()
+    rmf = _rmf(
+        is_multiplexed=True,
+        file_format="hdf5",
+        file_size=4096,
+        software="cellranger",
+        software_version="7.1.0",
+    )
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+    cri = _lib("/droplet_based_libraries/cri/", ["CRISPR Guide Capture"], alias="lab:cri")
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [rmf], [sample]),
+                (cri, [rmf], [sample]),
+            ]
+        )
+    )
+
+    assert len(main_df) == 2
+    for column in RAW_MATRIX_FILE_COLUMNS:
+        assert set(main_df[column]) == {main_df.iloc[0][column]}
+    assert main_df.iloc[0]["raw_matrix_files_is_multiplexed"]
+    assert main_df.iloc[0]["raw_matrix_files_file_size"] == 4096
 
 
 def test_biohub_tissue_type_from_tissues_cell_lines_or_both():

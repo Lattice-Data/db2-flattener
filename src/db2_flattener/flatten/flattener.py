@@ -246,8 +246,7 @@ class DB2Flattener:
             library_entries = file_data["library_entries"]
             samples = file_data["all_samples"]
 
-            # For raw_matrix_file_alias and raw_file_samples, it doesn't matter which raw file copy we use
-            # As they will all have the same value
+            # File-level fields are the same on every library copy of this raw file.
             representative_raw_file = library_entries[0]["raw_file"]
             sample_aliases = []
             for sample_ref in representative_raw_file.get("samples", []):
@@ -259,6 +258,15 @@ class DB2Flattener:
                 "raw_matrix_file_alias": self._get_clean_alias(representative_raw_file),
                 "raw_file_samples": self._join_unique(sample_aliases),
             }
+            # Direct copies, not _join_unique(): that stringifies booleans and integers.
+            for field in (
+                "is_multiplexed",
+                "file_format",
+                "file_size",
+                "software",
+                "software_version",
+            ):
+                shared[f"raw_matrix_files_{field}"] = representative_raw_file.get(field)
 
             # Recorded here, where the aliases are still separate values, rather
             # than by splitting raw_file_samples back apart on '; ' afterwards
