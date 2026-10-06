@@ -583,6 +583,61 @@ def test_biohub_preservation_method_defaults_to_unknown():
     assert list(biohub_df_missing["preservation_method"]) == ["unknown", "unknown", "unknown"]
 
 
+def test_biohub_disease_ontology_term_id_defaults_to_pato():
+    f = make_flattener()
+    base = {
+        "tissues_@type": [
+            ["Tissue", "Biosample", "Item"],
+            ["Tissue", "Biosample", "Item"],
+            ["Tissue", "Biosample", "Item"],
+        ],
+        "tissues_sample_terms_term_id": [
+            "UBERON:0002048",
+            "UBERON:0002048",
+            "UBERON:0002048",
+        ],
+        "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
+        "human_donors_sex": ["female", "female", "female"],
+        "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606", "NCBITaxon:9606"],
+    }
+
+    biohub_absent = f.create_biohub_dataframe(pd.DataFrame(base))
+    assert list(biohub_absent["disease_ontology_term_id"]) == [
+        "PATO:0000461",
+        "PATO:0000461",
+        "PATO:0000461",
+    ]
+
+    main_df = pd.DataFrame(
+        {
+            **base,
+            "tissues_diseases_term_id": ["MONDO:0005148", None, ""],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["disease_ontology_term_id"]) == [
+        "MONDO:0005148",
+        "PATO:0000461",
+        "PATO:0000461",
+    ]
+
+
+def test_biohub_disease_ontology_term_id_sorts_and_joins_multiple():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [["Tissue", "Biosample", "Item"]],
+            "tissues_sample_terms_term_id": ["UBERON:0002048"],
+            "tissues_diseases_term_id": [["MONDO:0005148", "MONDO:0004992"]],
+            "human_donors_cxg_donor_id": ["donor1"],
+            "human_donors_sex": ["female"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["disease_ontology_term_id"]) == ["MONDO:0004992 || MONDO:0005148"]
+
+
 def test_biohub_experimental_condition_ontology_term_id_defaults():
     f = make_flattener()
     base = {
