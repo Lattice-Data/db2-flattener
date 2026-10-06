@@ -338,7 +338,11 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
                 "HANCESTRO:0008",
                 "HANCESTRO:0005",
             ],
-            "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+            "human_donors_taxa_term_id": [
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+            ],
         }
     )
 
@@ -361,6 +365,11 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
         "HANCESTRO:0005",
         "na",
         "HANCESTRO:0005",
+    ]
+    assert list(biohub_df["organism_ontology_term_id"]) == [
+        "NCBITaxon:9606",
+        "NCBITaxon:9606",
+        "NCBITaxon:9606",
     ]
     assert list(biohub_df["sample_probe_barcode"]) == ["BC001", "BC005", "BC003"]
     assert list(biohub_df["suspension_type"]) == ["cell", "cell", "cell"]
@@ -403,12 +412,12 @@ def test_biohub_empty_development_stage_defaults_to_unknown():
                 "HANCESTRO:0005",
                 "HANCESTRO:0008",
             ],
-            "human_donors_taxa": [
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
+            "human_donors_taxa_term_id": [
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
             ],
         }
     )
@@ -507,14 +516,14 @@ def test_biohub_sex_ontology_term_id_mapping():
                 "HANCESTRO:0005",
                 "HANCESTRO:0008",
             ],
-            "human_donors_taxa": [
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
-                "Homo sapiens",
+            "human_donors_taxa_term_id": [
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
             ],
         }
     )
@@ -558,7 +567,11 @@ def test_biohub_preservation_method_defaults_to_unknown():
             "tissues_preservation_method": ["fresh", None, ""],
             "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
             "human_donors_sex": ["female", "female", "female"],
-            "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+            "human_donors_taxa_term_id": [
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+                "NCBITaxon:9606",
+            ],
         }
     )
 
@@ -585,7 +598,7 @@ def test_biohub_experimental_condition_ontology_term_id_defaults():
         ],
         "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
         "human_donors_sex": ["female", "female", "female"],
-        "human_donors_taxa": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+        "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606", "NCBITaxon:9606"],
     }
 
     biohub_absent = f.create_biohub_dataframe(pd.DataFrame(base))
@@ -603,3 +616,26 @@ def test_biohub_experimental_condition_ontology_term_id_defaults():
         "na",
         "na",
     ]
+
+
+def test_biohub_organism_ontology_term_id_from_donor_taxa():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [
+                ["Tissue", "Biosample", "Item"],
+                ["Tissue", "Biosample", "Item"],
+            ],
+            "tissues_sample_terms_term_id": ["UBERON:0002048", "UBERON:0002107"],
+            "human_donors_cxg_donor_id": ["donor1", None],
+            "non_human_donors_cxg_donor_id": [None, "donor2"],
+            "human_donors_sex": ["female", None],
+            "non_human_donors_sex": [None, "male"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", None],
+            "non_human_donors_taxa_term_id": [None, "NCBITaxon:10090"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["organism_ontology_term_id"]) == ["NCBITaxon:9606", "NCBITaxon:10090"]
+    assert list(biohub_df["self_reported_ethnicity_ontology_term_id"]) == ["unknown", "na"]

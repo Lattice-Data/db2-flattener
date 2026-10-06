@@ -1576,17 +1576,17 @@ class DB2Flattener:
 
         if "self_reported_ethnicity_ontology_term_id" not in biohub_df.columns:
             biohub_df["self_reported_ethnicity_ontology_term_id"] = np.where(
-                biohub_df["organism"] == "Homo sapiens", "unknown", "na"
+                biohub_df["organism_ontology_term_id"] == "NCBITaxon:9606", "unknown", "na"
             )
         else:
             biohub_df.loc[
                 biohub_df["self_reported_ethnicity_ontology_term_id"].isna()
-                & (biohub_df["organism"] == "Homo sapiens"),
+                & (biohub_df["organism_ontology_term_id"] == "NCBITaxon:9606"),
                 "self_reported_ethnicity_ontology_term_id",
             ] = "unknown"
             biohub_df.loc[
                 biohub_df["self_reported_ethnicity_ontology_term_id"].isna()
-                & (biohub_df["organism"] != "Homo sapiens"),
+                & (biohub_df["organism_ontology_term_id"] != "NCBITaxon:9606"),
                 "self_reported_ethnicity_ontology_term_id",
             ] = "na"
 

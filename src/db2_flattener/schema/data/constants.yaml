@@ -1061,7 +1061,7 @@ https://api.data.lattice-data.org/:
         submits_for: labs
   object_config_sha256: 984ad7e33d01e5a463d2bbba03aa6e556af42011c7bc3afe4728fe1bfb5d8cd9
 https://lattice-api-dev.demo.lattice-data.org/:
-  date_parsed: '2026-09-10'
+  date_parsed: '2026-10-05'
   field_types:
     '@id':
       type: string
@@ -1583,6 +1583,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       references:
         ethnicity: controlled_terms
         lab: labs
+        taxa: controlled_terms
     images:
       api_type: Image
       fields:
@@ -1661,6 +1662,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - uuid
       references:
         lab: labs
+        taxa: controlled_terms
     organoids:
       api_type: Organoid
       fields:
@@ -2121,4 +2123,4 @@ https://lattice-api-dev.demo.lattice-data.org/:
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: 984ad7e33d01e5a463d2bbba03aa6e556af42011c7bc3afe4728fe1bfb5d8cd9
+  object_config_sha256: d86c1915214035829ef49949670d8efb98f27f19fe0b1e9edcff5c5bf4328ffe
