@@ -617,6 +617,38 @@ def test_biohub_experimental_condition_ontology_term_id_defaults():
         "na",
     ]
 
+    controlled_only = pd.DataFrame(
+        {
+            **base,
+            "experimental_conditions_controlled_term_term_id": ["EFO:0000002", None, ""],
+        }
+    )
+    biohub_controlled = f.create_biohub_dataframe(controlled_only)
+    assert list(biohub_controlled["experimental_condition_ontology_term_id"]) == [
+        "EFO:0000002",
+        "na",
+        "na",
+    ]
+
+
+def test_biohub_experimental_condition_ontology_term_id_merges_and_sorts_sources():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [["Tissue", "Biosample", "Item"]],
+            "tissues_sample_terms_term_id": ["UBERON:0002048"],
+            "human_donors_cxg_donor_id": ["donor1"],
+            "human_donors_sex": ["female"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+            "treatments_ontological_term_term_id": ["EFO:0000002"],
+            "experimental_conditions_controlled_term_term_id": ["EFO:0000001"],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["experimental_condition_ontology_term_id"]) == [
+        "EFO:0000001 || EFO:0000002"
+    ]
+
 
 def test_biohub_organism_ontology_term_id_from_donor_taxa():
     f = make_flattener()

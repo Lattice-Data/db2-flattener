@@ -12,7 +12,7 @@ from db2_flattener.schema.constants import (
     GEO_EXPERIMENTAL_CONDITION_COLS,
     GEO_FLEX_LIBRARY_PROTOCOLS,
     GEO_INSTRUMENT_MODEL_MAP,
-    GEO_LIBRARY_CARDINALITY_MAP,
+    GEO_RUN_CARDINALITY_MAP,
     GEO_LIBRARY_STRATEGY_FEATURE_COL,
     GEO_LIBRARY_STRATEGY_MAP,
     GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
@@ -515,9 +515,9 @@ class DB2Flattener:
             if col in geo_df.columns:
                 geo_df[col] = geo_df[col].map(self._sort_geo_list)
         geo_df = self._add_geo_title(geo_df)
-        col = "single or paired-end"
+        col = "*single or paired-end"
         if col in geo_df.columns:
-            geo_df[col] = geo_df[col].replace(GEO_LIBRARY_CARDINALITY_MAP)
+            geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
         col = "*instrument model"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_INSTRUMENT_MODEL_MAP)

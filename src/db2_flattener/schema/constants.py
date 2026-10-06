@@ -73,15 +73,15 @@ PROP_MAP_GEO = {
     "cell_lines_sample_terms_term_name": "**cell_line",
     "droplet_based_libraries_CRO_group_identifier": "*library name",
     "droplet_based_libraries_dbxrefs": "*SRA Experiment or Run",
-    "droplet_based_libraries_library_cardinality": "single or paired-end",
+    "sequence_file_sets_run_cardinality": "*single or paired-end",
     "droplet_based_libraries_library_construction_technology_term_name": "library_protocol",
     "genetic_modifications_strategy": "genetic_modifications_strategy",
     "human_donors_cxg_donor_id": "donor_ids",
     "human_donors_sex": "donor_sex",
-    "human_donors_taxa": "*organism",
+    "human_donors_taxa_term_name": "*organism",
     "non_human_donors_cxg_donor_id": "donor_ids",
     "non_human_donors_sex": "donor_sex",
-    "non_human_donors_taxa": "*organism",
+    "non_human_donors_taxa_term_name": "*organism",
     "organoids_sample_terms_term_name": "**tissue",
     "primary_cell_cultures_enriched_cell_types_term_name": "**cell type",
     "raw_file_samples": "samples",
@@ -125,8 +125,7 @@ PROP_MAP_BIOHUB = {
     "tissues_preservation_method": "preservation_method",
     "cell_lines_preservation_method": "preservation_method",
     "treatments_ontological_term_term_id": "experimental_condition_ontology_term_id",
-    "treatments_ontological_term_term_name": "experimental_condition",
-    "experimental_conditions_condition": "experimental_condition",
+    "experimental_conditions_controlled_term_term_id": "experimental_condition_ontology_term_id",
     "experimental_conditions_text_value": "experimental_perturbation",
     "experimental_conditions_upper_bound_duration": "experimental_conditions_upper_bound_duration",
     "experimental_conditions_lower_bound_duration": "experimental_conditions_lower_bound_duration",
@@ -142,8 +141,8 @@ PROP_MAP_SAMPLES = {
     "non_human_donors_cxg_donor_id": "donor_id",
     "human_donors_sex": "donor_sex",
     "non_human_donors_sex": "donor_sex",
-    "human_donors_taxa": "organism",
-    "non_human_donors_taxa": "organism",
+    "human_donors_taxa_term_name": "organism",
+    "non_human_donors_taxa_term_name": "organism",
     "cell_lines_intended_cell_types_term_name": "**cell type",
     "cell_lines_sample_terms_term_name": "**cell_line",
     "tissues_sample_terms_term_name": "tissue",
@@ -168,8 +167,8 @@ PROP_MAP_SAMPLES = {
 PROP_MAP_SRA_BIOSAMPLE = {
     "droplet_based_libraries_CRO_group_identifier": "sample_name",
     "plate_based_libraries_CRO_group_identifier": "sample_name",
-    "non_human_donors_taxa": "*organism",
-    "human_donors_taxa": "*organism",
+    "non_human_donors_taxa_term_name": "*organism",
+    "human_donors_taxa_term_name": "*organism",
 }
 
 BIOHUB_SORT_ONTOLOGY_IDS = [
@@ -193,8 +192,12 @@ TISSUE_TYPE_MAP = {
     "Tissue": "tissue",
 }
 
-GEO_LIBRARY_CARDINALITY_MAP = {
-    "dual": "paired-end",
+GEO_RUN_CARDINALITY_MAP = {
+    "single-end": "single",
+    "paired-end": "paired-end",
+    "paired-end-with-index": "paired-end",
+    "paired-end-with-dual-index": "paired-end",
+    "triplet": "paired-end",
 }
 
 GEO_INSTRUMENT_MODEL_MAP = {
