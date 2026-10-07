@@ -26,8 +26,8 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["non_human_donors_cxg_donor_id"] == "donor_id"
     assert PROP_MAP_SAMPLES["human_donors_sex"] == "donor_sex"
     assert PROP_MAP_SAMPLES["non_human_donors_sex"] == "donor_sex"
-    assert PROP_MAP_SAMPLES["human_donors_taxa"] == "organism"
-    assert PROP_MAP_SAMPLES["non_human_donors_taxa"] == "organism"
+    assert PROP_MAP_SAMPLES["human_donors_taxa_term_name"] == "organism"
+    assert PROP_MAP_SAMPLES["non_human_donors_taxa_term_name"] == "organism"
     assert "human_donors_ethnicity_term_name" not in PROP_MAP_SAMPLES
     assert PROP_MAP_SAMPLES["cell_lines_intended_cell_types_term_name"] == "**cell type"
     assert PROP_MAP_SAMPLES["cell_lines_sample_terms_term_name"] == "**cell_line"
@@ -60,7 +60,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
             "sample_alias": ["s1"],
             "human_donors_cxg_donor_id": ["H1"],
             "human_donors_sex": ["female"],
-            "human_donors_taxa": ["Homo sapiens"],
+            "human_donors_taxa_term_name": ["Homo sapiens"],
             "human_donors_ethnicity_term_name": ["European"],
             "cell_lines_intended_cell_types_term_name": ["hepatocyte"],
             "cell_lines_sample_terms_term_name": ["HeLa"],
@@ -171,8 +171,8 @@ def test_create_samples_dataframe_coalesces_human_and_non_human_donors():
             "non_human_donors_cxg_donor_id": [None, "M1"],
             "human_donors_sex": ["female", None],
             "non_human_donors_sex": [None, "male"],
-            "human_donors_taxa": ["Homo sapiens", None],
-            "non_human_donors_taxa": [None, "Mus musculus"],
+            "human_donors_taxa_term_name": ["Homo sapiens", None],
+            "non_human_donors_taxa_term_name": [None, "Mus musculus"],
         }
     )
 
