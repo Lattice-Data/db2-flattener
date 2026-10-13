@@ -25,7 +25,7 @@ def gex_row(**overrides):
         "droplet_based_libraries_CRO_group_identifier": "libA",
         "droplet_based_libraries_feature_types": "Gene Expression",
         "droplet_based_libraries_library_construction_technology_term_name": "10x 3' v3",
-        "droplet_based_libraries_library_cardinality": "paired",
+        "sequence_file_sets_run_cardinality": "paired-end",
         "raw_matrix_file_alias": "libA.h5",
         "raw_file_samples": "sample1",
         "tissues_sample_terms_term_name": "liver",
@@ -33,10 +33,10 @@ def gex_row(**overrides):
         "tissues_developmental_stages_term_name": "adult",
         "human_donors_cxg_donor_id": None,
         "human_donors_sex": None,
-        "human_donors_taxa": None,
+        "human_donors_taxa_term_name": None,
         "non_human_donors_cxg_donor_id": None,
         "non_human_donors_sex": None,
-        "non_human_donors_taxa": None,
+        "non_human_donors_taxa_term_name": None,
     }
     row.update(overrides)
     return row
@@ -52,10 +52,11 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["non_human_donors_cxg_donor_id"] == "donor_ids"
     assert PROP_MAP_GEO["human_donors_sex"] == "donor_sex"
     assert PROP_MAP_GEO["non_human_donors_sex"] == "donor_sex"
-    assert PROP_MAP_GEO["human_donors_taxa"] == "*organism"
+    assert PROP_MAP_GEO["human_donors_taxa_term_name"] == "*organism"
     assert PROP_MAP_GEO["raw_file_samples"] == "samples"
     assert PROP_MAP_GEO["tissues_developmental_stages_term_name"] == "donor_dev_stage"
     assert PROP_MAP_GEO["sequence_file_sets_sequencing_platform"] == "*instrument model"
+    assert PROP_MAP_GEO["sequence_file_sets_run_cardinality"] == "*single or paired-end"
     assert PROP_MAP_GEO["genetic_modifications_strategy"] == "genetic_modifications_strategy"
     assert PROP_MAP_GEO["tissues_selection_kits"] == "selection_kits"
     assert PROP_MAP_GEO["tissues_selection_markers"] == "selection_markers"
@@ -74,7 +75,7 @@ def test_create_geo_dataframe_adds_new_columns():
             gex_row(
                 human_donors_cxg_donor_id="H1",
                 human_donors_sex="female",
-                human_donors_taxa="Homo sapiens",
+                human_donors_taxa_term_name="Homo sapiens",
                 sequence_file_sets_sequencing_platform="Illumina NovaSeq 6000",
             )
         ]
@@ -92,7 +93,7 @@ def test_create_geo_dataframe_adds_new_columns():
     assert list(geo_df["donor_dev_stage"]) == ["adult"]
     assert list(geo_df["**tissue"]) == ["liver"]
     assert list(geo_df["**cell type"]) == ["hepatocyte"]
-    assert list(geo_df["single or paired-end"]) == ["paired"]
+    assert list(geo_df["*single or paired-end"]) == ["paired-end"]
     assert list(geo_df["*instrument model"]) == ["Illumina NovaSeq 6000"]
     assert "selection_kits" not in geo_df.columns
     assert "selection_markers" not in geo_df.columns
@@ -201,16 +202,16 @@ def test_create_geo_dataframe_collapses_human_and_non_human_donors():
                 droplet_based_libraries_CRO_group_identifier="libMouse",
                 non_human_donors_cxg_donor_id="M1",
                 non_human_donors_sex="male",
-                non_human_donors_taxa="Mus musculus",
+                non_human_donors_taxa_term_name="Mus musculus",
             ),
             gex_row(
                 droplet_based_libraries_CRO_group_identifier="libBoth",
                 human_donors_cxg_donor_id="H1",
                 human_donors_sex="female",
-                human_donors_taxa="Homo sapiens",
+                human_donors_taxa_term_name="Homo sapiens",
                 non_human_donors_cxg_donor_id="M2",
                 non_human_donors_sex="male",
-                non_human_donors_taxa="Mus musculus",
+                non_human_donors_taxa_term_name="Mus musculus",
             ),
         ]
     )
@@ -282,15 +283,26 @@ def test_create_geo_dataframe_expands_raw_file_to_rightmost_columns():
     assert all(isinstance(v, str) for v in raw_values)
 
 
-def test_create_geo_dataframe_maps_dual_cardinality_to_paired_end():
+def test_create_geo_dataframe_maps_run_cardinality_single_end():
     flattener = make_flattener()
-    main_df = pd.DataFrame([gex_row(droplet_based_libraries_library_cardinality="dual")]).dropna(
+    main_df = pd.DataFrame([gex_row(sequence_file_sets_run_cardinality="single-end")]).dropna(
         axis=1, how="all"
     )
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["single or paired-end"]) == ["paired-end"]
+    assert list(geo_df["*single or paired-end"]) == ["single"]
+
+
+def test_create_geo_dataframe_maps_run_cardinality_paired_end_with_index():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(sequence_file_sets_run_cardinality="paired-end-with-index")]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*single or paired-end"]) == ["paired-end"]
 
 
 def test_create_geo_dataframe_maps_ultima_instrument_model():

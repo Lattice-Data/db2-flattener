@@ -45,7 +45,7 @@ STRATEGY_COLUMN = "genetic_perturbation_strategy"
 PRESERVATION_COLUMN = "preservation_method"
 # Read off the map so a rename there, e.g. dropping the SRA '*' required marker,
 # does not have to be chased through every assertion below.
-ORGANISM_COLUMN = PROP_MAP_SRA_BIOSAMPLE["human_donors_taxa"]
+ORGANISM_COLUMN = PROP_MAP_SRA_BIOSAMPLE["human_donors_taxa_term_name"]
 
 LAB = {"@id": "/labs/alex-marson/", "title": "Alex Marson, UCSF"}
 SOURCE = {"@id": "/sources/abcam/", "title": "Abcam"}
@@ -136,7 +136,7 @@ def droplet_main_df():
             "sample_alias": aliases,
             "droplet_based_libraries_CRO_group_identifier": ["TregR3_L13_L05"] * 4,
             "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
-            "human_donors_taxa": ["Homo sapiens"] * 4,
+            "human_donors_taxa_term_name": ["Homo sapiens"] * 4,
         }
     )
 
@@ -194,7 +194,7 @@ def test_paired_libraries_share_one_row_because_the_crispr_half_is_dropped(capsy
             "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2
             + [["CRISPR Guide Capture"]] * 2,
             "droplet_based_libraries_samples": [FOUR_SAMPLES] * 4,
-            "human_donors_taxa": ["Homo sapiens"] * 4,
+            "human_donors_taxa_term_name": ["Homo sapiens"] * 4,
         }
     )
 
@@ -214,7 +214,7 @@ def test_group_with_no_gex_library_is_dropped_entirely(capsys):
                 ["Gene Expression"],
                 ["CRISPR Guide Capture"],
             ],
-            "human_donors_taxa": ["Homo sapiens"] * 2,
+            "human_donors_taxa_term_name": ["Homo sapiens"] * 2,
         }
     )
 

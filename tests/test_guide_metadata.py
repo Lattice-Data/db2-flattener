@@ -81,14 +81,14 @@ def test_one_unique_file_subsets_columns(monkeypatch):
     )
     result = guide_df_from_data(flattener, data)
     assert list(result.columns) == [
-        "guide_id",
-        "guide_protospacer",
-        "guide_role",
-        "guide_PAM",
-        "guide_target_gene_id",
-        "guide_target_gene_name",
+        "id",
+        "protospacer_sequence",
+        "role",
+        "protospacer_adjacent_motif",
+        "intended_features_feature_id",
+        "intended_features_gene_name",
     ]
-    assert list(result["guide_id"]) == ["g1", "g2"]
+    assert list(result["id"]) == ["g1", "g2"]
     assert len(calls) == 1
 
 
@@ -154,7 +154,7 @@ def test_keeps_only_present_guide_columns(monkeypatch):
         {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
     )
     result = guide_df_from_data(flattener, data)
-    assert list(result.columns) == ["guide_id", "guide_role"]
+    assert list(result.columns) == ["id", "role"]
 
 
 @pytest.mark.parametrize(
