@@ -231,6 +231,8 @@ GEO_LIBRARY_STRATEGY_SOURCE_COLS = [
 GEO_LIBRARY_STRATEGY_MAP = {
     ("Gene Expression", "nucleus"): "snRNA-seq",
     ("Gene Expression", "cell"): "scRNA-seq",
+    ("Gene Expression", "cell; nucleus"): "RNA-Seq",
+    ("Gene Expression", "nucleus; cell"): "RNA-Seq",
     ("ATAC", None): "scATAC-seq",
 }
 
