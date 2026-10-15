@@ -259,6 +259,14 @@ def test_create_geo_dataframe_pools_mixed_donor_sex():
                 droplet_based_libraries_CRO_group_identifier="libJoined",
                 human_donors_sex="female; male",
             ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libJoinedPlusMale",
+                human_donors_sex="female; male",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libJoinedPlusMale",
+                human_donors_sex="male",
+            ),
         ]
     )
 
@@ -268,6 +276,7 @@ def test_create_geo_dataframe_pools_mixed_donor_sex():
     assert geo_df.loc["libSameLib"]["donor_sex"] == "pooled male and female"
     assert geo_df.loc["libExtra"]["donor_sex"] == ["female", "unknown"]
     assert geo_df.loc["libJoined"]["donor_sex"] == "pooled male and female"
+    assert geo_df.loc["libJoinedPlusMale"]["donor_sex"] == "pooled male and female"
 
 
 def test_create_geo_dataframe_expands_raw_file_to_rightmost_columns():
@@ -554,6 +563,35 @@ def test_create_geo_dataframe_library_strategy_mixed_suspension_is_rna_seq():
     assert geo_df.loc["libCellNucleus"]["*library strategy"] == "RNA-Seq"
     assert geo_df.loc["libNucleusCell"]["*library strategy"] == "RNA-Seq"
     _assert_no_library_strategy_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_library_strategy_pools_cell_and_nucleus_rows():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libCellThenNucleus",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libCellThenNucleus",
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libNucleusThenCell",
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libNucleusThenCell",
+                tissues_suspension_type="cell",
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["libCellThenNucleus"]["*library strategy"] == "RNA-Seq"
+    assert geo_df.loc["libNucleusThenCell"]["*library strategy"] == "RNA-Seq"
 
 
 def test_create_geo_dataframe_library_strategy_collapses_suspension_sources():

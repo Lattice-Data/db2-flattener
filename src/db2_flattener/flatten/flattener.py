@@ -539,6 +539,9 @@ class DB2Flattener:
         for col in ("treatment", "_title_treatment"):
             if col in geo_df.columns:
                 geo_df[col] = geo_df[col].map(self._sort_geo_list)
+        col = "*library strategy"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._pool_mixed_geo_strategy)
         geo_df = self._add_geo_title(geo_df)
         col = "*single or paired-end"
         if col in geo_df.columns:
@@ -592,10 +595,24 @@ class DB2Flattener:
         return "; ".join(mapped)
 
     @staticmethod
+    def _pool_mixed_geo_strategy(val):
+        """Rewrite a list of scRNA-seq and snRNA-seq (either order) to RNA-Seq."""
+        if isinstance(val, (list, tuple)):
+            strategies = {str(item).strip() for item in val if not is_empty(item)}
+            if strategies == {"scRNA-seq", "snRNA-seq"}:
+                return "RNA-Seq"
+        return val
+
+    @staticmethod
     def _pool_mixed_geo_sex(val):
         """Rewrite male and female, as a list or a '; '-joined string, to a pooled label."""
         if isinstance(val, (list, tuple)):
-            parts = [str(item) for item in val if not is_empty(item)]
+            parts = [
+                part
+                for item in val
+                if not is_empty(item)
+                for part in str(item).split("; ")
+            ]
         elif isinstance(val, str):
             parts = val.split("; ")
         else:
