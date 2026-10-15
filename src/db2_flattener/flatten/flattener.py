@@ -532,13 +532,16 @@ class DB2Flattener:
             geo_df["donor_ethnicity"] = geo_df["*library name"].map(ethnicity)
         col = "genetic_modifications_strategy"
         if col in geo_df.columns:
-            geo_df[col] = geo_df[col].replace(GENETIC_PERTURBATION_MAP)
+            geo_df[col] = geo_df[col].map(self._map_geo_genetic_strategy)
         col = "donor_sex"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_sex)
         for col in ("treatment", "_title_treatment"):
             if col in geo_df.columns:
                 geo_df[col] = geo_df[col].map(self._sort_geo_list)
+        col = "*library strategy"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._pool_mixed_geo_strategy)
         geo_df = self._add_geo_title(geo_df)
         col = "*single or paired-end"
         if col in geo_df.columns:
@@ -581,12 +584,42 @@ class DB2Flattener:
         return cls._extract_dbxref_accessions(val, "Biomaterial:")
 
     @staticmethod
-    def _pool_mixed_geo_sex(val):
-        """Rewrite a list of male and female (either order) to a pooled label."""
+    def _map_geo_genetic_strategy(val):
+        """Translate each '; '-joined genetic strategy; leave non-strings unchanged."""
+        if not isinstance(val, str):
+            return val
+        parts = [part.strip() for part in val.split("; ") if part.strip()]
+        if not parts:
+            return val
+        mapped = [GENETIC_PERTURBATION_MAP.get(part, part) for part in parts]
+        return "; ".join(mapped)
+
+    @staticmethod
+    def _pool_mixed_geo_strategy(val):
+        """Rewrite a list of scRNA-seq and snRNA-seq (either order) to RNA-Seq."""
         if isinstance(val, (list, tuple)):
-            sexes = {str(item).strip().lower() for item in val if not is_empty(item)}
-            if sexes == {"male", "female"}:
-                return "pooled male and female"
+            strategies = {str(item).strip() for item in val if not is_empty(item)}
+            if strategies == {"scRNA-seq", "snRNA-seq"}:
+                return "RNA-Seq"
+        return val
+
+    @staticmethod
+    def _pool_mixed_geo_sex(val):
+        """Rewrite male and female, as a list or a '; '-joined string, to a pooled label."""
+        if isinstance(val, (list, tuple)):
+            parts = [
+                part
+                for item in val
+                if not is_empty(item)
+                for part in str(item).split("; ")
+            ]
+        elif isinstance(val, str):
+            parts = val.split("; ")
+        else:
+            return val
+        sexes = {part.strip().lower() for part in parts if part.strip()}
+        if sexes == {"male", "female"}:
+            return "pooled male and female"
         return val
 
     @staticmethod
