@@ -109,6 +109,7 @@ PROP_MAP_BIOHUB = {
     "human_donors_sex": "sex_ontology_term_id",
     "human_donors_ethnicity_term_id": "self_reported_ethnicity_ontology_term_id",
     "droplet_based_libraries_library_construction_technology_term_id": "assay_ontology_term_id",
+    "plate_based_libraries_library_construction_technology_term_id": "assay_ontology_term_id",
     "tissues_upper_bound_age": "tissues_upper_bound_age",
     "tissues_lower_bound_age": "tissues_lower_bound_age",
     "tissues_age_units": "tissues_age_units",

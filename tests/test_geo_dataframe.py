@@ -724,6 +724,37 @@ def test_create_geo_dataframe_molecule_polya_rna_for_other_gex():
     assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
 
 
+def test_create_geo_dataframe_molecule_from_plate_feature_types():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateGex",
+                "plate_based_libraries_feature_types": "Gene Expression",
+                "plate_based_libraries_library_construction_technology_term_name": "10x 3' v3",
+            },
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateFlex",
+                "plate_based_libraries_feature_types": "Gene Expression",
+                "plate_based_libraries_library_construction_technology_term_name": (
+                    "10x gene expression flex v1"
+                ),
+            },
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateAtac",
+                "plate_based_libraries_feature_types": "ATAC",
+                "plate_based_libraries_library_construction_technology_term_name": "10x ATAC",
+            },
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["plateGex", "*molecule"] == "polyA RNA"
+    assert geo_df.loc["plateFlex", "*molecule"] == "total RNA"
+    assert geo_df.loc["plateAtac", "*molecule"] == "genomic DNA"
+
+
 def test_create_geo_dataframe_includes_stripped_author_metadata():
     flattener = make_flattener()
     main_df = pd.DataFrame(

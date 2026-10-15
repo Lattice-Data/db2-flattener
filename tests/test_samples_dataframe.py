@@ -143,6 +143,51 @@ def test_create_samples_dataframe_maps_cell_line_source_and_barcodes():
     assert "cell_lines_multiplexing_barcodes" not in result.columns
 
 
+def test_create_samples_dataframe_plate_library_names_barcode_column_hash_index():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["s1"],
+            "tissues_multiplexing_barcodes": [["BC001", "CR001"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert list(result["hash_index"]) == ["BC001|CR001"]
+    assert "sample_probe_barcode" not in result.columns
+    assert "plate_based_libraries_@id" not in result.columns
+
+
+def test_attach_plate_library_id_does_not_duplicate_sample_rows():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "plate_based_libraries_@id": [
+                "/plate_based_libraries/p1/",
+                "/plate_based_libraries/p2/",
+            ],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1"],
+            "sample_alias": ["s1"],
+            "tissues_multiplexing_barcodes": [["BC001"]],
+        }
+    )
+
+    attached = flattener._attach_plate_library_id(main_df, sample_df)
+    result = flattener.create_samples_dataframe(attached)
+
+    assert len(attached) == 1
+    assert list(result["hash_index"]) == ["BC001"]
+    assert "sample_probe_barcode" not in result.columns
+    assert "plate_based_libraries_@id" not in result.columns
+
+
 def test_create_samples_dataframe_maps_genetic_modifications_strategy():
     flattener = make_flattener()
     keys = list(GENETIC_PERTURBATION_MAP)
