@@ -177,7 +177,8 @@ def test_plate_library_columns_are_used_when_droplet_is_absent():
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert list(sra_df["sample_name"]) == ["PLATE_1"]
-    assert list(sra_df[BARCODE_COLUMN]) == ["s1 : BC001+CR001"]
+    assert list(sra_df["sample_name: hash_index"]) == ["s1 : BC001+CR001"]
+    assert BARCODE_COLUMN not in sra_df.columns
 
 
 def test_paired_libraries_share_one_row_because_the_crispr_half_is_dropped(capsys):
