@@ -640,12 +640,7 @@ class DB2Flattener:
     def _pool_mixed_geo_sex(val):
         """Rewrite male and female, as a list or a '; '-joined string, to a pooled label."""
         if isinstance(val, (list, tuple)):
-            parts = [
-                part
-                for item in val
-                if not is_empty(item)
-                for part in str(item).split("; ")
-            ]
+            parts = [part for item in val if not is_empty(item) for part in str(item).split("; ")]
         elif isinstance(val, str):
             parts = val.split("; ")
         else:
@@ -1713,7 +1708,11 @@ class DB2Flattener:
         # Used only to recognize a plate experiment after per-sample rows replace
         # main. create_biohub_dataframe does not write this column.
         plate_id = "plate_based_libraries_@id"
-        if plate_id in main_df.columns and plate_id not in exploded.columns and plate_id not in extras:
+        if (
+            plate_id in main_df.columns
+            and plate_id not in exploded.columns
+            and plate_id not in extras
+        ):
             extras.append(plate_id)
         if extras:
             file_level = main_df.loc[
