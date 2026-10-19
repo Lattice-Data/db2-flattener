@@ -629,10 +629,11 @@ class DB2Flattener:
 
     @staticmethod
     def _pool_mixed_geo_strategy(val):
-        """Rewrite a list of scRNA-seq and snRNA-seq (either order) to RNA-Seq."""
+        """Rewrite a mix of scRNA-seq, snRNA-seq, and RNA-Seq to RNA-Seq."""
+        rna_strategies = {"scRNA-seq", "snRNA-seq", "RNA-Seq"}
         if isinstance(val, (list, tuple)):
             strategies = {str(item).strip() for item in val if not is_empty(item)}
-            if strategies == {"scRNA-seq", "snRNA-seq"}:
+            if len(strategies) >= 2 and strategies <= rna_strategies:
                 return "RNA-Seq"
         return val
 
