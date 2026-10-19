@@ -483,6 +483,70 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
     assert list(biohub_df["preservation_method"]) == ["fresh", "frozen", "fresh"]
 
 
+def test_biohub_assay_ontology_term_id_from_plate_library():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "plate_based_libraries_library_construction_technology_term_id": ["EFO:0030004"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["assay_ontology_term_id"]) == ["EFO:0030004"]
+
+
+def test_biohub_plate_library_names_barcode_column_hash_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "tissues_multiplexing_barcodes": [["BC001", "CR001"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["hash_index"]) == ["BC001|CR001"]
+    assert "sample_probe_barcode" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
+def test_multiplexed_plate_biohub_names_barcode_column_hash_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "raw_matrix_files_is_multiplexed": [True, True],
+            "raw_file_samples": ["H1; H2", "H1; H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "plate_based_libraries_@id": [
+                "/plate_based_libraries/p1/",
+                "/plate_based_libraries/p1/",
+            ],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "sample_alias": ["H1", "H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "tissues_multiplexing_barcodes": ["BC001", "BC002"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, sample_df))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert list(by_name.loc[["H1", "H2"], "hash_index"]) == ["BC001", "BC002"]
+    assert "sample_probe_barcode" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
 def test_biohub_empty_development_stage_defaults_to_unknown():
     f = make_flattener()
     main_df = pd.DataFrame(

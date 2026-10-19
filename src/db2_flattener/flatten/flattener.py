@@ -116,6 +116,7 @@ class DB2Flattener:
         if sample_df is not None and not sample_df.empty:
             sample_df = split_controlled_term_columns(sample_df)
             biohub_samples = sample_df.copy()
+            sample_df = self._attach_plate_library_id(main_df, sample_df)
             sample_df = self.create_samples_dataframe(sample_df)
 
         # Save main DataFrame to CSV
@@ -347,6 +348,7 @@ class DB2Flattener:
         rename them, and fold duration into treatment_description.
         """
         sample_df = sample_df.copy()
+        plate_experiment = self._frame_has_plate_library(sample_df)
 
         duration_cols = (
             "treatments_lower_bound_duration",
@@ -417,7 +419,34 @@ class DB2Flattener:
                 sample_df = sample_df.drop(columns=["treatment_duration"])
 
         sample_df = self._add_samples_donor_ethnicity(sample_df)
-        return join_sequence_column(sample_df, "sample_probe_barcode")
+        sample_df = join_sequence_column(sample_df, "sample_probe_barcode")
+        if plate_experiment and "sample_probe_barcode" in sample_df.columns:
+            sample_df = sample_df.rename(columns={"sample_probe_barcode": "hash_index"})
+        return sample_df
+
+    def _attach_plate_library_id(self, main_df, sample_df):
+        """Copy the plate library id onto sample rows so the SAMPLES sheet can see it.
+
+        Rolled up to one value per raw matrix file, so two libraries do not
+        repeat each sample. create_samples_dataframe drops the column after
+        using it to choose the barcode header.
+        """
+        plate_id = "plate_based_libraries_@id"
+        if (
+            sample_df is None
+            or sample_df.empty
+            or plate_id not in main_df.columns
+            or plate_id in sample_df.columns
+            or "raw_matrix_file_alias" not in main_df.columns
+            or "raw_matrix_file_alias" not in sample_df.columns
+        ):
+            return sample_df
+
+        file_level = main_df.loc[:, ["raw_matrix_file_alias", plate_id]]
+        file_level = file_level.groupby("raw_matrix_file_alias", as_index=False).agg(
+            {plate_id: self._combine_sample_values}
+        )
+        return sample_df.merge(file_level, on="raw_matrix_file_alias", how="left")
 
     def _row_is_gex(self, row) -> bool:
         """Filter df to only GEX libraries"""
@@ -787,6 +816,12 @@ class DB2Flattener:
     def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
         """Build *molecule from feature_types and library_protocol."""
 
+        def _feature_types(row: pd.Series):
+            droplet_ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            if not is_empty(droplet_ft):
+                return droplet_ft
+            return row.get(GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL)
+
         def _has_feature(ft, name: str) -> bool:
             if is_empty(ft):
                 return False
@@ -795,7 +830,7 @@ class DB2Flattener:
             return name in str(ft)
 
         def _map_row(row: pd.Series):
-            ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            ft = _feature_types(row)
             if _has_feature(ft, "ATAC"):
                 return "genomic DNA"
             if _has_feature(ft, "Gene Expression"):
@@ -1059,7 +1094,12 @@ class DB2Flattener:
             mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
             barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
         if barcode_map is not None:
-            sra_df["sample_name: sample_probe_barcode"] = barcode_map
+            barcode_column = (
+                "sample_name: hash_index"
+                if self._frame_has_plate_library(main_df)
+                else "sample_name: sample_probe_barcode"
+            )
+            sra_df[barcode_column] = barcode_map
 
         unnamed = int(sra_df["sample_name"].isna().sum())
         if unnamed:
@@ -1600,6 +1640,16 @@ class DB2Flattener:
                 unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
         return list(unique.values())
 
+    @staticmethod
+    def _frame_has_plate_library(df) -> bool:
+        """True when any plate library column on this frame has a value."""
+        for column in df.columns:
+            if not str(column).startswith("plate_based_libraries_"):
+                continue
+            if df[column].map(lambda value: not is_empty(value)).any():
+                return True
+        return False
+
     def biohub_source_dataframe(self, main_df, sample_df):
         """
         Rows create_biohub_dataframe should read.
@@ -1656,6 +1706,11 @@ class DB2Flattener:
             and column not in exploded.columns
             and column not in extras
         )
+        # Used only to recognize a plate experiment after per-sample rows replace
+        # main. create_biohub_dataframe does not write this column.
+        plate_id = "plate_based_libraries_@id"
+        if plate_id in main_df.columns and plate_id not in exploded.columns and plate_id not in extras:
+            extras.append(plate_id)
         if extras:
             file_level = main_df.loc[
                 main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),
@@ -1675,6 +1730,7 @@ class DB2Flattener:
         """
         Build Biohub samples dataframe from main_df
         """
+        plate_experiment = self._frame_has_plate_library(main_df)
         columns_to_keep = [k for k in PROP_MAP_BIOHUB if k in main_df.columns]
         columns_to_keep.extend([k for k in main_df.columns if re.search("_author_metadata_", k)])
         # Multiplexed rows already carry sample_name from sample_alias. Keeping
@@ -1789,6 +1845,8 @@ class DB2Flattener:
             ].replace(GENETIC_PERTURBATION_MAP)
         for field in REFORMAT_LIST:
             biohub_df = join_sequence_column(biohub_df, field)
+        if plate_experiment and "sample_probe_barcode" in biohub_df.columns:
+            biohub_df = biohub_df.rename(columns={"sample_probe_barcode": "hash_index"})
 
         return biohub_df
 
