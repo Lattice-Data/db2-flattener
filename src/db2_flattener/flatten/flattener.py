@@ -25,8 +25,14 @@ from db2_flattener.schema.constants import (
     PROP_MAP_GEO,
     PROP_MAP_SAMPLES,
     PROP_MAP_SRA_BIOSAMPLE,
+    PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
     SEX_ONTOLOGY_MAP,
+    SRA_FILE_LIBRARY_LAYOUT_MAP,
+    SRA_FILE_LIBRARY_SELECTION_MAP,
+    SRA_FILE_LIBRARY_SOURCE_MAP,
+    SRA_FILE_LIBRARY_STRATEGY_MAP,
+    SRA_FILE_PLATFORM_PREFIXES,
     TISSUE_TYPE_MAP,
     Configs,
 )
@@ -99,6 +105,7 @@ class DB2Flattener:
         biohub_output = f"{prefix}_BIOHUB.csv"
         geo_output = f"{prefix}_GEO.csv"
         sra_biosample_output = f"{prefix}_SRA_BIOSAMPLE.csv"
+        sra_file_output = f"{prefix}_SRA_FILE.csv"
         sample_output = f"{prefix}_SAMPLES.csv"
         guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
@@ -149,6 +156,13 @@ class DB2Flattener:
         print(f"✅ SRA/BioSample CSV file created: {sra_biosample_output}")
         print(f"   Rows: {len(sra_biosample_df)}")
         print(f"   Columns: {len(sra_biosample_df.columns)}")
+
+        sra_files_df = self.create_sra_files_dataframe(main_df)
+        print(f"Saving SRA file DataFrame to {sra_file_output}...")
+        sra_files_df.to_csv(sra_file_output, index=False)
+        print(f"✅ SRA file CSV file created: {sra_file_output}")
+        print(f"   Rows: {len(sra_files_df)}")
+        print(f"   Columns: {len(sra_files_df.columns)}")
 
         guide_file = self._resolve_guide_rna_file(complete_data)
         guide_df = self.create_guide_metadata_dataframe(guide_file)
@@ -755,7 +769,13 @@ class DB2Flattener:
         return geo_df
 
     @staticmethod
-    def _add_geo_title(geo_df: pd.DataFrame) -> pd.DataFrame:
+    def _add_geo_title(
+        geo_df: pd.DataFrame,
+        *,
+        name_col: str = "*library name",
+        strategy_col: str = "*library strategy",
+        title_col: str = "*title",
+    ) -> pd.DataFrame:
         """Build title from library, strategy, treatment, and genetic modification fields."""
 
         def _cell_text(val) -> str:
@@ -787,8 +807,8 @@ class DB2Flattener:
             left = " ".join(
                 part
                 for part in (
-                    _cell_text(row.get("*library name")),
-                    _cell_text(row.get("*library strategy")),
+                    _cell_text(row.get(name_col)),
+                    _cell_text(row.get(strategy_col)),
                 )
                 if part
             )
@@ -804,7 +824,7 @@ class DB2Flattener:
             return "; ".join(group for group in groups if group) or None
 
         geo_df = geo_df.copy()
-        geo_df["*title"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df[title_col] = geo_df.apply(_summarize_row, axis=1)
         drop_cols = [
             c
             for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
@@ -1159,6 +1179,225 @@ class DB2Flattener:
                 sra_df[column] = sra_df["sample_name"].map(cells)
 
         return sra_df
+
+    def create_sra_files_dataframe(self, main_df) -> pd.DataFrame:
+        """
+        Build the SRA file dataframe from main_df: one row per CRO group × library.
+
+        sample_name is the same CRO_group_identifier as SRA_BIOSAMPLE. Unlike that
+        sheet, every library in the group gets its own row, including non-GEX.
+        Duplicate MAIN rows (same library on more than one raw matrix file)
+        collapse to one.
+        """
+        group_cols = [
+            col
+            for col in (
+                "droplet_based_libraries_CRO_group_identifier",
+                "plate_based_libraries_CRO_group_identifier",
+            )
+            if col in main_df.columns
+        ]
+        if not group_cols:
+            print(
+                "Warning: MAIN has no library CRO group identifier column; SRA_FILE will be empty"
+            )
+            return pd.DataFrame()
+
+        if main_df.empty:
+            return pd.DataFrame()
+
+        title_source_cols = []
+        seen = set()
+        for col in (
+            "raw_file_samples",
+            "genetic_modifications_strategy",
+            *GEO_TREATMENT_COLS,
+            *GEO_TITLE_TREATMENT_COLS,
+        ):
+            if col in main_df.columns and col not in seen:
+                seen.add(col)
+                title_source_cols.append(col)
+
+        columns_to_keep = [k for k in PROP_MAP_SRA_FILE if k in main_df.columns]
+        columns_to_keep.extend(title_source_cols)
+        sra_df = main_df[columns_to_keep].copy()
+        sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
+        if "raw_file_samples" in sra_df.columns:
+            sra_df.rename(columns={"raw_file_samples": "samples"}, inplace=True)
+        sra_df = collapse_duplicate_columns(sra_df)
+
+        aliases = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_aliases" for kind in ("droplet", "plate")]
+        )
+        library_atid = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_@id" for kind in ("droplet", "plate")]
+        )
+        if aliases is None:
+            print("Warning: MAIN has no library aliases column; SRA_FILE omits library_ID")
+        else:
+            sra_df["library_ID"] = aliases.map(
+                lambda alias: self._get_clean_alias({"aliases": to_items(alias)})
+            )
+
+        feature_types = self._coalesce_columns(
+            main_df,
+            [f"{kind}_based_libraries_feature_types" for kind in ("droplet", "plate")],
+        )
+        if feature_types is None:
+            sra_df["library_strategy"] = None
+            sra_df["library_source"] = None
+            sra_df["library_selection"] = None
+            sra_df["_feature_types"] = None
+        else:
+            sra_df["library_strategy"] = feature_types.map(self._map_sra_library_strategy)
+            sra_df["library_source"] = feature_types.map(self._map_sra_library_source)
+            sra_df["library_selection"] = feature_types.map(self._map_sra_library_selection)
+            sra_df["_feature_types"] = feature_types
+
+        run_cardinality = main_df.get("sequence_file_sets_run_cardinality")
+        if run_cardinality is None:
+            sra_df["library_layout"] = None
+        else:
+            sra_df["library_layout"] = run_cardinality.map(self._map_sra_library_layout)
+
+        sequencing_platform = main_df.get("sequence_file_sets_sequencing_platform")
+        if sequencing_platform is None:
+            sra_df["platform"] = None
+        else:
+            sra_df["platform"] = sequencing_platform.map(self._map_sra_platform)
+        if "instrument_model" not in sra_df.columns:
+            sra_df["instrument_model"] = None
+        if "filetype" not in sra_df.columns:
+            sra_df["filetype"] = None
+
+        if library_atid is not None:
+            dedup_key = library_atid
+            if "library_ID" in sra_df.columns:
+                dedup_key = dedup_key.fillna(sra_df["library_ID"])
+            sra_df["_dedup"] = dedup_key
+        elif "library_ID" in sra_df.columns:
+            sra_df["_dedup"] = sra_df["library_ID"]
+
+        unnamed = int(sra_df["sample_name"].isna().sum())
+        if unnamed:
+            print(
+                f"Warning: dropping {unnamed} of {len(sra_df)} MAIN row(s) with no library "
+                "CRO group identifier from SRA_FILE"
+            )
+            sra_df = sra_df[sra_df["sample_name"].notna()]
+
+        if sra_df.empty:
+            return sra_df.drop(columns=["_dedup"], errors="ignore").reset_index(drop=True)
+
+        sra_df = self._summarize_geo_treatment(sra_df)
+        if "_dedup" in sra_df.columns:
+            sra_df["_dedup"] = sra_df["_dedup"].fillna(sra_df["sample_name"])
+            sra_df = collapse_dataframe(sra_df, group_col="_dedup", sort=False)
+            sra_df = sra_df.drop(columns=["_dedup"])
+        else:
+            sra_df = collapse_dataframe(sra_df, group_col="sample_name", sort=False)
+
+        col = "genetic_modifications_strategy"
+        if col in sra_df.columns:
+            sra_df[col] = sra_df[col].replace(GENETIC_PERTURBATION_MAP)
+        for col in ("treatment", "_title_treatment"):
+            if col in sra_df.columns:
+                sra_df[col] = sra_df[col].map(self._sort_geo_list)
+
+        sra_df = self._add_geo_title(
+            sra_df,
+            name_col="sample_name",
+            strategy_col="library_strategy",
+            title_col="title",
+        )
+        sra_df["title"] = sra_df.apply(self._append_sra_title_feature_types, axis=1)
+
+        drop_cols = [
+            c
+            for c in (
+                "samples",
+                "treatment",
+                "genetic_modifications_strategy",
+                "_feature_types",
+                *GEO_TREATMENT_COLS,
+                *GEO_TITLE_TREATMENT_COLS,
+            )
+            if c in sra_df.columns
+        ]
+        if drop_cols:
+            sra_df = sra_df.drop(columns=drop_cols)
+
+        ordered = [
+            c
+            for c in (
+                "sample_name",
+                "library_ID",
+                "library_strategy",
+                "library_source",
+                "library_selection",
+                "library_layout",
+                "platform",
+                "instrument_model",
+                "filetype",
+                "title",
+            )
+            if c in sra_df.columns
+        ]
+        return sra_df[ordered].reset_index(drop=True)
+
+    @staticmethod
+    def _map_sra_feature_type(ft, mapping):
+        """Map the first listed feature type through mapping, or None if unmapped."""
+        for item in to_items(ft):
+            mapped = mapping.get(item)
+            if mapped:
+                return mapped
+        return None
+
+    @classmethod
+    def _map_sra_library_strategy(cls, ft):
+        """Map library feature_types to an SRA library_strategy, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_STRATEGY_MAP)
+
+    @classmethod
+    def _map_sra_library_source(cls, ft):
+        """Map library feature_types to an SRA library_source, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SOURCE_MAP)
+
+    @classmethod
+    def _map_sra_library_selection(cls, ft):
+        """Map library feature_types to an SRA library_selection, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SELECTION_MAP)
+
+    @classmethod
+    def _map_sra_library_layout(cls, val):
+        """Map sequence file set run_cardinality to an SRA library_layout, or None."""
+        return cls._map_sra_feature_type(val, SRA_FILE_LIBRARY_LAYOUT_MAP)
+
+    @staticmethod
+    def _map_sra_platform(val):
+        """Map sequencing_platform to an SRA platform by vendor prefix, or None."""
+        for item in to_items(val):
+            if is_empty(item):
+                continue
+            text = str(item)
+            for prefix, platform in SRA_FILE_PLATFORM_PREFIXES:
+                if text.startswith(prefix):
+                    return platform
+        return None
+
+    @staticmethod
+    def _append_sra_title_feature_types(row: pd.Series):
+        """Append feature_types to the GEO-style title, joined with '; '."""
+        items = [
+            str(item).strip() for item in to_items(row.get("_feature_types")) if not is_empty(item)
+        ]
+        suffix = "; ".join(item for item in items if item)
+        title = row.get("title")
+        title_text = "" if is_empty(title) else str(title).strip()
+        if suffix and title_text:
+            return f"{title_text}; {suffix}"
+        return suffix or title_text or None
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")

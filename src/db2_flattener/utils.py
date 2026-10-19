@@ -200,11 +200,13 @@ def collapse_dataframe(
     df: pd.DataFrame,
     group_col: str,
     columns: list[str] | None = None,
+    *,
+    sort: bool = True,
 ) -> pd.DataFrame:
     """Group by group_col and collapse other columns with single_or_list."""
     other_cols = columns or [c for c in df.columns if c != group_col]
     agg = {col: single_or_list for col in other_cols}
-    return df.groupby(group_col, as_index=False).agg(agg)
+    return df.groupby(group_col, as_index=False, sort=sort).agg(agg)
 
 
 def expand_list_column(df: pd.DataFrame, col: str) -> pd.DataFrame:
