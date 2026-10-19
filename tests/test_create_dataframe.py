@@ -3,6 +3,7 @@ import pytest
 
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.schema.constants import Configs
+from db2_flattener.utils import split_controlled_term_columns
 
 MIN_CONFIGS = Configs(
     FIELD_TYPES={},
@@ -49,11 +50,22 @@ def _lib(lib_id, feature_types, cro="RSJS_fast_1", alias=None):
     }
 
 
-def _rmf(rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1", sample_id="/tissues/s1/"):
+def _rmf(rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1", sample_id="/tissues/s1/", **file_fields):
+    allowed = {
+        "is_multiplexed",
+        "file_format",
+        "file_size",
+        "software",
+        "software_version",
+    }
+    unknown = set(file_fields) - allowed
+    if unknown:
+        raise TypeError(f"unexpected raw matrix file fields: {sorted(unknown)}")
     return {
         "@id": rmf_id,
         "aliases": [alias],
         "samples": [sample_id],
+        **file_fields,
     }
 
 
@@ -161,7 +173,7 @@ def test_sample_df_not_inflated_when_rmf_has_two_libraries():
 
     assert len(main_df) == 2
     assert sample_df is not None
-    assert sample_df.reset_index()["raw_matrix_file_alias"].nunique() == 1
+    assert sample_df["raw_matrix_file_alias"].nunique() == 1
     assert len(sample_df) == 1
 
 
@@ -308,6 +320,101 @@ def test_create_dataframe_keeps_is_pilot_order_false():
     assert main_df.iloc[0]["sequence_file_sets_is_pilot_order"] == "False"
 
 
+RAW_MATRIX_FILE_COLUMNS = (
+    "raw_matrix_files_is_multiplexed",
+    "raw_matrix_files_file_format",
+    "raw_matrix_files_file_size",
+    "raw_matrix_files_software",
+    "raw_matrix_files_software_version",
+)
+
+
+def test_create_dataframe_copies_raw_matrix_file_fields():
+    """File-level fields stay typed: boolean False and integer file_size are not stringified."""
+    f = make_flattener()
+    sample = _tissue()
+    present = _rmf(
+        is_multiplexed=False,
+        file_format="hdf5",
+        file_size=4096,
+        software="cellranger",
+        software_version="7.1.0",
+    )
+    also_true = _rmf(
+        rmf_id="/raw_matrix_files/r2/",
+        alias="lab:rmf2",
+        is_multiplexed=True,
+        file_format="mtx",
+        file_size=8,
+        software="kallisto",
+        software_version="0.48.0",
+    )
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [present], [sample]),
+                (gex, [also_true], [sample]),
+            ]
+        )
+    )
+
+    by_alias = main_df.set_index("raw_matrix_file_alias")
+    false_row = by_alias.loc["rmf1"]
+    # Truthiness, not `is`: pandas may store these as numpy scalars. The string
+    # "False" from _join_unique() would be truthy, so this still catches that.
+    assert not false_row["raw_matrix_files_is_multiplexed"]
+    assert not isinstance(false_row["raw_matrix_files_is_multiplexed"], str)
+    assert false_row["raw_matrix_files_file_format"] == "hdf5"
+    assert false_row["raw_matrix_files_file_size"] == 4096
+    assert not isinstance(false_row["raw_matrix_files_file_size"], (str, float))
+    assert false_row["raw_matrix_files_software"] == "cellranger"
+    assert false_row["raw_matrix_files_software_version"] == "7.1.0"
+    assert by_alias.loc["rmf2", "raw_matrix_files_is_multiplexed"]
+
+
+def test_create_dataframe_nulls_omitted_raw_matrix_file_fields():
+    f = make_flattener()
+    sample = _tissue()
+    omitted = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [omitted], [sample])]))
+
+    for column in RAW_MATRIX_FILE_COLUMNS:
+        assert pd.isna(main_df.iloc[0][column])
+
+
+def test_create_dataframe_shares_raw_matrix_file_fields_across_libraries():
+    f = make_flattener()
+    sample = _tissue()
+    rmf = _rmf(
+        is_multiplexed=True,
+        file_format="hdf5",
+        file_size=4096,
+        software="cellranger",
+        software_version="7.1.0",
+    )
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+    cri = _lib("/droplet_based_libraries/cri/", ["CRISPR Guide Capture"], alias="lab:cri")
+
+    main_df, _ = f.create_dataframe(
+        _complete_data(
+            [
+                (gex, [rmf], [sample]),
+                (cri, [rmf], [sample]),
+            ]
+        )
+    )
+
+    assert len(main_df) == 2
+    for column in RAW_MATRIX_FILE_COLUMNS:
+        assert set(main_df[column]) == {main_df.iloc[0][column]}
+    assert main_df.iloc[0]["raw_matrix_files_is_multiplexed"]
+    assert main_df.iloc[0]["raw_matrix_files_file_size"] == 4096
+
+
 def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
     f = make_flattener()
     main_df = pd.DataFrame(
@@ -374,6 +481,138 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
     assert list(biohub_df["sample_probe_barcode"]) == ["BC001", "BC005", "BC003"]
     assert list(biohub_df["suspension_type"]) == ["cell", "cell", "cell"]
     assert list(biohub_df["preservation_method"]) == ["fresh", "frozen", "fresh"]
+
+
+def test_biohub_assay_ontology_term_id_from_plate_library():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "plate_based_libraries_library_construction_technology_term_id": ["EFO:0030004"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["assay_ontology_term_id"]) == ["EFO:0030004"]
+
+
+def test_biohub_plate_library_names_barcode_column_hash_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "tissues_multiplexing_barcodes": [["BC001", "CR001"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["hash_index"]) == ["BC001|CR001"]
+    assert "sample_probe_barcode" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
+def test_multiplexed_plate_biohub_names_barcode_column_hash_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "raw_matrix_files_is_multiplexed": [True, True],
+            "raw_file_samples": ["H1; H2", "H1; H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "plate_based_libraries_@id": [
+                "/plate_based_libraries/p1/",
+                "/plate_based_libraries/p1/",
+            ],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "sample_alias": ["H1", "H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "tissues_multiplexing_barcodes": ["BC001", "BC002"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, sample_df))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert list(by_name.loc[["H1", "H2"], "hash_index"]) == ["BC001", "BC002"]
+    assert "sample_probe_barcode" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
+def test_biohub_plate_library_maps_rt_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1", "SCALEQUANT-B1"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["RT_index"]) == ["SCALEQUANT-A1,SCALEQUANT-B1"]
+    assert "tissues_RT_indexes" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
+def test_biohub_droplet_omits_rt_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1", "SCALEQUANT-B1"]],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert "RT_index" not in biohub_df.columns
+    assert "tissues_RT_indexes" not in biohub_df.columns
+
+
+def test_multiplexed_plate_biohub_keeps_per_sample_rt_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "raw_matrix_files_is_multiplexed": [True, True],
+            "raw_file_samples": ["H1; H2", "H1; H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "plate_based_libraries_@id": [
+                "/plate_based_libraries/p1/",
+                "/plate_based_libraries/p1/",
+            ],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "sample_alias": ["H1", "H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1"], ["SCALEQUANT-B1", "SCALEQUANT-C1"]],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, sample_df))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert list(by_name.loc[["H1", "H2"], "RT_index"]) == [
+        "SCALEQUANT-A1",
+        "SCALEQUANT-B1,SCALEQUANT-C1",
+    ]
+    assert "tissues_RT_indexes" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
 
 
 def test_biohub_empty_development_stage_defaults_to_unknown():
@@ -581,6 +820,285 @@ def test_biohub_preservation_method_defaults_to_unknown():
     main_df_no_preservation = main_df.drop(columns=["tissues_preservation_method"])
     biohub_df_missing = f.create_biohub_dataframe(main_df_no_preservation)
     assert list(biohub_df_missing["preservation_method"]) == ["unknown", "unknown", "unknown"]
+
+
+# --- multiplexed raw matrix files: one file carrying several samples ---
+
+MULTIPLEX_CONFIGS = Configs(
+    FIELD_TYPES={},
+    OBJECT_CONFIG={
+        "droplet_based_libraries": {
+            "api_type": "DropletBasedLibrary",
+            "fields": ["@id", "feature_types", "CRO_group_identifier", "aliases"],
+            "references": {},
+        },
+        "tissues": {
+            "api_type": "Tissue",
+            "fields": ["@id", "aliases", "suspension_type", "selection_kits"],
+            "references": {},
+        },
+    },
+)
+
+
+def _multiplex_flattener():
+    f = DB2Flattener.__new__(DB2Flattener)
+    f.connection = None
+    f.configs = MULTIPLEX_CONFIGS
+    f.gatherer = None
+    return f
+
+
+def _mx_tissue(sample_id, alias, suspension_type="cell", selection_kits=None):
+    return {
+        "@id": sample_id,
+        "@type": ["Tissue"],
+        "aliases": [alias],
+        "suspension_type": suspension_type,
+        "selection_kits": selection_kits,
+    }
+
+
+def _mx_run(tissues):
+    """One library, one raw matrix file, carrying every tissue given."""
+    rmf = {
+        "@id": "/raw_matrix_files/r1/",
+        "aliases": ["lab:rmf1"],
+        "samples": [t["@id"] for t in tissues],
+    }
+    lib = _lib("/droplet_based_libraries/d1/", ["Gene Expression"])
+    return _multiplex_flattener().create_dataframe(_complete_data([(lib, [rmf], tissues)]))
+
+
+MX_TWO = [
+    _mx_tissue("/tissues/s1/", "lab:H1", "cell", ["EasySep A"]),
+    _mx_tissue("/tissues/s2/", "lab:H2", "nucleus", ["EasySep B"]),
+]
+
+
+def test_multiplexed_file_gives_samples_a_row_each():
+    """The point of the fix: neither sample is lost to the joined-alias merge."""
+    _, sample_df = _mx_run(MX_TWO)
+
+    assert len(sample_df) == 2
+    assert list(sample_df["sample_alias"]) == ["H1", "H2"]
+    assert list(sample_df["raw_matrix_file_alias"]) == ["rmf1", "rmf1"]
+    assert list(sample_df["tissues_suspension_type"]) == ["cell", "nucleus"]
+
+
+def test_multiplexed_file_keeps_main_one_row_per_library():
+    """MAIN must not be multiplied by the file's sample count."""
+    main_df, _ = _mx_run(MX_TWO)
+
+    assert len(main_df) == 1
+    assert main_df.loc[0, "raw_file_samples"] == "H1; H2"
+
+
+def test_multiplexed_file_joins_differing_sample_values_in_main():
+    main_df, _ = _mx_run(MX_TWO)
+
+    assert main_df.loc[0, "sample_alias"] == "H1; H2"
+    assert main_df.loc[0, "tissues_suspension_type"] == "cell; nucleus"
+    assert main_df.loc[0, "tissues_selection_kits"] == "EasySep A; EasySep B"
+
+
+def test_multiplexed_file_does_not_repeat_a_shared_value():
+    """Both samples agreeing is one value, not 'cell; cell'."""
+    both_cell = [
+        _mx_tissue("/tissues/s1/", "lab:H1", "cell"),
+        _mx_tissue("/tissues/s2/", "lab:H2", "cell"),
+    ]
+    main_df, sample_df = _mx_run(both_cell)
+
+    assert len(sample_df) == 2
+    assert main_df.loc[0, "tissues_suspension_type"] == "cell"
+
+
+def test_single_sample_file_passes_its_values_through_unchanged():
+    """A list-valued field stays a list rather than being joined into a string."""
+    main_df, sample_df = _mx_run([MX_TWO[0]])
+
+    assert len(sample_df) == 1
+    assert main_df.loc[0, "tissues_selection_kits"] == ["EasySep A"]
+    assert main_df.loc[0, "tissues_suspension_type"] == "cell"
+
+
+def test_multiplexed_biohub_uses_sample_alias_for_sample_name():
+    """Multiplexed files are one Biohub row per sample; other files stay on main."""
+    f = DB2Flattener.__new__(DB2Flattener)
+    f.connection = None
+    f.configs = Configs(
+        FIELD_TYPES={},
+        OBJECT_CONFIG={
+            "droplet_based_libraries": {
+                "api_type": "DropletBasedLibrary",
+                "fields": [
+                    "@id",
+                    "feature_types",
+                    "aliases",
+                    "library_construction_technology",
+                ],
+                "references": {},
+            },
+            "tissues": {
+                "api_type": "Tissue",
+                "fields": ["@id", "aliases", "suspension_type", "multiplexing_barcodes"],
+                "references": {},
+            },
+            "sequence_file_sets": {
+                "api_type": "SequenceFileSet",
+                "fields": ["is_pilot_order"],
+                "references": {},
+            },
+        },
+    )
+
+    def tissue(sample_id, alias, suspension_type, barcode):
+        return {
+            "@id": sample_id,
+            "@type": ["Tissue"],
+            "aliases": [alias],
+            "suspension_type": suspension_type,
+            "multiplexing_barcodes": barcode,
+        }
+
+    def assay_lib(lib_id, term_id):
+        lib = _lib(lib_id, ["Gene Expression"])
+        lib["library_construction_technology"] = {
+            "@id": f"/controlled_terms/{term_id}/",
+            "term_name": term_id,
+        }
+        return lib
+
+    pooled = [
+        tissue("/tissues/s1/", "lab:H1", "cell", "BC001"),
+        tissue("/tissues/s2/", "lab:H2", "nucleus", "BC002"),
+    ]
+    pooled_file = {
+        "@id": "/raw_matrix_files/r1/",
+        "aliases": ["lab:rmf1"],
+        "samples": [sample["@id"] for sample in pooled],
+        "is_multiplexed": True,
+        "sequence_file_sets": [{"is_pilot_order": True}],
+    }
+    separate = [
+        tissue("/tissues/s3/", "lab:S1", "cell", "BC003"),
+        tissue("/tissues/s4/", "lab:S2", "nucleus", "BC004"),
+    ]
+    separate_file = {
+        "@id": "/raw_matrix_files/r2/",
+        "aliases": ["lab:rmf2"],
+        "samples": [sample["@id"] for sample in separate],
+        "is_multiplexed": False,
+        "sequence_file_sets": [{"is_pilot_order": False}],
+    }
+
+    main_df, sample_df = f.create_dataframe(
+        _complete_data(
+            [
+                (assay_lib("/droplet_based_libraries/a/", "EFO:0000002"), [pooled_file], pooled),
+                (assay_lib("/droplet_based_libraries/b/", "EFO:0000001"), [pooled_file], pooled),
+                (
+                    assay_lib("/droplet_based_libraries/c/", "EFO:0000003"),
+                    [separate_file],
+                    separate,
+                ),
+            ]
+        )
+    )
+    # create_biohub_dataframe reads organism_ontology_term_id; this fixture has no donors.
+    main_df["human_donors_taxa_term_id"] = "NCBITaxon:10090"
+    sample_df["human_donors_taxa_term_id"] = "NCBITaxon:10090"
+    main_df = split_controlled_term_columns(main_df)
+    sample_df = split_controlled_term_columns(sample_df)
+
+    biohub_samples = sample_df.copy()
+    samples_sheet = f.create_samples_dataframe(sample_df)
+    pd.testing.assert_frame_equal(sample_df, biohub_samples)
+    pooled_samples = samples_sheet.loc[
+        samples_sheet["processed data file"] == "rmf1", "pre_pooled_sample"
+    ]
+    assert list(pooled_samples) == ["H1", "H2"]
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, biohub_samples))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert set(by_name.index) == {"H1", "H2", "S1; S2"}
+    assert by_name.loc["H1", "suspension_type"] == "cell"
+    assert by_name.loc["H2", "suspension_type"] == "nucleus"
+    assert by_name.loc["H1", "sample_probe_barcode"] == "BC001"
+    assert by_name.loc["H2", "sample_probe_barcode"] == "BC002"
+    assert by_name.loc["H1", "assay_ontology_term_id"] == "EFO:0000001; EFO:0000002"
+    assert by_name.loc["H2", "assay_ontology_term_id"] == "EFO:0000001; EFO:0000002"
+    assert by_name.loc["H1", "is_pilot_data"] == "True"
+    assert by_name.loc["H2", "is_pilot_data"] == "True"
+    assert by_name.loc["S1; S2", "suspension_type"] == "cell; nucleus"
+    assert by_name.loc["S1; S2", "assay_ontology_term_id"] == "EFO:0000003"
+    assert by_name.loc["S1; S2", "sample_probe_barcode"] == "BC003; BC004"
+
+
+def test_multiplexed_biohub_broadcasts_main_only_author_metadata():
+    """A MAIN-only author-metadata column is copied; a sample column is not replaced."""
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "raw_matrix_files_is_multiplexed": [True, True],
+            "raw_file_samples": ["H1; H2", "H1; H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:10090", "NCBITaxon:10090"],
+            "droplet_based_libraries_author_metadata_batch": ["JSS1", "JSS1"],
+            "tissues_author_metadata_note": ["note-a; note-b", "note-a; note-b"],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "sample_alias": ["H1", "H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:10090", "NCBITaxon:10090"],
+            "tissues_author_metadata_note": ["note-a", "note-b"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, sample_df))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert list(by_name.loc[["H1", "H2"], "batch"]) == ["JSS1", "JSS1"]
+    assert list(by_name.loc[["H1", "H2"], "note"]) == ["note-a", "note-b"]
+
+
+# --- _combine_sample_values ---
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        pytest.param(["cell"], "cell", id="one-value-passes-through"),
+        pytest.param(["cell", "cell"], "cell", id="identical-values-collapse"),
+        pytest.param(["cell", "nucleus"], "cell; nucleus", id="distinct-values-join"),
+        pytest.param([["A"]], ["A"], id="lone-list-is-not-joined"),
+        pytest.param([None, "cell"], "cell", id="empty-values-ignored"),
+        pytest.param([None, None], None, id="all-empty"),
+        pytest.param([], None, id="no-values"),
+    ],
+)
+def test_combine_sample_values(values, expected):
+    assert make_flattener()._combine_sample_values(values) == expected
+
+
+def test_combine_sample_values_keeps_controlled_terms_as_dicts():
+    """_join_unique would str() these, and the term columns could not be split."""
+    blood = {"@id": "/controlled_terms/UBERON:1/", "term_name": "blood"}
+    liver = {"@id": "/controlled_terms/UBERON:2/", "term_name": "liver"}
+
+    assert make_flattener()._combine_sample_values([blood, liver]) == [blood, liver]
+
+
+def test_combine_sample_values_keeps_dicts_that_are_not_terms():
+    """An embedded 'sources' has no '@id', so it must not be deduped away."""
+    one = {"title": "Vendor X"}
+    two = {"title": "Vendor Y"}
+
+    assert make_flattener()._combine_sample_values([one, two]) == [one, two]
 
 
 def test_biohub_disease_ontology_term_id_defaults_to_pato():

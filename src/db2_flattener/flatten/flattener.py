@@ -108,10 +108,15 @@ class DB2Flattener:
         if sample_df is not None:
             sample_df = sample_df.dropna(axis=1, how="all")
 
-        # Split dict columns into _term_id / _term_name before writing CSV
+        # Split dict columns into _term_id / _term_name before writing CSV.
+        # Biohub takes its own copy of the per-sample frame here, before
+        # create_samples_dataframe pares that frame down for the SAMPLES sheet.
         main_df = split_controlled_term_columns(main_df)
+        biohub_samples = None
         if sample_df is not None and not sample_df.empty:
             sample_df = split_controlled_term_columns(sample_df)
+            biohub_samples = sample_df.copy()
+            sample_df = self._attach_plate_library_id(main_df, sample_df)
             sample_df = self.create_samples_dataframe(sample_df)
 
         # Save main DataFrame to CSV
@@ -122,8 +127,11 @@ class DB2Flattener:
         print(f"   Rows: {len(main_df)}")
         print(f"   Columns: {len(main_df.columns)}")
 
-        # Create Biohub DataFrame from main and sample df
-        biohub_df = self.create_biohub_dataframe(main_df)
+        # Multiplexed files contribute one Biohub row per sample. Other files
+        # still contribute their main_df rows.
+        biohub_df = self.create_biohub_dataframe(
+            self.biohub_source_dataframe(main_df, biohub_samples)
+        )
         print(f"Saving biohub DataFrame to {biohub_output}...")
         biohub_df.to_csv(biohub_output, index=False)
         print(f"✅ Biohub CSV file created: {biohub_output}")
@@ -171,7 +179,8 @@ class DB2Flattener:
 
         rows = []
         sample_df = None
-        new_sample_df = None
+        # One (raw matrix file, sample) pair per sample on each file
+        file_sample_pairs = []
 
         # Raw matrix file-based rows - samples field is always present
         # First, collect all raw matrix files and their associated libraries
@@ -246,8 +255,7 @@ class DB2Flattener:
             library_entries = file_data["library_entries"]
             samples = file_data["all_samples"]
 
-            # For raw_matrix_file_alias and raw_file_samples, it doesn't matter which raw file copy we use
-            # As they will all have the same value
+            # File-level fields are the same on every library copy of this raw file.
             representative_raw_file = library_entries[0]["raw_file"]
             sample_aliases = []
             for sample_ref in representative_raw_file.get("samples", []):
@@ -259,6 +267,25 @@ class DB2Flattener:
                 "raw_matrix_file_alias": self._get_clean_alias(representative_raw_file),
                 "raw_file_samples": self._join_unique(sample_aliases),
             }
+            # Direct copies, not _join_unique(): that stringifies booleans and integers.
+            for field in (
+                "is_multiplexed",
+                "file_format",
+                "file_size",
+                "software",
+                "software_version",
+            ):
+                shared[f"raw_matrix_files_{field}"] = representative_raw_file.get(field)
+
+            # Recorded here, where the aliases are still separate values, rather
+            # than by splitting raw_file_samples back apart on '; ' afterwards
+            file_sample_pairs.extend(
+                {
+                    "raw_matrix_file_alias": shared["raw_matrix_file_alias"],
+                    "sample_alias": alias,
+                }
+                for alias in sample_aliases
+            )
 
             for entry in library_entries:
                 lib = entry["library"]
@@ -285,34 +312,35 @@ class DB2Flattener:
 
         main_df = pd.DataFrame(rows)
 
-        # Merge sample metadata with main DataFrame columns
-        # Samples is one row per unique (raw matrix file + sample)
+        # SAMPLES is one row per (raw matrix file, sample), which is what makes a
+        # multiplexed file readable. MAIN stays one row per (raw matrix file,
+        # library), so it takes a copy of that frame rolled up to one row per
+        # file: joining the exploded frame straight on would multiply every
+        # library row by the file's sample count.
         sample_df = None
-        if sample_metadata and not main_df.empty:
+        if sample_metadata and file_sample_pairs and not main_df.empty:
             per_sample_df = pd.DataFrame.from_dict(sample_metadata, orient="index")
             per_sample_df.index.name = "sample_alias"
             per_sample_df = per_sample_df.reset_index()
 
-            rmf_sample_keys = main_df[
-                ["raw_matrix_file_alias", "raw_file_samples"]
-            ].drop_duplicates()
+            pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates()
+            sample_df = pairs_df.merge(per_sample_df, on="sample_alias", how="left")
 
-            sample_df = per_sample_df.merge(
-                rmf_sample_keys, left_on="sample_alias", right_on="raw_file_samples", how="right"
+            rolled_up = sample_df.groupby("raw_matrix_file_alias", as_index=False).agg(
+                {
+                    column: self._combine_sample_values
+                    for column in sample_df.columns
+                    if column != "raw_matrix_file_alias"
+                }
             )
-
-            new_sample_df = sample_df.set_index("raw_matrix_file_alias")
-
-            main_df = main_df.merge(
-                per_sample_df, left_on="raw_file_samples", right_on="sample_alias", how="left"
-            )
+            main_df = main_df.merge(rolled_up, on="raw_matrix_file_alias", how="left")
 
             print(
                 f"Creating sample DataFrame with {len(sample_df)} rows "
                 f"({sample_df['raw_matrix_file_alias'].nunique()} raw matrix files)..."
             )
 
-        return main_df, new_sample_df
+        return main_df, sample_df
 
     def create_samples_dataframe(self, sample_df) -> pd.DataFrame:
         """
@@ -320,8 +348,7 @@ class DB2Flattener:
         rename them, and fold duration into treatment_description.
         """
         sample_df = sample_df.copy()
-        if sample_df.index.name == "raw_matrix_file_alias":
-            sample_df = sample_df.reset_index()
+        plate_experiment = self._frame_has_plate_library(sample_df)
 
         duration_cols = (
             "treatments_lower_bound_duration",
@@ -341,6 +368,9 @@ class DB2Flattener:
             for c in sample_df.columns
             if re.search("_author_metadata_", c) and c not in columns_to_keep
         )
+        if not plate_experiment:
+            rt_sources = {key for key, name in PROP_MAP_SAMPLES.items() if name == "RT_index"}
+            columns_to_keep = [c for c in columns_to_keep if c not in rt_sources]
         sample_df = sample_df[columns_to_keep].copy()
 
         sample_df = self._summarize_geo_experimental_condition(sample_df)
@@ -392,7 +422,35 @@ class DB2Flattener:
                 sample_df = sample_df.drop(columns=["treatment_duration"])
 
         sample_df = self._add_samples_donor_ethnicity(sample_df)
-        return join_sequence_column(sample_df, "sample_probe_barcode")
+        sample_df = join_sequence_column(sample_df, "sample_probe_barcode")
+        sample_df = join_sequence_column(sample_df, "RT_index", sep=",")
+        if plate_experiment and "sample_probe_barcode" in sample_df.columns:
+            sample_df = sample_df.rename(columns={"sample_probe_barcode": "hash_index"})
+        return sample_df
+
+    def _attach_plate_library_id(self, main_df, sample_df):
+        """Copy the plate library id onto sample rows so the SAMPLES sheet can see it.
+
+        Rolled up to one value per raw matrix file, so two libraries do not
+        repeat each sample. create_samples_dataframe drops the column after
+        using it to choose the barcode header.
+        """
+        plate_id = "plate_based_libraries_@id"
+        if (
+            sample_df is None
+            or sample_df.empty
+            or plate_id not in main_df.columns
+            or plate_id in sample_df.columns
+            or "raw_matrix_file_alias" not in main_df.columns
+            or "raw_matrix_file_alias" not in sample_df.columns
+        ):
+            return sample_df
+
+        file_level = main_df.loc[:, ["raw_matrix_file_alias", plate_id]]
+        file_level = file_level.groupby("raw_matrix_file_alias", as_index=False).agg(
+            {plate_id: self._combine_sample_values}
+        )
+        return sample_df.merge(file_level, on="raw_matrix_file_alias", how="left")
 
     def _row_is_gex(self, row) -> bool:
         """Filter df to only GEX libraries"""
@@ -507,13 +565,16 @@ class DB2Flattener:
             geo_df["donor_ethnicity"] = geo_df["*library name"].map(ethnicity)
         col = "genetic_modifications_strategy"
         if col in geo_df.columns:
-            geo_df[col] = geo_df[col].replace(GENETIC_PERTURBATION_MAP)
+            geo_df[col] = geo_df[col].map(self._map_geo_genetic_strategy)
         col = "donor_sex"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_sex)
         for col in ("treatment", "_title_treatment"):
             if col in geo_df.columns:
                 geo_df[col] = geo_df[col].map(self._sort_geo_list)
+        col = "*library strategy"
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._pool_mixed_geo_strategy)
         geo_df = self._add_geo_title(geo_df)
         col = "*single or paired-end"
         if col in geo_df.columns:
@@ -556,12 +617,38 @@ class DB2Flattener:
         return cls._extract_dbxref_accessions(val, "Biomaterial:")
 
     @staticmethod
-    def _pool_mixed_geo_sex(val):
-        """Rewrite a list of male and female (either order) to a pooled label."""
+    def _map_geo_genetic_strategy(val):
+        """Translate each '; '-joined genetic strategy; leave non-strings unchanged."""
+        if not isinstance(val, str):
+            return val
+        parts = [part.strip() for part in val.split("; ") if part.strip()]
+        if not parts:
+            return val
+        mapped = [GENETIC_PERTURBATION_MAP.get(part, part) for part in parts]
+        return "; ".join(mapped)
+
+    @staticmethod
+    def _pool_mixed_geo_strategy(val):
+        """Rewrite a mix of scRNA-seq, snRNA-seq, and RNA-Seq to RNA-Seq."""
+        rna_strategies = {"scRNA-seq", "snRNA-seq", "RNA-Seq"}
         if isinstance(val, (list, tuple)):
-            sexes = {str(item).strip().lower() for item in val if not is_empty(item)}
-            if sexes == {"male", "female"}:
-                return "pooled male and female"
+            strategies = {str(item).strip() for item in val if not is_empty(item)}
+            if len(strategies) >= 2 and strategies <= rna_strategies:
+                return "RNA-Seq"
+        return val
+
+    @staticmethod
+    def _pool_mixed_geo_sex(val):
+        """Rewrite male and female, as a list or a '; '-joined string, to a pooled label."""
+        if isinstance(val, (list, tuple)):
+            parts = [part for item in val if not is_empty(item) for part in str(item).split("; ")]
+        elif isinstance(val, str):
+            parts = val.split("; ")
+        else:
+            return val
+        sexes = {part.strip().lower() for part in parts if part.strip()}
+        if sexes == {"male", "female"}:
+            return "pooled male and female"
         return val
 
     @staticmethod
@@ -729,6 +816,12 @@ class DB2Flattener:
     def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
         """Build *molecule from feature_types and library_protocol."""
 
+        def _feature_types(row: pd.Series):
+            droplet_ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            if not is_empty(droplet_ft):
+                return droplet_ft
+            return row.get(GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL)
+
         def _has_feature(ft, name: str) -> bool:
             if is_empty(ft):
                 return False
@@ -737,7 +830,7 @@ class DB2Flattener:
             return name in str(ft)
 
         def _map_row(row: pd.Series):
-            ft = row.get(GEO_LIBRARY_STRATEGY_FEATURE_COL)
+            ft = _feature_types(row)
             if _has_feature(ft, "ATAC"):
                 return "genomic DNA"
             if _has_feature(ft, "Gene Expression"):
@@ -1001,7 +1094,12 @@ class DB2Flattener:
             mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
             barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
         if barcode_map is not None:
-            sra_df["sample_name: sample_probe_barcode"] = barcode_map
+            barcode_column = (
+                "sample_name: hash_index"
+                if self._frame_has_plate_library(main_df)
+                else "sample_name: sample_probe_barcode"
+            )
+            sra_df[barcode_column] = barcode_map
 
         unnamed = int(sra_df["sample_name"].isna().sum())
         if unnamed:
@@ -1542,12 +1640,111 @@ class DB2Flattener:
                 unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
         return list(unique.values())
 
+    @staticmethod
+    def _frame_has_plate_library(df) -> bool:
+        """True when any plate library column on this frame has a value."""
+        for column in df.columns:
+            if not str(column).startswith("plate_based_libraries_"):
+                continue
+            if df[column].map(lambda value: not is_empty(value)).any():
+                return True
+        return False
+
+    def biohub_source_dataframe(self, main_df, sample_df):
+        """
+        Rows create_biohub_dataframe should read.
+
+        Files with raw_matrix_files_is_multiplexed true contribute the per-sample
+        frame (one row per sample, sample_name from the cleaned sample_alias).
+        Every other file contributes its main_df rows, where sample_name still
+        comes from raw_file_samples. A flagged file with no sample rows stays
+        on main_df.
+        """
+        if (
+            sample_df is None
+            or sample_df.empty
+            or "raw_matrix_file_alias" not in main_df.columns
+            or "raw_matrix_file_alias" not in sample_df.columns
+            or "raw_matrix_files_is_multiplexed" not in main_df.columns
+        ):
+            return main_df
+
+        multiplexed = set(
+            main_df.loc[
+                main_df["raw_matrix_files_is_multiplexed"].eq(True),
+                "raw_matrix_file_alias",
+            ].dropna()
+        )
+        if not multiplexed:
+            return main_df
+
+        exploded = sample_df.loc[sample_df["raw_matrix_file_alias"].isin(multiplexed)].copy()
+        if exploded.empty:
+            return main_df
+
+        if "sample_alias" in exploded.columns:
+            exploded["sample_name"] = exploded["sample_alias"]
+        if "raw_file_samples" in exploded.columns:
+            exploded = exploded.drop(columns=["raw_file_samples"])
+
+        # Library and file-set fields are not on the per-sample frame. Collapse
+        # to one value per file first so two libraries do not repeat each sample.
+        # Author-metadata columns use the same selection as create_biohub_dataframe.
+        # A column already on the sample rows is left there, so per-sample values
+        # are not replaced by the rolled-up MAIN copy.
+        extras = [
+            column
+            for column in PROP_MAP_BIOHUB
+            if column != "raw_file_samples"
+            and column in main_df.columns
+            and column not in exploded.columns
+        ]
+        extras.extend(
+            column
+            for column in main_df.columns
+            if re.search("_author_metadata_", column)
+            and column not in exploded.columns
+            and column not in extras
+        )
+        # Used only to recognize a plate experiment after per-sample rows replace
+        # main. create_biohub_dataframe does not write this column.
+        plate_id = "plate_based_libraries_@id"
+        if (
+            plate_id in main_df.columns
+            and plate_id not in exploded.columns
+            and plate_id not in extras
+        ):
+            extras.append(plate_id)
+        if extras:
+            file_level = main_df.loc[
+                main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),
+                ["raw_matrix_file_alias", *extras],
+            ]
+            file_level = file_level.groupby("raw_matrix_file_alias", as_index=False).agg(
+                {column: self._combine_sample_values for column in extras}
+            )
+            exploded = exploded.merge(file_level, on="raw_matrix_file_alias", how="left")
+
+        plain = main_df.loc[
+            ~main_df["raw_matrix_file_alias"].isin(set(exploded["raw_matrix_file_alias"]))
+        ]
+        return pd.concat([plain, exploded], ignore_index=True)
+
     def create_biohub_dataframe(self, main_df) -> pd.DataFrame:
         """
         Build Biohub samples dataframe from main_df
         """
+        plate_experiment = self._frame_has_plate_library(main_df)
         columns_to_keep = [k for k in PROP_MAP_BIOHUB if k in main_df.columns]
         columns_to_keep.extend([k for k in main_df.columns if re.search("_author_metadata_", k)])
+        # Multiplexed rows already carry sample_name from sample_alias. Keeping
+        # it here lets collapse_duplicate_columns coalesce it with the
+        # raw_file_samples rename used by every other row.
+        if "sample_name" in main_df.columns and "sample_name" not in columns_to_keep:
+            columns_to_keep.append("sample_name")
+        if not plate_experiment:
+            rt_sources = {key for key, name in PROP_MAP_BIOHUB.items() if name == "RT_index"}
+            columns_to_keep = [c for c in columns_to_keep if c not in rt_sources]
         biohub_df = main_df[columns_to_keep].copy()
         biohub_df.rename(columns=PROP_MAP_BIOHUB, inplace=True)
         biohub_df = strip_author_metadata_column_prefix(biohub_df)
@@ -1655,6 +1852,9 @@ class DB2Flattener:
             ].replace(GENETIC_PERTURBATION_MAP)
         for field in REFORMAT_LIST:
             biohub_df = join_sequence_column(biohub_df, field)
+        biohub_df = join_sequence_column(biohub_df, "RT_index", sep=",")
+        if plate_experiment and "sample_probe_barcode" in biohub_df.columns:
+            biohub_df = biohub_df.rename(columns={"sample_probe_barcode": "hash_index"})
 
         return biohub_df
 
@@ -1817,6 +2017,41 @@ class DB2Flattener:
         if not resolved:
             return None
         return resolved if isinstance(value, list) else resolved[0]
+
+    def _combine_sample_values(self, values):
+        """
+        One column's values across the samples sharing a raw matrix file.
+
+        Mirrors how _flatten_resolved_references combines a field across several
+        referenced objects: controlled terms stay dicts, because _join_unique()
+        would str() them into the cell and split_controlled_term_columns() could
+        no longer split them into _term_id and _term_name.
+
+        A single distinct value passes through untouched - first, before any
+        combining - so a file carrying one sample, which is every file in a run
+        that is not multiplexed, keeps exactly the cell it had before: the same
+        type, and terms in their original order rather than sorted by id.
+        """
+        present = [value for value in values if not is_empty(value)]
+        if not present:
+            return None
+
+        unique = []
+        for value in present:
+            if value not in unique:
+                unique.append(value)
+        if len(unique) == 1:
+            return unique[0]
+
+        items = [item for value in unique for item in to_items(value)]
+        if any(isinstance(item, dict) for item in items):
+            # Only controlled terms can be deduped by id; anything else dict-
+            # shaped, such as an embedded 'sources', is kept as it is rather
+            # than dropped for having no '@id'
+            if all(isinstance(item, dict) and item.get("@id") for item in items):
+                return self._dedupe_terms(items)
+            return items
+        return self._join_unique(unique)
 
     @staticmethod
     def _dedupe_terms(values):

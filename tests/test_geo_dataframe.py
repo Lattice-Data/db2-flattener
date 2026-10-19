@@ -255,6 +255,18 @@ def test_create_geo_dataframe_pools_mixed_donor_sex():
                 human_donors_sex="female",
                 non_human_donors_sex="unknown",
             ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libJoined",
+                human_donors_sex="female; male",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libJoinedPlusMale",
+                human_donors_sex="female; male",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libJoinedPlusMale",
+                human_donors_sex="male",
+            ),
         ]
     )
 
@@ -263,6 +275,8 @@ def test_create_geo_dataframe_pools_mixed_donor_sex():
     assert geo_df.loc["libMaleFemale"]["donor_sex"] == "pooled male and female"
     assert geo_df.loc["libSameLib"]["donor_sex"] == "pooled male and female"
     assert geo_df.loc["libExtra"]["donor_sex"] == ["female", "unknown"]
+    assert geo_df.loc["libJoined"]["donor_sex"] == "pooled male and female"
+    assert geo_df.loc["libJoinedPlusMale"]["donor_sex"] == "pooled male and female"
 
 
 def test_create_geo_dataframe_expands_raw_file_to_rightmost_columns():
@@ -529,6 +543,100 @@ def test_create_geo_dataframe_library_strategy_scatac_seq_keeps_atac_row():
     _assert_no_library_strategy_source_cols(geo_df)
 
 
+def test_create_geo_dataframe_library_strategy_mixed_suspension_is_rna_seq():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libCellNucleus",
+                tissues_suspension_type="cell; nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libNucleusCell",
+                tissues_suspension_type="nucleus; cell",
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["libCellNucleus"]["*library strategy"] == "RNA-Seq"
+    assert geo_df.loc["libNucleusCell"]["*library strategy"] == "RNA-Seq"
+    _assert_no_library_strategy_source_cols(geo_df)
+
+
+def test_create_geo_dataframe_library_strategy_pools_cell_and_nucleus_rows():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libCellThenNucleus",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libCellThenNucleus",
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libNucleusThenCell",
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libNucleusThenCell",
+                tissues_suspension_type="cell",
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["libCellThenNucleus"]["*library strategy"] == "RNA-Seq"
+    assert geo_df.loc["libNucleusThenCell"]["*library strategy"] == "RNA-Seq"
+
+
+def test_create_geo_dataframe_library_strategy_pools_rna_seq_with_single_cell_rows():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libMixed",
+                tissues_suspension_type="cell; nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libMixed",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libMixed",
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libWithAtac",
+                tissues_suspension_type="cell; nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libWithAtac",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libWithAtac",
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libWithAtac",
+                droplet_based_libraries_feature_types="ATAC",
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["libMixed"]["*library strategy"] == "RNA-Seq"
+    atac_strategy = geo_df.loc["libWithAtac"]["*library strategy"]
+    assert isinstance(atac_strategy, list)
+    assert "scATAC-seq" in atac_strategy
+
+
 def test_create_geo_dataframe_library_strategy_collapses_suspension_sources():
     flattener = make_flattener()
     main_df = pd.DataFrame(
@@ -659,6 +767,37 @@ def test_create_geo_dataframe_molecule_polya_rna_for_other_gex():
     assert list(geo_df["library_protocol"]) == ["10x 3' v3"]
 
 
+def test_create_geo_dataframe_molecule_from_plate_feature_types():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateGex",
+                "plate_based_libraries_feature_types": "Gene Expression",
+                "plate_based_libraries_library_construction_technology_term_name": "10x 3' v3",
+            },
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateFlex",
+                "plate_based_libraries_feature_types": "Gene Expression",
+                "plate_based_libraries_library_construction_technology_term_name": (
+                    "10x gene expression flex v1"
+                ),
+            },
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateAtac",
+                "plate_based_libraries_feature_types": "ATAC",
+                "plate_based_libraries_library_construction_technology_term_name": "10x ATAC",
+            },
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["plateGex", "*molecule"] == "polyA RNA"
+    assert geo_df.loc["plateFlex", "*molecule"] == "total RNA"
+    assert geo_df.loc["plateAtac", "*molecule"] == "genomic DNA"
+
+
 def test_create_geo_dataframe_includes_stripped_author_metadata():
     flattener = make_flattener()
     main_df = pd.DataFrame(
@@ -681,13 +820,23 @@ def test_create_geo_dataframe_includes_stripped_author_metadata():
 
 def test_create_geo_dataframe_maps_genetic_modifications_strategy():
     flattener = make_flattener()
-    main_df = pd.DataFrame([gex_row(genetic_modifications_strategy="knockout screen")]).dropna(
-        axis=1, how="all"
+    main_df = pd.DataFrame(
+        [
+            gex_row(genetic_modifications_strategy="knockout screen"),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libJoined",
+                genetic_modifications_strategy="activation screen; knockout screen",
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
+
+    assert geo_df.loc["libA"]["genetic_modifications_strategy"] == "CRISPR knockout screen"
+    assert (
+        geo_df.loc["libJoined"]["genetic_modifications_strategy"]
+        == "CRISPR activation screen; CRISPR knockout screen"
     )
-
-    geo_df = flattener.create_geo_dataframe(main_df)
-
-    assert list(geo_df["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
     assert "genetic_perturbation_strategy" not in geo_df.columns
 
 

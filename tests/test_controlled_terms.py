@@ -379,3 +379,37 @@ def test_dedupe_terms_single_term_returns_scalar():
 def test_dedupe_terms_empty_returns_none():
     f = make_flattener()
     assert f._dedupe_terms([]) is None
+
+
+def test_multiplexed_file_keeps_every_sample_term_as_a_dict():
+    """
+    Two samples on one raw matrix file, each with its own term.
+
+    The roll-up onto MAIN must not _join_unique() these into a string, or
+    split_controlled_term_columns() can no longer produce the term columns.
+    """
+    t1 = _tissue("/tissues/t1/", "lab:s1", sample_terms=[LUNG["@id"]])
+    t2 = _tissue("/tissues/t2/", "lab:s2", sample_terms=[DIABETES["@id"]])
+    rmf = {
+        "@id": "/raw_matrix_files/r1/",
+        "aliases": ["lab:rmf1"],
+        "samples": [t1["@id"], t2["@id"]],
+    }
+
+    main_df, sample_df = make_flattener().create_dataframe(
+        {
+            "libraries": {
+                "uuid-0": {"library": _lib(), "samples": [t1, t2], "raw_matrix_files": [rmf]}
+            },
+            "resolved_objects": {"ControlledTerm": RESOLVED_TERMS},
+        }
+    )
+    main_df = split_controlled_term_columns(main_df)
+
+    assert len(main_df) == 1
+    assert sorted(main_df.loc[0, "tissues_sample_terms_term_name"]) == [
+        "lung",
+        "type 2 diabetes mellitus",
+    ]
+    assert len(sample_df) == 2
+    assert list(sample_df["sample_alias"]) == ["s1", "s2"]
