@@ -368,6 +368,9 @@ class DB2Flattener:
             for c in sample_df.columns
             if re.search("_author_metadata_", c) and c not in columns_to_keep
         )
+        if not plate_experiment:
+            rt_sources = {key for key, name in PROP_MAP_SAMPLES.items() if name == "RT_index"}
+            columns_to_keep = [c for c in columns_to_keep if c not in rt_sources]
         sample_df = sample_df[columns_to_keep].copy()
 
         sample_df = self._summarize_geo_experimental_condition(sample_df)
@@ -420,6 +423,7 @@ class DB2Flattener:
 
         sample_df = self._add_samples_donor_ethnicity(sample_df)
         sample_df = join_sequence_column(sample_df, "sample_probe_barcode")
+        sample_df = join_sequence_column(sample_df, "RT_index", sep=",")
         if plate_experiment and "sample_probe_barcode" in sample_df.columns:
             sample_df = sample_df.rename(columns={"sample_probe_barcode": "hash_index"})
         return sample_df
@@ -1738,6 +1742,9 @@ class DB2Flattener:
         # raw_file_samples rename used by every other row.
         if "sample_name" in main_df.columns and "sample_name" not in columns_to_keep:
             columns_to_keep.append("sample_name")
+        if not plate_experiment:
+            rt_sources = {key for key, name in PROP_MAP_BIOHUB.items() if name == "RT_index"}
+            columns_to_keep = [c for c in columns_to_keep if c not in rt_sources]
         biohub_df = main_df[columns_to_keep].copy()
         biohub_df.rename(columns=PROP_MAP_BIOHUB, inplace=True)
         biohub_df = strip_author_metadata_column_prefix(biohub_df)
@@ -1845,6 +1852,7 @@ class DB2Flattener:
             ].replace(GENETIC_PERTURBATION_MAP)
         for field in REFORMAT_LIST:
             biohub_df = join_sequence_column(biohub_df, field)
+        biohub_df = join_sequence_column(biohub_df, "RT_index", sep=",")
         if plate_experiment and "sample_probe_barcode" in biohub_df.columns:
             biohub_df = biohub_df.rename(columns={"sample_probe_barcode": "hash_index"})
 

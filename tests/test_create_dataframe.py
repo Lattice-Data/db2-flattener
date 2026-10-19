@@ -547,6 +547,74 @@ def test_multiplexed_plate_biohub_names_barcode_column_hash_index():
     assert "plate_based_libraries_@id" not in biohub_df.columns
 
 
+def test_biohub_plate_library_maps_rt_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1", "SCALEQUANT-B1"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert list(biohub_df["RT_index"]) == ["SCALEQUANT-A1,SCALEQUANT-B1"]
+    assert "tissues_RT_indexes" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
+def test_biohub_droplet_omits_rt_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1", "SCALEQUANT-B1"]],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert "RT_index" not in biohub_df.columns
+    assert "tissues_RT_indexes" not in biohub_df.columns
+
+
+def test_multiplexed_plate_biohub_keeps_per_sample_rt_index():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "raw_matrix_files_is_multiplexed": [True, True],
+            "raw_file_samples": ["H1; H2", "H1; H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "plate_based_libraries_@id": [
+                "/plate_based_libraries/p1/",
+                "/plate_based_libraries/p1/",
+            ],
+        }
+    )
+    sample_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1", "rmf1"],
+            "sample_alias": ["H1", "H2"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606", "NCBITaxon:9606"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1"], ["SCALEQUANT-B1", "SCALEQUANT-C1"]],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(f.biohub_source_dataframe(main_df, sample_df))
+    by_name = biohub_df.set_index("sample_name")
+
+    assert list(by_name.loc[["H1", "H2"], "RT_index"]) == [
+        "SCALEQUANT-A1",
+        "SCALEQUANT-B1,SCALEQUANT-C1",
+    ]
+    assert "tissues_RT_indexes" not in biohub_df.columns
+    assert "plate_based_libraries_@id" not in biohub_df.columns
+
+
 def test_biohub_empty_development_stage_defaults_to_unknown():
     f = make_flattener()
     main_df = pd.DataFrame(

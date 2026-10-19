@@ -36,6 +36,10 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["primary_cell_cultures_enriched_cell_types_term_name"] == "**cell type"
     assert PROP_MAP_SAMPLES["tissues_multiplexing_barcodes"] == "sample_probe_barcode"
     assert PROP_MAP_SAMPLES["cell_lines_multiplexing_barcodes"] == "sample_probe_barcode"
+    assert PROP_MAP_SAMPLES["tissues_RT_indexes"] == "RT_index"
+    assert PROP_MAP_SAMPLES["cell_lines_RT_indexes"] == "RT_index"
+    assert PROP_MAP_SAMPLES["organoids_RT_indexes"] == "RT_index"
+    assert PROP_MAP_SAMPLES["primary_cell_cultures_RT_indexes"] == "RT_index"
     assert PROP_MAP_SAMPLES["tissues_selection_kits"] == "selection_kits"
     assert PROP_MAP_SAMPLES["tissues_selection_markers"] == "selection_markers"
     assert PROP_MAP_SAMPLES["tissues_selection_methods"] == "selection_methods"
@@ -186,6 +190,53 @@ def test_attach_plate_library_id_does_not_duplicate_sample_rows():
     assert list(result["hash_index"]) == ["BC001"]
     assert "sample_probe_barcode" not in result.columns
     assert "plate_based_libraries_@id" not in result.columns
+
+
+def test_create_samples_dataframe_plate_library_maps_rt_index():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["s1"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1", "SCALEQUANT-B1"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert list(result["RT_index"]) == ["SCALEQUANT-A1,SCALEQUANT-B1"]
+    assert "tissues_RT_indexes" not in result.columns
+
+
+def test_create_samples_dataframe_plate_cell_line_maps_rt_index():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["cl1"],
+            "cell_lines_RT_indexes": [["SCALEQUANT-C1"]],
+            "plate_based_libraries_@id": ["/plate_based_libraries/p1/"],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert list(result["RT_index"]) == ["SCALEQUANT-C1"]
+    assert "cell_lines_RT_indexes" not in result.columns
+
+
+def test_create_samples_dataframe_droplet_omits_rt_index():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["s1"],
+            "tissues_RT_indexes": [["SCALEQUANT-A1", "SCALEQUANT-B1"]],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert "RT_index" not in result.columns
+    assert "tissues_RT_indexes" not in result.columns
 
 
 def test_create_samples_dataframe_maps_genetic_modifications_strategy():
