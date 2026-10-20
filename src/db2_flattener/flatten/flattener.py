@@ -1390,7 +1390,25 @@ class DB2Flattener:
     @classmethod
     def _map_sra_library_layout(cls, val):
         """Map sequence file set run_cardinality to an SRA library_layout, or None."""
-        return cls._map_sra_feature_type(val, SRA_FILE_LIBRARY_LAYOUT_MAP)
+        if is_empty(val):
+            return None
+        mapped = []
+        for item in to_items(val):
+            for part in str(item).split(";"):
+                part = part.strip()
+                if not part:
+                    continue
+                mapped.append(SRA_FILE_LIBRARY_LAYOUT_MAP.get(part))
+        if not mapped:
+            return None
+        unique = {item for item in mapped if item is not None}
+        if None not in mapped and unique in ({"paired"}, {"single"}):
+            return next(iter(unique))
+        print(
+            f"Warning: SRA_FILE cannot map run_cardinality {val!r} to a single "
+            "library_layout (paired or single)"
+        )
+        return None
 
     @staticmethod
     def _map_sra_platform(val):

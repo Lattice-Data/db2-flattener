@@ -528,31 +528,41 @@ def test_library_layout_maps_run_cardinality():
                 "LIB_SINGLE",
                 "LIB_INDEX",
                 "LIB_DUAL",
+                "LIB_TRIPLET",
             ],
             "droplet_based_libraries_aliases": [
                 ["lab:LIB_PAIRED"],
                 ["lab:LIB_SINGLE"],
                 ["lab:LIB_INDEX"],
                 ["lab:LIB_DUAL"],
+                ["lab:LIB_TRIPLET"],
             ],
             "droplet_based_libraries_@id": [
                 "/droplet_based_libraries/a/",
                 "/droplet_based_libraries/b/",
                 "/droplet_based_libraries/c/",
                 "/droplet_based_libraries/d/",
+                "/droplet_based_libraries/e/",
             ],
             "sequence_file_sets_run_cardinality": [
                 "paired-end",
                 "single-end",
                 "paired-end-with-index",
                 "paired-end-with-dual-index",
+                "triplet",
             ],
         }
     )
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[LIBRARY_LAYOUT_COLUMN]) == ["paired", "single", "paired", "paired"]
+    assert list(sra_df[LIBRARY_LAYOUT_COLUMN]) == [
+        "paired",
+        "single",
+        "paired",
+        "paired",
+        "paired",
+    ]
     assert "sequence_file_sets_run_cardinality" not in sra_df.columns
 
 
@@ -582,7 +592,38 @@ def test_library_layout_collapses_equivalent_paired_cardinalities():
     assert sra_df.loc[0, LIBRARY_LAYOUT_COLUMN] == "paired"
 
 
-def test_library_layout_is_blank_when_run_cardinality_is_unmapped():
+def test_library_layout_maps_joined_equivalent_paired_cardinalities():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_file_sets_run_cardinality": ["paired-end; paired-end-with-index"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[LIBRARY_LAYOUT_COLUMN]) == ["paired"]
+
+
+def test_library_layout_is_blank_when_joined_cardinalities_disagree(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_file_sets_run_cardinality": ["paired-end; single-end"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert pd.isna(sra_df.loc[0, LIBRARY_LAYOUT_COLUMN])
+    assert "cannot map run_cardinality" in capsys.readouterr().out
+
+
+def test_library_layout_is_blank_when_run_cardinality_is_unmapped(capsys):
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
@@ -595,6 +636,7 @@ def test_library_layout_is_blank_when_run_cardinality_is_unmapped():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert pd.isna(sra_df.loc[0, LIBRARY_LAYOUT_COLUMN])
+    assert "cannot map run_cardinality" in capsys.readouterr().out
 
 
 def test_platform_maps_sequencing_platform_prefix():

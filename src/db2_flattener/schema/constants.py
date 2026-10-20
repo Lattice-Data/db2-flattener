@@ -218,6 +218,7 @@ SRA_FILE_LIBRARY_LAYOUT_MAP = {
     "single-end": "single",
     "paired-end-with-index": "paired",
     "paired-end-with-dual-index": "paired",
+    "triplet": "paired",
 }
 
 SRA_FILE_PLATFORM_PREFIXES = (
