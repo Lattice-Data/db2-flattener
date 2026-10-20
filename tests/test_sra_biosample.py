@@ -125,6 +125,20 @@ def test_barcode_map_returns_none(library_samples):
     assert make_flattener()._sample_probe_barcode_map(library_samples) is None
 
 
+def test_blank_barcode_column_is_omitted():
+    main_df = main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_samples": [["/tissues/s1/", "/tissues/s2/"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert BARCODE_COLUMN not in sra_df.columns
+    assert "sample_name: hash_index" not in sra_df.columns
+
+
 # create_sra_biosample_dataframe
 
 

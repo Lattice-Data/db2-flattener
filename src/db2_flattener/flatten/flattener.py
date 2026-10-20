@@ -1114,7 +1114,7 @@ class DB2Flattener:
                 continue
             mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
             barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
-        if barcode_map is not None:
+        if barcode_map is not None and barcode_map.map(lambda v: not is_empty(v)).any():
             barcode_column = (
                 "sample_name: hash_index"
                 if self._frame_has_plate_library(main_df)
