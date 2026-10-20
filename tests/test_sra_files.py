@@ -439,6 +439,25 @@ def test_title_matches_geo_recipe_with_sra_strategy_and_feature_types():
     _assert_no_title_source_cols(sra_df)
 
 
+def test_title_maps_joined_genetic_modifications_strategy():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "genetic_modifications_strategy": ["activation screen; knockout screen"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; CRISPR activation screen; CRISPR knockout screen; Gene Expression"
+    ]
+    _assert_no_title_source_cols(sra_df)
+
+
 def test_title_marks_pooled_samples_from_a_list():
     main_df = pd.DataFrame(
         {

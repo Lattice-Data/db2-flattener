@@ -1312,7 +1312,7 @@ class DB2Flattener:
 
         col = "genetic_modifications_strategy"
         if col in sra_df.columns:
-            sra_df[col] = sra_df[col].replace(GENETIC_PERTURBATION_MAP)
+            sra_df[col] = sra_df[col].map(self._map_geo_genetic_strategy)
         for col in ("treatment", "_title_treatment"):
             if col in sra_df.columns:
                 sra_df[col] = sra_df[col].map(self._sort_geo_list)
