@@ -1230,8 +1230,10 @@ class DB2Flattener:
             filename_basename = False
 
         columns_to_keep = [k for k in PROP_MAP_SRA_FILE if k in main_df.columns]
-        columns_to_keep.extend(title_source_cols)
-        if filename_source:
+        for col in title_source_cols:
+            if col not in columns_to_keep:
+                columns_to_keep.append(col)
+        if filename_source and filename_source not in columns_to_keep:
             columns_to_keep.append(filename_source)
         sra_df = main_df[columns_to_keep].copy()
         sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
@@ -1283,6 +1285,20 @@ class DB2Flattener:
         if "filetype" not in sra_df.columns:
             sra_df["filetype"] = None
 
+        barcode_map = None
+        for samples_col in ("droplet_based_libraries_samples", "plate_based_libraries_samples"):
+            if samples_col not in main_df.columns:
+                continue
+            mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
+            barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
+        if barcode_map is not None and barcode_map.map(lambda v: not is_empty(v)).any():
+            barcode_column = (
+                "sample_name: hash_index"
+                if self._frame_has_plate_library(main_df)
+                else "sample_name: sample_probe_barcode"
+            )
+            sra_df[barcode_column] = barcode_map
+
         if library_atid is not None:
             dedup_key = library_atid
             if "library_ID" in sra_df.columns:
@@ -1325,12 +1341,19 @@ class DB2Flattener:
         )
         sra_df["title"] = sra_df.apply(self._append_sra_title_feature_types, axis=1)
 
+        sra_df["design_description"] = ""
+        if "_feature_types" in sra_df.columns:
+            crispr = sra_df["_feature_types"].map(self._sra_feature_has_crispr)
+            if bool(crispr.any()):
+                sra_df["options"] = crispr.map(
+                    lambda is_crispr: "--ignoreNames" if is_crispr else ""
+                )
+
         drop_cols = [
             c
             for c in (
                 "samples",
                 "treatment",
-                "genetic_modifications_strategy",
                 "_feature_types",
                 *GEO_TREATMENT_COLS,
                 *GEO_TITLE_TREATMENT_COLS,
@@ -1353,6 +1376,14 @@ class DB2Flattener:
                 "instrument_model",
                 "filetype",
                 "title",
+                "design_description",
+                "options",
+                "sample_name: sample_probe_barcode",
+                "sample_name: hash_index",
+                "donor_ids",
+                "donor_dev_stage",
+                "tissue",
+                "genetic_modifications_strategy",
             )
             if c in sra_df.columns
         ]
@@ -1361,6 +1392,8 @@ class DB2Flattener:
         sra_df = sra_df[ordered]
         if filename_source:
             sra_df = self._add_sra_filenames(sra_df, filename_source, basename=filename_basename)
+        if "sample_name" in sra_df.columns:
+            sra_df = sra_df.sort_values("sample_name", kind="mergesort")
         return sra_df.reset_index(drop=True)
 
     @staticmethod
@@ -1386,6 +1419,11 @@ class DB2Flattener:
     def _map_sra_library_selection(cls, ft):
         """Map library feature_types to an SRA library_selection, or None if unmapped."""
         return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SELECTION_MAP)
+
+    @staticmethod
+    def _sra_feature_has_crispr(ft) -> bool:
+        """True when feature_types include CRISPR Guide Capture."""
+        return any("CRISPR Guide Capture" in str(item) for item in to_items(ft))
 
     @classmethod
     def _map_sra_library_layout(cls, val):

@@ -184,12 +184,18 @@ PROP_MAP_SRA_BIOSAMPLE = {
 }
 
 # library_ID, library_strategy, library_source, library_selection,
-# library_layout, platform, and title are derived, not renames
+# library_layout, platform, title, design_description, and options are derived
 PROP_MAP_SRA_FILE = {
     "droplet_based_libraries_CRO_group_identifier": "sample_name",
     "plate_based_libraries_CRO_group_identifier": "sample_name",
     "sequence_file_sets_sequencing_platform": "instrument_model",
     "sequence_files_file_format": "filetype",
+    "human_donors_cxg_donor_id": "donor_ids",
+    "non_human_donors_cxg_donor_id": "donor_ids",
+    "tissues_developmental_stages_term_name": "donor_dev_stage",
+    "tissues_sample_terms_term_name": "tissue",
+    "organoids_sample_terms_term_name": "tissue",
+    "genetic_modifications_strategy": "genetic_modifications_strategy",
 }
 
 SRA_FILE_LIBRARY_STRATEGY_MAP = {

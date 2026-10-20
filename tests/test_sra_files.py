@@ -30,6 +30,13 @@ PLATFORM_COLUMN = "platform"
 INSTRUMENT_MODEL_COLUMN = "instrument_model"
 FILETYPE_COLUMN = "filetype"
 TITLE_COLUMN = "title"
+DESIGN_DESCRIPTION_COLUMN = "design_description"
+OPTIONS_COLUMN = "options"
+BARCODE_COLUMN = "sample_name: sample_probe_barcode"
+DONOR_IDS_COLUMN = "donor_ids"
+DONOR_DEV_STAGE_COLUMN = "donor_dev_stage"
+TISSUE_COLUMN = "tissue"
+STRATEGY_COLUMN = "genetic_modifications_strategy"
 SRA_FILE_COLUMNS = [
     "sample_name",
     LIBRARY_ID_COLUMN,
@@ -41,6 +48,7 @@ SRA_FILE_COLUMNS = [
     INSTRUMENT_MODEL_COLUMN,
     FILETYPE_COLUMN,
     TITLE_COLUMN,
+    DESIGN_DESCRIPTION_COLUMN,
 ]
 
 
@@ -74,9 +82,11 @@ def test_paired_libraries_each_get_a_row():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == SRA_FILE_COLUMNS
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, OPTIONS_COLUMN]
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_A"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
+    assert list(sra_df[DESIGN_DESCRIPTION_COLUMN]) == ["", ""]
+    assert list(sra_df[OPTIONS_COLUMN]) == ["", "--ignoreNames"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER"]
     assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == [
         "TRANSCRIPTOMIC SINGLE CELL",
@@ -123,6 +133,31 @@ def test_crispr_only_group_is_kept():
         "LIB_A RNA-Seq; Gene Expression",
         "LIB_B OTHER; CRISPR Guide Capture",
     ]
+
+
+def test_rows_are_sorted_by_sample_name():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_B", "LIB_A"],
+            "droplet_based_libraries_aliases": [
+                ["alex-marson:LIB_B_CRI"],
+                ["alex-marson:LIB_A_GEX"],
+            ],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/cri/",
+                "/droplet_based_libraries/gex/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["CRISPR Guide Capture"],
+                ["Gene Expression"],
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_B"]
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_B_CRI"]
 
 
 def test_plate_library_columns_are_used_when_droplet_is_absent():
@@ -274,22 +309,24 @@ def test_library_strategy_maps_feature_types():
         }
     )
 
-    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+    sra_df = make_flattener().create_sra_files_dataframe(main_df).set_index("sample_name")
 
-    assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER", "OTHER", "ATAC-seq"]
-    assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == [
-        "TRANSCRIPTOMIC SINGLE CELL",
-        "OTHER",
-        "OTHER",
-        "GENOMIC SINGLE CELL",
-    ]
-    assert list(sra_df[LIBRARY_SELECTION_COLUMN]) == ["cDNA", "PCR", "OTHER", "OTHER"]
-    assert list(sra_df[TITLE_COLUMN]) == [
-        "LIB_GEX RNA-Seq; Gene Expression",
-        "LIB_CRI OTHER; CRISPR Guide Capture",
-        "LIB_MUX OTHER; Multiplexing Capture",
-        "LIB_ATAC ATAC-seq; ATAC",
-    ]
+    assert sra_df.loc["LIB_GEX", LIBRARY_STRATEGY_COLUMN] == "RNA-Seq"
+    assert sra_df.loc["LIB_CRI", LIBRARY_STRATEGY_COLUMN] == "OTHER"
+    assert sra_df.loc["LIB_MUX", LIBRARY_STRATEGY_COLUMN] == "OTHER"
+    assert sra_df.loc["LIB_ATAC", LIBRARY_STRATEGY_COLUMN] == "ATAC-seq"
+    assert sra_df.loc["LIB_GEX", LIBRARY_SOURCE_COLUMN] == "TRANSCRIPTOMIC SINGLE CELL"
+    assert sra_df.loc["LIB_CRI", LIBRARY_SOURCE_COLUMN] == "OTHER"
+    assert sra_df.loc["LIB_MUX", LIBRARY_SOURCE_COLUMN] == "OTHER"
+    assert sra_df.loc["LIB_ATAC", LIBRARY_SOURCE_COLUMN] == "GENOMIC SINGLE CELL"
+    assert sra_df.loc["LIB_GEX", LIBRARY_SELECTION_COLUMN] == "cDNA"
+    assert sra_df.loc["LIB_CRI", LIBRARY_SELECTION_COLUMN] == "PCR"
+    assert sra_df.loc["LIB_MUX", LIBRARY_SELECTION_COLUMN] == "OTHER"
+    assert sra_df.loc["LIB_ATAC", LIBRARY_SELECTION_COLUMN] == "OTHER"
+    assert sra_df.loc["LIB_GEX", TITLE_COLUMN] == "LIB_GEX RNA-Seq; Gene Expression"
+    assert sra_df.loc["LIB_CRI", TITLE_COLUMN] == "LIB_CRI OTHER; CRISPR Guide Capture"
+    assert sra_df.loc["LIB_MUX", TITLE_COLUMN] == "LIB_MUX OTHER; Multiplexing Capture"
+    assert sra_df.loc["LIB_ATAC", TITLE_COLUMN] == "LIB_ATAC ATAC-seq; ATAC"
     assert "droplet_based_libraries_feature_types" not in sra_df.columns
 
 
@@ -384,7 +421,12 @@ def test_prop_map_sends_both_library_types_to_sample_name():
     assert PROP_MAP_SRA_FILE["sequence_files_file_format"] == FILETYPE_COLUMN
     assert "raw_file_samples" not in PROP_MAP_SRA_FILE
     assert "sequence_file_sets_run_cardinality" not in PROP_MAP_SRA_FILE
-    assert "genetic_modifications_strategy" not in PROP_MAP_SRA_FILE
+    assert PROP_MAP_SRA_FILE["human_donors_cxg_donor_id"] == DONOR_IDS_COLUMN
+    assert PROP_MAP_SRA_FILE["non_human_donors_cxg_donor_id"] == DONOR_IDS_COLUMN
+    assert PROP_MAP_SRA_FILE["tissues_developmental_stages_term_name"] == DONOR_DEV_STAGE_COLUMN
+    assert PROP_MAP_SRA_FILE["tissues_sample_terms_term_name"] == TISSUE_COLUMN
+    assert PROP_MAP_SRA_FILE["organoids_sample_terms_term_name"] == TISSUE_COLUMN
+    assert PROP_MAP_SRA_FILE[STRATEGY_COLUMN] == STRATEGY_COLUMN
     assert "sequence_files_sra_file_names" not in PROP_MAP_SRA_FILE
     assert "sequence_files_s3_uri" not in PROP_MAP_SRA_FILE
 
@@ -401,7 +443,6 @@ def _assert_no_title_source_cols(sra_df):
         "raw_file_samples",
         "treatment",
         "_title_treatment",
-        "genetic_modifications_strategy",
         "_feature_types",
         "sequence_file_sets_run_cardinality",
         "sequence_file_sets_sequencing_platform",
@@ -455,6 +496,7 @@ def test_title_maps_joined_genetic_modifications_strategy():
     assert list(sra_df[TITLE_COLUMN]) == [
         "LIB_A RNA-Seq; CRISPR activation screen; CRISPR knockout screen; Gene Expression"
     ]
+    assert list(sra_df[STRATEGY_COLUMN]) == ["CRISPR activation screen; CRISPR knockout screen"]
     _assert_no_title_source_cols(sra_df)
 
 
@@ -539,6 +581,120 @@ def test_title_skips_feature_types_suffix_when_missing():
     assert "Gene Expression" not in sra_df.loc[0, TITLE_COLUMN]
 
 
+def test_design_description_is_blank_and_gex_only_omits_options():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[DESIGN_DESCRIPTION_COLUMN]) == [""]
+    assert OPTIONS_COLUMN not in sra_df.columns
+
+
+def test_options_marks_crispr_libraries_when_present():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_aliases": [
+                ["lab:LIB_A_GEX"],
+                ["lab:LIB_B_CRI"],
+            ],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/gex/",
+                "/droplet_based_libraries/cri/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[OPTIONS_COLUMN]) == ["", "--ignoreNames"]
+
+
+def test_geo_like_columns_use_main_sources_and_tissue_name():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_aliases": [
+                ["lab:LIB_A_GEX"],
+                ["lab:LIB_B_ORG"],
+            ],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/gex/",
+                "/droplet_based_libraries/org/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["Gene Expression"],
+            ],
+            "human_donors_cxg_donor_id": ["H1", None],
+            "non_human_donors_cxg_donor_id": [None, "M1"],
+            "tissues_developmental_stages_term_name": ["adult", None],
+            "tissues_sample_terms_term_name": ["liver", None],
+            "organoids_sample_terms_term_name": [None, "brain organoid"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[DONOR_IDS_COLUMN]) == ["H1", "M1"]
+    assert sra_df.loc[0, DONOR_DEV_STAGE_COLUMN] == "adult"
+    assert pd.isna(sra_df.loc[1, DONOR_DEV_STAGE_COLUMN])
+    assert list(sra_df[TISSUE_COLUMN]) == ["liver", "brain organoid"]
+    assert "**tissue" not in sra_df.columns
+
+
+def test_barcode_column_maps_library_samples():
+    samples = [
+        {
+            "@id": "/tissues/s1/",
+            "aliases": ["lab:s1"],
+            "multiplexing_barcodes": ["BC001"],
+        }
+    ]
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "droplet_based_libraries_samples": [samples],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[BARCODE_COLUMN]) == ["s1 : BC001"]
+    assert "sample_name: hash_index" not in sra_df.columns
+
+
+def test_blank_barcode_column_is_omitted():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "droplet_based_libraries_samples": [["/tissues/s1/"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert BARCODE_COLUMN not in sra_df.columns
+    assert "sample_name: hash_index" not in sra_df.columns
+
+
 def test_library_layout_maps_run_cardinality():
     main_df = pd.DataFrame(
         {
@@ -573,15 +729,13 @@ def test_library_layout_maps_run_cardinality():
         }
     )
 
-    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+    sra_df = make_flattener().create_sra_files_dataframe(main_df).set_index("sample_name")
 
-    assert list(sra_df[LIBRARY_LAYOUT_COLUMN]) == [
-        "paired",
-        "single",
-        "paired",
-        "paired",
-        "paired",
-    ]
+    assert sra_df.loc["LIB_PAIRED", LIBRARY_LAYOUT_COLUMN] == "paired"
+    assert sra_df.loc["LIB_SINGLE", LIBRARY_LAYOUT_COLUMN] == "single"
+    assert sra_df.loc["LIB_INDEX", LIBRARY_LAYOUT_COLUMN] == "paired"
+    assert sra_df.loc["LIB_DUAL", LIBRARY_LAYOUT_COLUMN] == "paired"
+    assert sra_df.loc["LIB_TRIPLET", LIBRARY_LAYOUT_COLUMN] == "paired"
     assert "sequence_file_sets_run_cardinality" not in sra_df.columns
 
 
