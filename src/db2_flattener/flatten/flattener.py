@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from pathlib import PurePosixPath
 
 import numpy as np
 import pandas as pd
@@ -1218,8 +1219,20 @@ class DB2Flattener:
                 seen.add(col)
                 title_source_cols.append(col)
 
+        if "sequence_files_sra_file_names" in main_df.columns:
+            filename_source = "sequence_files_sra_file_names"
+            filename_basename = False
+        elif "sequence_files_s3_uri" in main_df.columns:
+            filename_source = "sequence_files_s3_uri"
+            filename_basename = True
+        else:
+            filename_source = None
+            filename_basename = False
+
         columns_to_keep = [k for k in PROP_MAP_SRA_FILE if k in main_df.columns]
         columns_to_keep.extend(title_source_cols)
+        if filename_source:
+            columns_to_keep.append(filename_source)
         sra_df = main_df[columns_to_keep].copy()
         sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
         if "raw_file_samples" in sra_df.columns:
@@ -1343,7 +1356,12 @@ class DB2Flattener:
             )
             if c in sra_df.columns
         ]
-        return sra_df[ordered].reset_index(drop=True)
+        if filename_source and filename_source in sra_df.columns:
+            ordered.append(filename_source)
+        sra_df = sra_df[ordered]
+        if filename_source:
+            sra_df = self._add_sra_filenames(sra_df, filename_source, basename=filename_basename)
+        return sra_df.reset_index(drop=True)
 
     @staticmethod
     def _map_sra_feature_type(ft, mapping):
@@ -1398,6 +1416,33 @@ class DB2Flattener:
         if suffix and title_text:
             return f"{title_text}; {suffix}"
         return suffix or title_text or None
+
+    @classmethod
+    def _sra_filename_parts(cls, val, *, basename: bool) -> list[str]:
+        """Split a joined or collapsed filename cell into unique names."""
+        names = []
+        for item in to_items(val):
+            for part in str(item).split("; "):
+                part = part.strip()
+                if not part:
+                    continue
+                names.append(PurePosixPath(part).name if basename else part)
+        return list(dict.fromkeys(names))
+
+    @classmethod
+    def _add_sra_filenames(cls, sra_df, source_col, *, basename: bool) -> pd.DataFrame:
+        """Replace source_col with filename, filename2, filename3, … on the right."""
+        if source_col not in sra_df.columns:
+            return sra_df
+        names = sra_df[source_col].map(lambda val: cls._sra_filename_parts(val, basename=basename))
+        sra_df = sra_df.drop(columns=[source_col])
+        max_n = int(names.map(len).max()) if len(names) else 0
+        if max_n == 0:
+            return sra_df
+        for i in range(max_n):
+            col = "filename" if i == 0 else f"filename{i + 1}"
+            sra_df[col] = names.map(lambda xs, i=i: xs[i] if i < len(xs) else pd.NA)
+        return sra_df
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")

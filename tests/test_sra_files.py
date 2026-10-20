@@ -385,6 +385,8 @@ def test_prop_map_sends_both_library_types_to_sample_name():
     assert "raw_file_samples" not in PROP_MAP_SRA_FILE
     assert "sequence_file_sets_run_cardinality" not in PROP_MAP_SRA_FILE
     assert "genetic_modifications_strategy" not in PROP_MAP_SRA_FILE
+    assert "sequence_files_sra_file_names" not in PROP_MAP_SRA_FILE
+    assert "sequence_files_s3_uri" not in PROP_MAP_SRA_FILE
 
 
 def test_empty_main_df_returns_empty_frame():
@@ -404,6 +406,8 @@ def _assert_no_title_source_cols(sra_df):
         "sequence_file_sets_run_cardinality",
         "sequence_file_sets_sequencing_platform",
         "sequence_files_file_format",
+        "sequence_files_sra_file_names",
+        "sequence_files_s3_uri",
         *GEO_TREATMENT_COLS,
         *GEO_TITLE_TREATMENT_COLS,
     ]
@@ -655,3 +659,99 @@ def test_filetype_maps_sequence_file_format():
 
     assert list(sra_df[FILETYPE_COLUMN]) == ["fastq"]
     assert "sequence_files_file_format" not in sra_df.columns
+
+
+def test_filenames_use_sra_file_names_when_present():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
+            "sequence_files_s3_uri": ["s3://bucket/other/ignored.fastq.gz"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df["filename"]) == ["R1.fastq.gz"]
+    assert list(sra_df["filename2"]) == ["R2.fastq.gz"]
+    assert "filename3" not in sra_df.columns
+    assert "ignored.fastq.gz" not in list(sra_df["filename"]) + list(sra_df["filename2"])
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_filenames_from_one_s3_uri_basename():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_files_s3_uri": ["s3://bucket/dir/R1.fastq.gz"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "filename"]
+    assert list(sra_df["filename"]) == ["R1.fastq.gz"]
+    assert "filename2" not in sra_df.columns
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_filenames_from_three_s3_uris():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+            "sequence_files_s3_uri": [
+                "s3://bucket/dir/I1.fastq.gz; s3://bucket/dir/R1.fastq.gz; s3://bucket/dir/R2.fastq.gz"
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df["filename"]) == ["I1.fastq.gz"]
+    assert list(sra_df["filename2"]) == ["R1.fastq.gz"]
+    assert list(sra_df["filename3"]) == ["R2.fastq.gz"]
+    assert "filename4" not in sra_df.columns
+
+
+def test_filenames_omitted_when_neither_source_column_exists():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df.columns) == SRA_FILE_COLUMNS
+    assert "filename" not in sra_df.columns
+
+
+def test_filenames_merge_across_duplicate_library_rows():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"], ["lab:LIB_A"]],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/a/",
+            ],
+            "sequence_files_s3_uri": [
+                "s3://bucket/dir/R1.fastq.gz",
+                "s3://bucket/dir/R2.fastq.gz",
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert len(sra_df) == 1
+    assert list(sra_df["filename"]) == ["R1.fastq.gz"]
+    assert list(sra_df["filename2"]) == ["R2.fastq.gz"]
