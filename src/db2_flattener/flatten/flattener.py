@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from pathlib import PurePosixPath
 
 import numpy as np
 import pandas as pd
@@ -25,8 +26,14 @@ from db2_flattener.schema.constants import (
     PROP_MAP_GEO,
     PROP_MAP_SAMPLES,
     PROP_MAP_SRA_BIOSAMPLE,
+    PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
     SEX_ONTOLOGY_MAP,
+    SRA_FILE_LIBRARY_LAYOUT_MAP,
+    SRA_FILE_LIBRARY_SELECTION_MAP,
+    SRA_FILE_LIBRARY_SOURCE_MAP,
+    SRA_FILE_LIBRARY_STRATEGY_MAP,
+    SRA_FILE_PLATFORM_PREFIXES,
     TISSUE_TYPE_MAP,
     Configs,
 )
@@ -51,6 +58,9 @@ from db2_flattener.utils import (
 
 # For SRA Biosample sheet creation, utilizing TISSUE_TYPE_MAP to get various sample types
 SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE_MAP.values())
+
+# SequenceFileSet slots that link to SequenceFiles, in filename column order
+SEQUENCE_FILE_SET_FILE_SLOTS = ("index1", "index2", "read1", "read2", "read3")
 
 
 def age_with_units(value, units) -> str | None:
@@ -99,6 +109,7 @@ class DB2Flattener:
         biohub_output = f"{prefix}_BIOHUB.csv"
         geo_output = f"{prefix}_GEO.csv"
         sra_biosample_output = f"{prefix}_SRA_BIOSAMPLE.csv"
+        sra_file_output = f"{prefix}_SRA_FILE.csv"
         sample_output = f"{prefix}_SAMPLES.csv"
         guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
@@ -149,6 +160,16 @@ class DB2Flattener:
         print(f"✅ SRA/BioSample CSV file created: {sra_biosample_output}")
         print(f"   Rows: {len(sra_biosample_df)}")
         print(f"   Columns: {len(sra_biosample_df.columns)}")
+
+        sequence_file_set_df = self.create_sequence_file_set_dataframe(complete_data)
+        sra_files_df = self.create_sra_files_dataframe(
+            main_df, sequence_file_set_df=sequence_file_set_df
+        )
+        print(f"Saving SRA file DataFrame to {sra_file_output}...")
+        sra_files_df.to_csv(sra_file_output, index=False)
+        print(f"✅ SRA file CSV file created: {sra_file_output}")
+        print(f"   Rows: {len(sra_files_df)}")
+        print(f"   Columns: {len(sra_files_df.columns)}")
 
         guide_file = self._resolve_guide_rna_file(complete_data)
         guide_df = self.create_guide_metadata_dataframe(guide_file)
@@ -755,7 +776,13 @@ class DB2Flattener:
         return geo_df
 
     @staticmethod
-    def _add_geo_title(geo_df: pd.DataFrame) -> pd.DataFrame:
+    def _add_geo_title(
+        geo_df: pd.DataFrame,
+        *,
+        name_col: str = "*library name",
+        strategy_col: str = "*library strategy",
+        title_col: str = "*title",
+    ) -> pd.DataFrame:
         """Build title from library, strategy, treatment, and genetic modification fields."""
 
         def _cell_text(val) -> str:
@@ -787,8 +814,8 @@ class DB2Flattener:
             left = " ".join(
                 part
                 for part in (
-                    _cell_text(row.get("*library name")),
-                    _cell_text(row.get("*library strategy")),
+                    _cell_text(row.get(name_col)),
+                    _cell_text(row.get(strategy_col)),
                 )
                 if part
             )
@@ -804,7 +831,7 @@ class DB2Flattener:
             return "; ".join(group for group in groups if group) or None
 
         geo_df = geo_df.copy()
-        geo_df["*title"] = geo_df.apply(_summarize_row, axis=1)
+        geo_df[title_col] = geo_df.apply(_summarize_row, axis=1)
         drop_cols = [
             c
             for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
@@ -1093,7 +1120,7 @@ class DB2Flattener:
                 continue
             mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
             barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
-        if barcode_map is not None:
+        if barcode_map is not None and barcode_map.map(lambda v: not is_empty(v)).any():
             barcode_column = (
                 "sample_name: hash_index"
                 if self._frame_has_plate_library(main_df)
@@ -1159,6 +1186,495 @@ class DB2Flattener:
                 sra_df[column] = sra_df["sample_name"].map(cells)
 
         return sra_df
+
+    def create_sequence_file_set_dataframe(self, complete_data) -> pd.DataFrame:
+        """
+        One row per SequenceFileSet: library link and filenames from linked files.
+
+        Filenames come from index1, index2, read1, read2, read3 in that order.
+        Each SequenceFile prefers sra_file_names, else the s3_uri basename.
+        Intermediate only; not written as a CSV.
+        """
+        if not complete_data:
+            return pd.DataFrame()
+
+        resolved = complete_data.get("resolved_objects") or {}
+        seq_files_by_id = resolved.get("SequenceFile") or {}
+        rows_by_set_id = {}
+
+        for lib_data in (complete_data.get("libraries") or {}).values():
+            for raw_file in lib_data.get("raw_matrix_files") or []:
+                local_files = {
+                    sf.get("@id"): sf
+                    for sf in (raw_file.get("sequence_files") or [])
+                    if isinstance(sf, dict) and sf.get("@id")
+                }
+                for file_set in raw_file.get("sequence_file_sets") or []:
+                    if not isinstance(file_set, dict):
+                        continue
+                    set_id = file_set.get("@id")
+                    if not set_id or set_id in rows_by_set_id:
+                        continue
+                    library_ref = file_set.get("library", "")
+                    if isinstance(library_ref, dict):
+                        library_atid = library_ref.get("@id") or None
+                    else:
+                        library_atid = library_ref or None
+                    names = []
+                    for slot in SEQUENCE_FILE_SET_FILE_SLOTS:
+                        ref = file_set.get(slot)
+                        if is_empty(ref):
+                            continue
+                        file_id = ref.get("@id") if isinstance(ref, dict) else ref
+                        if not file_id:
+                            continue
+                        seq_file = local_files.get(file_id) or seq_files_by_id.get(file_id)
+                        if not seq_file:
+                            continue
+                        names.extend(self._sequence_file_filenames(seq_file))
+                    names = list(dict.fromkeys(names))
+                    row = {
+                        "sequence_file_set_@id": set_id,
+                        "library_@id": library_atid,
+                    }
+                    for i, name in enumerate(names):
+                        col = "filename" if i == 0 else f"filename{i + 1}"
+                        row[col] = name
+                    rows_by_set_id[set_id] = row
+
+        if not rows_by_set_id:
+            return pd.DataFrame()
+        return pd.DataFrame(list(rows_by_set_id.values()))
+
+    @classmethod
+    def _sequence_file_filenames(cls, seq_file: dict) -> list[str]:
+        """Filenames for one SequenceFile: prefer sra_file_names, else s3_uri basename."""
+        sra_names = seq_file.get("sra_file_names")
+        if not is_empty(sra_names):
+            return cls._sra_filename_parts(sra_names, basename=False)
+        s3_uri = seq_file.get("s3_uri")
+        if not is_empty(s3_uri):
+            return cls._sra_filename_parts(s3_uri, basename=True)
+        return []
+
+    def create_sra_files_dataframe(self, main_df, sequence_file_set_df=None) -> pd.DataFrame:
+        """
+        Build the SRA file dataframe from main_df: one row per CRO group × library.
+
+        sample_name is the same CRO_group_identifier as SRA_BIOSAMPLE. Unlike that
+        sheet, every library in the group gets its own row, including non-GEX.
+        Duplicate MAIN rows (same library on more than one raw matrix file)
+        collapse to one. CRISPR libraries expand to one row per SequenceFileSet
+        when sequence_file_set_df is provided; non-CRISPR keep MAIN filenames.
+        """
+        group_cols = [
+            col
+            for col in (
+                "droplet_based_libraries_CRO_group_identifier",
+                "plate_based_libraries_CRO_group_identifier",
+            )
+            if col in main_df.columns
+        ]
+        if not group_cols:
+            print(
+                "Warning: MAIN has no library CRO group identifier column; SRA_FILE will be empty"
+            )
+            return pd.DataFrame()
+
+        if main_df.empty:
+            return pd.DataFrame()
+
+        title_source_cols = []
+        seen = set()
+        for col in (
+            "raw_file_samples",
+            "genetic_modifications_strategy",
+            *GEO_TREATMENT_COLS,
+            *GEO_TITLE_TREATMENT_COLS,
+        ):
+            if col in main_df.columns and col not in seen:
+                seen.add(col)
+                title_source_cols.append(col)
+
+        if "sequence_files_sra_file_names" in main_df.columns:
+            filename_source = "sequence_files_sra_file_names"
+            filename_basename = False
+        elif "sequence_files_s3_uri" in main_df.columns:
+            filename_source = "sequence_files_s3_uri"
+            filename_basename = True
+        else:
+            filename_source = None
+            filename_basename = False
+
+        columns_to_keep = [k for k in PROP_MAP_SRA_FILE if k in main_df.columns]
+        for col in title_source_cols:
+            if col not in columns_to_keep:
+                columns_to_keep.append(col)
+        if filename_source and filename_source not in columns_to_keep:
+            columns_to_keep.append(filename_source)
+        sra_df = main_df[columns_to_keep].copy()
+        sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
+        if "raw_file_samples" in sra_df.columns:
+            sra_df.rename(columns={"raw_file_samples": "samples"}, inplace=True)
+        sra_df = collapse_duplicate_columns(sra_df)
+
+        aliases = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_aliases" for kind in ("droplet", "plate")]
+        )
+        library_atid = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_@id" for kind in ("droplet", "plate")]
+        )
+        if aliases is None:
+            print("Warning: MAIN has no library aliases column; SRA_FILE omits library_ID")
+        else:
+            sra_df["library_ID"] = aliases.map(
+                lambda alias: self._get_clean_alias({"aliases": to_items(alias)})
+            )
+
+        feature_types = self._coalesce_columns(
+            main_df,
+            [f"{kind}_based_libraries_feature_types" for kind in ("droplet", "plate")],
+        )
+        if feature_types is None:
+            sra_df["library_strategy"] = None
+            sra_df["library_source"] = None
+            sra_df["library_selection"] = None
+            sra_df["_feature_types"] = None
+        else:
+            sra_df["library_strategy"] = feature_types.map(self._map_sra_library_strategy)
+            sra_df["library_source"] = feature_types.map(self._map_sra_library_source)
+            sra_df["library_selection"] = feature_types.map(self._map_sra_library_selection)
+            sra_df["_feature_types"] = feature_types
+
+        run_cardinality = main_df.get("sequence_file_sets_run_cardinality")
+        if run_cardinality is None:
+            sra_df["library_layout"] = None
+        else:
+            sra_df["library_layout"] = run_cardinality.map(self._map_sra_library_layout)
+
+        sequencing_platform = main_df.get("sequence_file_sets_sequencing_platform")
+        if sequencing_platform is None:
+            sra_df["platform"] = None
+        else:
+            sra_df["platform"] = sequencing_platform.map(self._map_sra_platform)
+        if "instrument_model" not in sra_df.columns:
+            sra_df["instrument_model"] = None
+        if "filetype" not in sra_df.columns:
+            sra_df["filetype"] = None
+
+        barcode_map = None
+        for samples_col in ("droplet_based_libraries_samples", "plate_based_libraries_samples"):
+            if samples_col not in main_df.columns:
+                continue
+            mapped = main_df[samples_col].map(self._sample_probe_barcode_map)
+            barcode_map = mapped if barcode_map is None else barcode_map.fillna(mapped)
+        if barcode_map is not None and barcode_map.map(lambda v: not is_empty(v)).any():
+            barcode_column = (
+                "sample_name: hash_index"
+                if self._frame_has_plate_library(main_df)
+                else "sample_name: sample_probe_barcode"
+            )
+            sra_df[barcode_column] = barcode_map
+
+        if library_atid is not None:
+            dedup_key = library_atid
+            if "library_ID" in sra_df.columns:
+                dedup_key = dedup_key.fillna(sra_df["library_ID"])
+            sra_df["_dedup"] = dedup_key
+        elif "library_ID" in sra_df.columns:
+            sra_df["_dedup"] = sra_df["library_ID"]
+
+        unnamed = int(sra_df["sample_name"].isna().sum())
+        if unnamed:
+            print(
+                f"Warning: dropping {unnamed} of {len(sra_df)} MAIN row(s) with no library "
+                "CRO group identifier from SRA_FILE"
+            )
+            sra_df = sra_df[sra_df["sample_name"].notna()]
+
+        if sra_df.empty:
+            return sra_df.drop(columns=["_dedup"], errors="ignore").reset_index(drop=True)
+
+        sra_df = self._summarize_geo_treatment(sra_df)
+        if "_dedup" in sra_df.columns:
+            sra_df["_dedup"] = sra_df["_dedup"].fillna(sra_df["sample_name"])
+            sra_df = collapse_dataframe(sra_df, group_col="_dedup", sort=False)
+            sra_df = sra_df.rename(columns={"_dedup": "_library_atid"})
+        else:
+            sra_df = collapse_dataframe(sra_df, group_col="sample_name", sort=False)
+
+        col = "genetic_modifications_strategy"
+        if col in sra_df.columns:
+            sra_df[col] = sra_df[col].map(self._map_geo_genetic_strategy)
+        for col in ("treatment", "_title_treatment"):
+            if col in sra_df.columns:
+                sra_df[col] = sra_df[col].map(self._sort_geo_list)
+
+        sra_df = self._add_geo_title(
+            sra_df,
+            name_col="sample_name",
+            strategy_col="library_strategy",
+            title_col="title",
+        )
+        sra_df["title"] = sra_df.apply(self._append_sra_title_feature_types, axis=1)
+
+        sra_df["design_description"] = ""
+        if "_feature_types" in sra_df.columns:
+            sra_df["_is_crispr"] = sra_df["_feature_types"].map(self._sra_feature_has_crispr)
+            if bool(sra_df["_is_crispr"].any()):
+                sra_df["options"] = sra_df["_is_crispr"].map(
+                    lambda is_crispr: "--ignoreNames" if is_crispr else ""
+                )
+        else:
+            sra_df["_is_crispr"] = False
+
+        drop_cols = [
+            c
+            for c in (
+                "samples",
+                "treatment",
+                "_feature_types",
+                *GEO_TREATMENT_COLS,
+                *GEO_TITLE_TREATMENT_COLS,
+            )
+            if c in sra_df.columns
+        ]
+        if drop_cols:
+            sra_df = sra_df.drop(columns=drop_cols)
+
+        ordered = [
+            c
+            for c in (
+                "sample_name",
+                "library_ID",
+                "library_strategy",
+                "library_source",
+                "library_selection",
+                "library_layout",
+                "platform",
+                "instrument_model",
+                "filetype",
+                "title",
+                "design_description",
+                "options",
+                "sample_name: sample_probe_barcode",
+                "sample_name: hash_index",
+                "donor_ids",
+                "donor_dev_stage",
+                "tissue",
+                "genetic_modifications_strategy",
+                "_library_atid",
+                "_is_crispr",
+            )
+            if c in sra_df.columns
+        ]
+        if filename_source and filename_source in sra_df.columns:
+            ordered.append(filename_source)
+        sra_df = sra_df[ordered]
+        sra_df = self._apply_sra_filenames(
+            sra_df,
+            sequence_file_set_df=sequence_file_set_df,
+            filename_source=filename_source,
+            filename_basename=filename_basename,
+        )
+        sort_cols = [c for c in ("sample_name", "sequence_file_set_@id") if c in sra_df.columns]
+        if sort_cols:
+            sra_df = sra_df.sort_values(sort_cols, kind="mergesort")
+        helper_cols = [
+            c
+            for c in (
+                "_library_atid",
+                "_is_crispr",
+                "library_@id",
+                "sequence_file_set_@id",
+            )
+            if c in sra_df.columns
+        ]
+        if helper_cols:
+            sra_df = sra_df.drop(columns=helper_cols)
+        return sra_df.reset_index(drop=True)
+
+    @staticmethod
+    def _map_sra_feature_type(ft, mapping):
+        """Map the first listed feature type through mapping, or None if unmapped."""
+        for item in to_items(ft):
+            mapped = mapping.get(item)
+            if mapped:
+                return mapped
+        return None
+
+    @classmethod
+    def _map_sra_library_strategy(cls, ft):
+        """Map library feature_types to an SRA library_strategy, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_STRATEGY_MAP)
+
+    @classmethod
+    def _map_sra_library_source(cls, ft):
+        """Map library feature_types to an SRA library_source, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SOURCE_MAP)
+
+    @classmethod
+    def _map_sra_library_selection(cls, ft):
+        """Map library feature_types to an SRA library_selection, or None if unmapped."""
+        return cls._map_sra_feature_type(ft, SRA_FILE_LIBRARY_SELECTION_MAP)
+
+    @staticmethod
+    def _sra_feature_has_crispr(ft) -> bool:
+        """True when feature_types include CRISPR Guide Capture."""
+        return any("CRISPR Guide Capture" in str(item) for item in to_items(ft))
+
+    @classmethod
+    def _map_sra_library_layout(cls, val):
+        """Map sequence file set run_cardinality to an SRA library_layout, or None."""
+        if is_empty(val):
+            return None
+        mapped = []
+        for item in to_items(val):
+            for part in str(item).split(";"):
+                part = part.strip()
+                if not part:
+                    continue
+                mapped.append(SRA_FILE_LIBRARY_LAYOUT_MAP.get(part))
+        if not mapped:
+            return None
+        unique = {item for item in mapped if item is not None}
+        if None not in mapped and unique in ({"paired"}, {"single"}):
+            return next(iter(unique))
+        print(
+            f"Warning: SRA_FILE cannot map run_cardinality {val!r} to a single "
+            "library_layout (paired or single)"
+        )
+        return None
+
+    @staticmethod
+    def _map_sra_platform(val):
+        """Map sequencing_platform to an SRA platform by vendor prefix, or None."""
+        for item in to_items(val):
+            if is_empty(item):
+                continue
+            text = str(item)
+            for prefix, platform in SRA_FILE_PLATFORM_PREFIXES:
+                if text.startswith(prefix):
+                    return platform
+        return None
+
+    @staticmethod
+    def _append_sra_title_feature_types(row: pd.Series):
+        """Append feature_types to the GEO-style title, joined with '; '."""
+        items = [
+            str(item).strip() for item in to_items(row.get("_feature_types")) if not is_empty(item)
+        ]
+        suffix = "; ".join(item for item in items if item)
+        title = row.get("title")
+        title_text = "" if is_empty(title) else str(title).strip()
+        if suffix and title_text:
+            return f"{title_text}; {suffix}"
+        return suffix or title_text or None
+
+    @classmethod
+    def _sra_filename_parts(cls, val, *, basename: bool) -> list[str]:
+        """Split a joined or collapsed filename cell into unique names."""
+        names = []
+        for item in to_items(val):
+            for part in str(item).split("; "):
+                part = part.strip()
+                if not part:
+                    continue
+                names.append(PurePosixPath(part).name if basename else part)
+        return list(dict.fromkeys(names))
+
+    @classmethod
+    def _add_sra_filenames(cls, sra_df, source_col, *, basename: bool) -> pd.DataFrame:
+        """Replace source_col with filename, filename2, filename3, … on the right."""
+        if source_col not in sra_df.columns:
+            return sra_df
+        names = sra_df[source_col].map(lambda val: cls._sra_filename_parts(val, basename=basename))
+        sra_df = sra_df.drop(columns=[source_col])
+        max_n = int(names.map(len).max()) if len(names) else 0
+        if max_n == 0:
+            return sra_df
+        for i in range(max_n):
+            col = "filename" if i == 0 else f"filename{i + 1}"
+            sra_df[col] = names.map(lambda xs, i=i: xs[i] if i < len(xs) else pd.NA)
+        return sra_df
+
+    @classmethod
+    def _apply_sra_filenames(
+        cls,
+        sra_df,
+        *,
+        sequence_file_set_df,
+        filename_source,
+        filename_basename: bool,
+    ) -> pd.DataFrame:
+        """
+        Attach filenames: MAIN join for non-CRISPR; per SequenceFileSet for CRISPR.
+
+        CRISPR rows expand to one row per set when sequence_file_set_df has matches.
+        CRISPR with no sets keeps one row and no filenames.
+        """
+        if sra_df.empty:
+            return sra_df
+
+        is_crispr = (
+            sra_df["_is_crispr"].fillna(False).astype(bool)
+            if "_is_crispr" in sra_df.columns
+            else pd.Series(False, index=sra_df.index)
+        )
+        non_crispr = sra_df.loc[~is_crispr].copy()
+        crispr = sra_df.loc[is_crispr].copy()
+
+        if not non_crispr.empty and filename_source and filename_source in non_crispr.columns:
+            non_crispr = cls._add_sra_filenames(
+                non_crispr, filename_source, basename=filename_basename
+            )
+
+        if not crispr.empty:
+            if filename_source and filename_source in crispr.columns:
+                crispr = crispr.drop(columns=[filename_source])
+            if (
+                sequence_file_set_df is not None
+                and not sequence_file_set_df.empty
+                and "_library_atid" in crispr.columns
+                and "library_@id" in sequence_file_set_df.columns
+            ):
+                crispr = crispr.merge(
+                    sequence_file_set_df,
+                    left_on="_library_atid",
+                    right_on="library_@id",
+                    how="left",
+                )
+                crispr = cls._suffix_crispr_library_ids(crispr)
+
+        parts = [part for part in (non_crispr, crispr) if not part.empty]
+        if not parts:
+            return sra_df
+        return pd.concat(parts, ignore_index=True, sort=False)
+
+    @staticmethod
+    def _suffix_crispr_library_ids(crispr: pd.DataFrame) -> pd.DataFrame:
+        """Append .1, .2, … to library_ID for CRISPR rows matched to a SequenceFileSet."""
+        if crispr.empty or "library_ID" not in crispr.columns:
+            return crispr
+        if "sequence_file_set_@id" not in crispr.columns:
+            return crispr
+
+        crispr = crispr.copy()
+        group_col = "_library_atid" if "_library_atid" in crispr.columns else None
+        sort_cols = [c for c in (group_col, "sequence_file_set_@id") if c]
+        crispr = crispr.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+
+        matched = crispr["sequence_file_set_@id"].map(lambda v: not is_empty(v))
+        if not matched.any():
+            return crispr
+        matched_rows = crispr.loc[matched]
+        if group_col:
+            suffixes = matched_rows.groupby(group_col, sort=False).cumcount().add(1)
+        else:
+            suffixes = pd.Series(range(1, len(matched_rows) + 1), index=matched_rows.index)
+        base = matched_rows["library_ID"].map(lambda v: "" if is_empty(v) else str(v))
+        crispr.loc[matched, "library_ID"] = base + "." + suffixes.astype(str)
+        return crispr
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")
