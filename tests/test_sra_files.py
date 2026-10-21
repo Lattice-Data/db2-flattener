@@ -970,3 +970,164 @@ def test_filenames_merge_across_duplicate_library_rows():
     assert len(sra_df) == 1
     assert list(sra_df["filename"]) == ["R1.fastq.gz"]
     assert list(sra_df["filename2"]) == ["R2.fastq.gz"]
+
+
+def test_create_sequence_file_set_dataframe_one_row_per_set():
+    complete_data = {
+        "libraries": {
+            "lib-uuid": {
+                "library": {"@id": "/droplet_based_libraries/cri/", "uuid": "lib-uuid"},
+                "raw_matrix_files": [
+                    {
+                        "sequence_files": [
+                            {
+                                "@id": "/sequence_files/r1a/",
+                                "sra_file_names": ["setA_R1.fastq.gz"],
+                            },
+                            {
+                                "@id": "/sequence_files/r2a/",
+                                "sra_file_names": ["setA_R2.fastq.gz"],
+                            },
+                            {
+                                "@id": "/sequence_files/r1b/",
+                                "s3_uri": "s3://bucket/setB_R1.fastq.gz",
+                            },
+                        ],
+                        "sequence_file_sets": [
+                            {
+                                "@id": "/sequence_file_sets/a/",
+                                "library": "/droplet_based_libraries/cri/",
+                                "read1": "/sequence_files/r1a/",
+                                "read2": "/sequence_files/r2a/",
+                            },
+                            {
+                                "@id": "/sequence_file_sets/b/",
+                                "library": "/droplet_based_libraries/cri/",
+                                "read1": "/sequence_files/r1b/",
+                            },
+                        ],
+                    }
+                ],
+            }
+        },
+        "resolved_objects": {"SequenceFile": {}},
+    }
+
+    sfs_df = make_flattener().create_sequence_file_set_dataframe(complete_data)
+
+    assert len(sfs_df) == 2
+    by_id = sfs_df.set_index("sequence_file_set_@id")
+    assert by_id.loc["/sequence_file_sets/a/", "library_@id"] == "/droplet_based_libraries/cri/"
+    assert by_id.loc["/sequence_file_sets/a/", "filename"] == "setA_R1.fastq.gz"
+    assert by_id.loc["/sequence_file_sets/a/", "filename2"] == "setA_R2.fastq.gz"
+    assert by_id.loc["/sequence_file_sets/b/", "filename"] == "setB_R1.fastq.gz"
+
+
+def test_crispr_expands_one_row_per_sequence_file_set():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_CRI"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/cri/"],
+            "droplet_based_libraries_feature_types": [["CRISPR Guide Capture"]],
+            "sequence_files_sra_file_names": ["joined_R1.fastq.gz; joined_R2.fastq.gz"],
+        }
+    )
+    sequence_file_set_df = pd.DataFrame(
+        [
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/a/",
+                "library_@id": "/droplet_based_libraries/cri/",
+                "filename": "setA_R1.fastq.gz",
+                "filename2": "setA_R2.fastq.gz",
+            },
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/b/",
+                "library_@id": "/droplet_based_libraries/cri/",
+                "filename": "setB_R1.fastq.gz",
+            },
+        ]
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(
+        main_df, sequence_file_set_df=sequence_file_set_df
+    )
+
+    assert len(sra_df) == 2
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_CRI.1", "LIB_A_CRI.2"]
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A OTHER; CRISPR Guide Capture",
+        "LIB_A OTHER; CRISPR Guide Capture",
+    ]
+    assert list(sra_df[OPTIONS_COLUMN]) == ["--ignoreNames", "--ignoreNames"]
+    assert list(sra_df["filename"]) == ["setA_R1.fastq.gz", "setB_R1.fastq.gz"]
+    assert sra_df.loc[0, "filename2"] == "setA_R2.fastq.gz"
+    assert pd.isna(sra_df.loc[1, "filename2"])
+    assert "joined_R1.fastq.gz" not in list(sra_df["filename"])
+    assert "sequence_file_set_@id" not in sra_df.columns
+    assert "_library_atid" not in sra_df.columns
+
+
+def test_crispr_with_one_sequence_file_set_keeps_one_row():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_CRI"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/cri/"],
+            "droplet_based_libraries_feature_types": [["CRISPR Guide Capture"]],
+        }
+    )
+    sequence_file_set_df = pd.DataFrame(
+        [
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/a/",
+                "library_@id": "/droplet_based_libraries/cri/",
+                "filename": "setA_R1.fastq.gz",
+                "filename2": "setA_R2.fastq.gz",
+            }
+        ]
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(
+        main_df, sequence_file_set_df=sequence_file_set_df
+    )
+
+    assert len(sra_df) == 1
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_CRI.1"]
+    assert list(sra_df["filename"]) == ["setA_R1.fastq.gz"]
+    assert list(sra_df["filename2"]) == ["setA_R2.fastq.gz"]
+
+
+def test_gex_keeps_one_row_and_main_filenames_despite_sequence_file_sets():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "sequence_files_sra_file_names": ["main_R1.fastq.gz; main_R2.fastq.gz"],
+        }
+    )
+    sequence_file_set_df = pd.DataFrame(
+        [
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/a/",
+                "library_@id": "/droplet_based_libraries/gex/",
+                "filename": "setA_R1.fastq.gz",
+            },
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/b/",
+                "library_@id": "/droplet_based_libraries/gex/",
+                "filename": "setB_R1.fastq.gz",
+            },
+        ]
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(
+        main_df, sequence_file_set_df=sequence_file_set_df
+    )
+
+    assert len(sra_df) == 1
+    assert list(sra_df["filename"]) == ["main_R1.fastq.gz"]
+    assert list(sra_df["filename2"]) == ["main_R2.fastq.gz"]
+    assert "setA_R1.fastq.gz" not in list(sra_df["filename"])
