@@ -1,10 +1,8 @@
 """SRA file/biosample chunking by sample_name under a byte budget."""
 
-from pathlib import Path
-
 import pandas as pd
 
-from db2_flattener.flatten.flattener import DB2Flattener, SRA_CHUNK_MAX_BYTES
+from db2_flattener.flatten.flattener import SRA_CHUNK_MAX_BYTES, DB2Flattener
 
 
 def make_flattener():

@@ -843,9 +843,9 @@ def test_create_geo_dataframe_maps_genetic_modifications_strategy():
 
 def test_create_geo_dataframe_maps_genetic_modification_alias():
     flattener = make_flattener()
-    main_df = pd.DataFrame(
-        [gex_row(genetic_modifications_aliases="lab:gm-screen-a")]
-    ).dropna(axis=1, how="all")
+    main_df = pd.DataFrame([gex_row(genetic_modifications_aliases="lab:gm-screen-a")]).dropna(
+        axis=1, how="all"
+    )
 
     geo_df = flattener.create_geo_dataframe(main_df)
 

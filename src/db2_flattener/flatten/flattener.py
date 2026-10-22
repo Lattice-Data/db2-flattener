@@ -1311,9 +1311,7 @@ class DB2Flattener:
             sample_names = set()
             if "sample_name" in write_files.columns:
                 sample_names = {
-                    name
-                    for name in write_files["sample_name"].tolist()
-                    if not is_empty(name)
+                    name for name in write_files["sample_name"].tolist() if not is_empty(name)
                 }
             if (
                 sra_biosample_df is not None

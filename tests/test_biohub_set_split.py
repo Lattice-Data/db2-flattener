@@ -196,4 +196,6 @@ def test_unassigned_rows_warn(tmp_path, monkeypatch, capsys):
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
 
     flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
-    assert "1 BIOHUB source row(s) have no matching GeneticModification set" in capsys.readouterr().out
+    assert (
+        "1 BIOHUB source row(s) have no matching GeneticModification set" in capsys.readouterr().out
+    )

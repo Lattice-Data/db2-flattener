@@ -87,9 +87,7 @@ def test_no_genetic_modifications_returns_empty_sets(monkeypatch):
 
 def test_gm_without_guide_rna_files_skips_guide(monkeypatch, capsys):
     flattener, calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": GM_AAA, "strategy": "interference screen"}
-    )
+    data = complete_data_with_gms({"@id": GM_AAA, "strategy": "interference screen"})
     sets = flattener._biohub_guide_sets(data)
     assert len(sets) == 1
     assert sets[0]["file_info"] is None
@@ -314,9 +312,7 @@ def test_read_tabular_file_sniffs_tsv_without_format_hints(monkeypatch):
 
 def test_biohub_set_prefers_gathered_tabular_file(monkeypatch):
     flattener, _calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE["@id"]]}
-    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE["@id"]]})
     data["resolved_objects"]["TabularFile"] = {GUIDE_FILE["@id"]: GUIDE_FILE}
     sets = flattener._biohub_guide_sets(data)
     assert sets[0]["file_info"] == GUIDE_FILE
@@ -324,9 +320,7 @@ def test_biohub_set_prefers_gathered_tabular_file(monkeypatch):
 
 def test_biohub_set_id_only_without_gathered_object(monkeypatch):
     flattener, _calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE["@id"]]}
-    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE["@id"]]})
     sets = flattener._biohub_guide_sets(data)
     assert sets[0]["file_info"] == {"@id": GUIDE_FILE["@id"]}
 

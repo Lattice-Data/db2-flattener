@@ -91,7 +91,9 @@ def resolve_biohub_version_from_s3(s3_order_dir: str, *, fs=None) -> str:
     return next_biohub_version_from_versions(versions_from_metadata_names(entries))
 
 
-def resolve_biohub_version(*, s3_order_dir: str | None = None, biohub_version: str | None = None, fs=None) -> str:
+def resolve_biohub_version(
+    *, s3_order_dir: str | None = None, biohub_version: str | None = None, fs=None
+) -> str:
     """Resolve from exactly one of ``biohub_version`` or ``s3_order_dir``."""
     if biohub_version is not None and s3_order_dir is not None:
         raise ValueError("provide only one of biohub_version or s3_order_dir")
