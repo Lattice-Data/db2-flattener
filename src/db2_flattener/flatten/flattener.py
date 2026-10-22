@@ -62,6 +62,9 @@ SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE
 # SequenceFileSet slots that link to SequenceFiles, in filename column order
 SEQUENCE_FILE_SET_FILE_SLOTS = ("index1", "index2", "read1", "read2", "read3")
 
+# Max total SequenceFile bytes per SRA file/biosample chunk (5 TiB)
+SRA_CHUNK_MAX_BYTES = 5 * 1024**4
+
 # MAIN / biohub-source columns used to assign rows to a GeneticModification set
 BIOHUB_LIBRARY_ID_COLS = (
     "droplet_based_libraries_@id",
@@ -148,8 +151,6 @@ class DB2Flattener:
         main_output = outdir / "MAIN.csv"
         geo_output = geo_dir / "geo_metadata.csv"
         sample_output = geo_dir / "demultiplexing_samples.csv"
-        sra_biosample_output = sra_dir / "sra_biosample.csv"
-        sra_file_output = sra_dir / "sra_file.csv"
 
         # Save main DataFrame to CSV
         print(f"Saving main DataFrame to {main_output}...")
@@ -176,23 +177,13 @@ class DB2Flattener:
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
 
-        # Create SRA/BioSample DataFrame from main DataFrame
+        # SRA sheets: chunk by sample_name so each set stays under 5 TiB of files
         sra_biosample_df = self.create_sra_biosample_dataframe(main_df)
-        print(f"Saving SRA/BioSample DataFrame to {sra_biosample_output}...")
-        sra_biosample_df.to_csv(sra_biosample_output, index=False)
-        print(f"✅ SRA/BioSample CSV file created: {sra_biosample_output}")
-        print(f"   Rows: {len(sra_biosample_df)}")
-        print(f"   Columns: {len(sra_biosample_df.columns)}")
-
         sequence_file_set_df = self.create_sequence_file_set_dataframe(complete_data)
         sra_files_df = self.create_sra_files_dataframe(
             main_df, sequence_file_set_df=sequence_file_set_df
         )
-        print(f"Saving SRA file DataFrame to {sra_file_output}...")
-        sra_files_df.to_csv(sra_file_output, index=False)
-        print(f"✅ SRA file CSV file created: {sra_file_output}")
-        print(f"   Rows: {len(sra_files_df)}")
-        print(f"   Columns: {len(sra_files_df.columns)}")
+        self._write_sra_chunked_outputs(sra_dir, sra_files_df, sra_biosample_df)
 
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
@@ -1252,6 +1243,7 @@ class DB2Flattener:
                     else:
                         library_atid = library_ref or None
                     names = []
+                    total_size = 0
                     for slot in SEQUENCE_FILE_SET_FILE_SLOTS:
                         ref = file_set.get(slot)
                         if is_empty(ref):
@@ -1263,10 +1255,12 @@ class DB2Flattener:
                         if not seq_file:
                             continue
                         names.extend(self._sequence_file_filenames(seq_file))
+                        total_size += self._coerce_file_size(seq_file.get("file_size"))
                     names = list(dict.fromkeys(names))
                     row = {
                         "sequence_file_set_@id": set_id,
                         "library_@id": library_atid,
+                        "file_size": total_size,
                     }
                     for i, name in enumerate(names):
                         col = "filename" if i == 0 else f"filename{i + 1}"
@@ -1287,6 +1281,107 @@ class DB2Flattener:
         if not is_empty(s3_uri):
             return cls._sra_filename_parts(s3_uri, basename=True)
         return []
+
+    @staticmethod
+    def _coerce_file_size(val) -> int:
+        """Parse a single file_size cell to a non-negative int; missing/invalid → 0."""
+        if is_empty(val):
+            return 0
+        try:
+            return max(0, int(float(val)))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _sum_file_sizes(cls, val) -> int:
+        """Sum file sizes from a scalar, list, or '; '-joined MAIN cell."""
+        total = 0
+        for item in to_items(val):
+            if is_empty(item):
+                continue
+            for part in str(item).split(";"):
+                total += cls._coerce_file_size(part.strip())
+        return total
+
+    def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
+        """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TiB sample_name packs."""
+        chunks = self._chunk_sra_by_sample_name(sra_files_df)
+        for set_n, file_chunk in enumerate(chunks, start=1):
+            write_files = file_chunk.drop(columns=["file_size"], errors="ignore")
+            sample_names = set()
+            if "sample_name" in write_files.columns:
+                sample_names = {
+                    name
+                    for name in write_files["sample_name"].tolist()
+                    if not is_empty(name)
+                }
+            if (
+                sra_biosample_df is not None
+                and not sra_biosample_df.empty
+                and "sample_name" in sra_biosample_df.columns
+            ):
+                bio_chunk = sra_biosample_df[
+                    sra_biosample_df["sample_name"].isin(sample_names)
+                ].copy()
+            else:
+                bio_chunk = pd.DataFrame()
+
+            file_output = sra_dir / f"sra_file_set{set_n}.csv"
+            bio_output = sra_dir / f"sra_biosample_set{set_n}.csv"
+            print(f"Saving SRA file DataFrame to {file_output}...")
+            write_files.to_csv(file_output, index=False)
+            print(f"✅ SRA file CSV file created: {file_output}")
+            print(f"   Rows: {len(write_files)}")
+            print(f"   Columns: {len(write_files.columns)}")
+            print(f"Saving SRA/BioSample DataFrame to {bio_output}...")
+            bio_chunk.to_csv(bio_output, index=False)
+            print(f"✅ SRA/BioSample CSV file created: {bio_output}")
+            print(f"   Rows: {len(bio_chunk)}")
+            print(f"   Columns: {len(bio_chunk.columns)}")
+
+    @classmethod
+    def _chunk_sra_by_sample_name(
+        cls, sra_files_df, max_bytes: int = SRA_CHUNK_MAX_BYTES
+    ) -> list[pd.DataFrame]:
+        """Pack SRA_FILE rows by sample_name into chunks totaling ≤ max_bytes."""
+        if sra_files_df is None or sra_files_df.empty:
+            return [pd.DataFrame() if sra_files_df is None else sra_files_df.copy()]
+
+        df = sra_files_df.copy()
+        if "sample_name" not in df.columns:
+            print("Warning: SRA_FILE has no sample_name; writing as a single chunk")
+            return [df]
+
+        if "file_size" not in df.columns:
+            df["file_size"] = 0
+        df["file_size"] = df["file_size"].map(cls._coerce_file_size)
+
+        order = list(dict.fromkeys(df["sample_name"].tolist()))
+        groups = []
+        for name in order:
+            part = df.loc[df["sample_name"] == name]
+            groups.append((name, part, int(part["file_size"].sum())))
+
+        chunks: list[pd.DataFrame] = []
+        current_parts: list[pd.DataFrame] = []
+        current_size = 0
+        for name, part, size in groups:
+            if current_parts and current_size + size > max_bytes:
+                chunks.append(pd.concat(current_parts, ignore_index=True))
+                current_parts = []
+                current_size = 0
+            if not current_parts and size > max_bytes:
+                print(
+                    f"Warning: sample_name {name!r} totals {size} bytes "
+                    f"(> {max_bytes}); writing alone in its own SRA set"
+                )
+                chunks.append(part.reset_index(drop=True))
+                continue
+            current_parts.append(part)
+            current_size += size
+        if current_parts:
+            chunks.append(pd.concat(current_parts, ignore_index=True))
+        return chunks or [df.iloc[0:0].copy()]
 
     def create_sra_files_dataframe(self, main_df, sequence_file_set_df=None) -> pd.DataFrame:
         """
@@ -1343,6 +1438,9 @@ class DB2Flattener:
                 columns_to_keep.append(col)
         if filename_source and filename_source not in columns_to_keep:
             columns_to_keep.append(filename_source)
+        # Used only to size non-CRISPR rows for ≤5 TiB SRA chunking; dropped before write.
+        if "sequence_files_file_size" in main_df.columns:
+            columns_to_keep.append("sequence_files_file_size")
         sra_df = main_df[columns_to_keep].copy()
         sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
         if "raw_file_samples" in sra_df.columns:
@@ -1501,6 +1599,8 @@ class DB2Flattener:
         ]
         if filename_source and filename_source in sra_df.columns:
             ordered.append(filename_source)
+        if "sequence_files_file_size" in sra_df.columns:
+            ordered.append("sequence_files_file_size")
         sra_df = sra_df[ordered]
         sra_df = self._apply_sra_filenames(
             sra_df,
@@ -1518,11 +1618,16 @@ class DB2Flattener:
                 "_is_crispr",
                 "library_@id",
                 "sequence_file_set_@id",
+                "sequence_files_file_size",
             )
             if c in sra_df.columns
         ]
         if helper_cols:
             sra_df = sra_df.drop(columns=helper_cols)
+        if "file_size" in sra_df.columns:
+            sra_df["file_size"] = sra_df["file_size"].map(self._coerce_file_size)
+        else:
+            sra_df["file_size"] = 0
         return sra_df.reset_index(drop=True)
 
     @staticmethod
@@ -1655,14 +1760,24 @@ class DB2Flattener:
         non_crispr = sra_df.loc[~is_crispr].copy()
         crispr = sra_df.loc[is_crispr].copy()
 
-        if not non_crispr.empty and filename_source and filename_source in non_crispr.columns:
-            non_crispr = cls._add_sra_filenames(
-                non_crispr, filename_source, basename=filename_basename
-            )
+        if not non_crispr.empty:
+            if filename_source and filename_source in non_crispr.columns:
+                non_crispr = cls._add_sra_filenames(
+                    non_crispr, filename_source, basename=filename_basename
+                )
+            if "sequence_files_file_size" in non_crispr.columns:
+                non_crispr["file_size"] = non_crispr["sequence_files_file_size"].map(
+                    cls._sum_file_sizes
+                )
+                non_crispr = non_crispr.drop(columns=["sequence_files_file_size"])
+            else:
+                non_crispr["file_size"] = 0
 
         if not crispr.empty:
             if filename_source and filename_source in crispr.columns:
                 crispr = crispr.drop(columns=[filename_source])
+            if "sequence_files_file_size" in crispr.columns:
+                crispr = crispr.drop(columns=["sequence_files_file_size"])
             if (
                 sequence_file_set_df is not None
                 and not sequence_file_set_df.empty
@@ -1676,6 +1791,10 @@ class DB2Flattener:
                     how="left",
                 )
                 crispr = cls._suffix_crispr_library_ids(crispr)
+            if "file_size" not in crispr.columns:
+                crispr["file_size"] = 0
+            else:
+                crispr["file_size"] = crispr["file_size"].map(cls._coerce_file_size)
 
         parts = [part for part in (non_crispr, crispr) if not part.empty]
         if not parts:

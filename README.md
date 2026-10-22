@@ -69,8 +69,8 @@ Layout:
     demultiplexing_samples.csv           # omitted when empty; same alias column when present
     {gm_alias}_guide_metadata.csv        # copy of each BIOHUB guide template
   SRA/
-    sra_biosample.csv
-    sra_file.csv
+    sra_biosample_setN.csv               # paired with sra_file_setN; ≤5 TiB per set
+    sra_file_setN.csv                    # sample_name groups packed under 5 TiB
   BIOHUB/
     samples_template_v#.csv              # when no GeneticModifications
     samples_template_setN_v#.csv         # one per GeneticModification
