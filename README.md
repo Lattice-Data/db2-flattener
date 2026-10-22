@@ -39,21 +39,43 @@ export DB2_DEMO_SERVER=https://lattice-api-dev.demo.lattice-data.org/
 
 ## Flatten from this directory
 
-After the editable install, any of these work from the repository root. CSVs
-are written to the current working directory.
+After the editable install, any of these work from the repository root. Output
+is written under a directory in the current working directory named
+`{CRO_orders}_{timestamp}` (unique `sequence_file_sets_CRO_order` values from
+MAIN, sorted and joined by `_`). If no CRO_order values are present, the
+directory is `MatrixFileSet_{uuid8}_{timestamp}`.
+
+Exactly one of these BIOHUB version flags is required:
+
+- `--biohub-version` / `-b` — explicit version (`1` or `v1`)
+- `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; `v#` is taken from
+  `{order}/metadata/` (`samples_template(_set#)?_v#.csv` /
+  `guide_template(_set#)?_v#.csv`). Missing/empty metadata → `v1`; otherwise
+  highest found `v#` + 1.
 
 ```bash
-python flatten.py -u <matrix-file-set-uuid> -m db2_demo
-db2-flattener -u <matrix-file-set-uuid> -m db2_demo
-python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo
+python flatten.py -u <matrix-file-set-uuid> -m db2_demo -b v1
+db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
+python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -b 2
 ```
 
-Optional `-o` sets a shared path prefix. CSVs are written as
-`{prefix}_MAIN.csv`, `{prefix}_BIOHUB.csv`, `{prefix}_GEO.csv`,
-`{prefix}_SRA_BIOSAMPLE.csv`, `{prefix}_SRA_FILE.csv`, `{prefix}_SAMPLES.csv`,
-and `{prefix}_GUIDE_METADATA.csv`. SAMPLES and GUIDE_METADATA are omitted when
-there is nothing to write. Without `-o`, the prefix is
-`MatrixFileSet_{uuid}_{timestamp}`.
+Layout:
+
+```
+{CRO_orders}_{timestamp}/
+  MAIN.csv
+  GEO/
+    geo_metadata.csv                     # includes genetic_modification_alias when present
+    demultiplexing_samples.csv           # omitted when empty; same alias column when present
+    {gm_alias}_guide_metadata.csv        # copy of each BIOHUB guide template
+  SRA/
+    sra_biosample_setN.csv               # paired with sra_file_setN; ≤5 TB per set
+    sra_file_setN.csv                    # sample_name groups packed under 5 TB
+  BIOHUB/
+    samples_template_setN_v#.csv         # one per GeneticModification; set1 when none
+    guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing
+```
+
 
 ## Fetch latest schema from Lattice
 

@@ -78,6 +78,7 @@ PROP_MAP_GEO = {
     "sequence_file_sets_run_cardinality": "*single or paired-end",
     "droplet_based_libraries_library_construction_technology_term_name": "library_protocol",
     "plate_based_libraries_library_construction_technology_term_name": "library_protocol",
+    "genetic_modifications_aliases": "genetic_modification_alias",
     "genetic_modifications_strategy": "genetic_modifications_strategy",
     "human_donors_cxg_donor_id": "donor_ids",
     "human_donors_sex": "donor_sex",
@@ -170,6 +171,7 @@ PROP_MAP_SAMPLES = {
     "cell_lines_sources_title": "source",
     "treatments_ontological_term_term_name": "treatment",
     "treatments_description": "treatment_description",
+    "genetic_modifications_aliases": "genetic_modification_alias",
     "genetic_modifications_strategy": "genetic_modifications_strategy",
 }
 

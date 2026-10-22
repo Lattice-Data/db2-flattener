@@ -48,6 +48,7 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["cell_lines_sources_title"] == "source"
     assert PROP_MAP_SAMPLES["treatments_ontological_term_term_name"] == "treatment"
     assert PROP_MAP_SAMPLES["treatments_description"] == "treatment_description"
+    assert PROP_MAP_SAMPLES["genetic_modifications_aliases"] == "genetic_modification_alias"
     assert PROP_MAP_SAMPLES["genetic_modifications_strategy"] == "genetic_modifications_strategy"
     assert "treatments_lower_bound_duration" not in PROP_MAP_SAMPLES
     assert "treatments_upper_bound_duration" not in PROP_MAP_SAMPLES
@@ -78,6 +79,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
             "tissues_sources_title": ["Vendor X"],
             "treatments_ontological_term_term_name": ["LPS"],
             "treatments_description": ["stimulation"],
+            "genetic_modifications_aliases": ["lab:gm-screen-a"],
             "genetic_modifications_strategy": ["knockout screen"],
             "raw_file_samples": ["s1"],
             "tissues_@id": ["/tissues/s1/"],
@@ -107,6 +109,8 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert list(result["treatment"]) == ["LPS"]
     assert list(result["treatment_description"]) == ["stimulation"]
     assert "treatment_duration" not in result.columns
+    assert list(result["genetic_modification_alias"]) == ["lab:gm-screen-a"]
+    assert "genetic_modifications_aliases" not in result.columns
     assert list(result["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
     assert "raw_file_samples" not in result.columns
     assert "tissues_@id" not in result.columns

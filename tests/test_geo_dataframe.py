@@ -57,6 +57,7 @@ def test_prop_map_geo_keeps_library_strategy():
     assert PROP_MAP_GEO["tissues_developmental_stages_term_name"] == "donor_dev_stage"
     assert PROP_MAP_GEO["sequence_file_sets_sequencing_platform"] == "*instrument model"
     assert PROP_MAP_GEO["sequence_file_sets_run_cardinality"] == "*single or paired-end"
+    assert PROP_MAP_GEO["genetic_modifications_aliases"] == "genetic_modification_alias"
     assert PROP_MAP_GEO["genetic_modifications_strategy"] == "genetic_modifications_strategy"
     assert PROP_MAP_GEO["tissues_selection_kits"] == "selection_kits"
     assert PROP_MAP_GEO["tissues_selection_markers"] == "selection_markers"
@@ -838,6 +839,18 @@ def test_create_geo_dataframe_maps_genetic_modifications_strategy():
         == "CRISPR activation screen; CRISPR knockout screen"
     )
     assert "genetic_perturbation_strategy" not in geo_df.columns
+
+
+def test_create_geo_dataframe_maps_genetic_modification_alias():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row(genetic_modifications_aliases="lab:gm-screen-a")]).dropna(
+        axis=1, how="all"
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["genetic_modification_alias"]) == ["gm-screen-a"]
+    assert "genetic_modifications_aliases" not in geo_df.columns
 
 
 def test_create_geo_dataframe_title_full_set():

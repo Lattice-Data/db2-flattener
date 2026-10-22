@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 import pandas as pd
@@ -60,7 +60,24 @@ from db2_flattener.utils import (
 SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE_MAP.values())
 
 # SequenceFileSet slots that link to SequenceFiles, in filename column order
-SEQUENCE_FILE_SET_FILE_SLOTS = ("index1", "index2", "read1", "read2", "read3")
+SEQUENCE_FILE_SET_FILE_SLOTS = (
+    "index1",
+    "index2",
+    "read1",
+    "read2",
+    "read3",
+    "trimmed_cram",
+    "untrimmed_cram",
+)
+
+# Max total SequenceFile bytes per SRA file/biosample chunk (5 TB)
+SRA_CHUNK_MAX_BYTES = 5 * 1000**4  # 5_000_000_000_000
+
+# MAIN / biohub-source columns used to assign rows to a GeneticModification set
+BIOHUB_LIBRARY_ID_COLS = (
+    "droplet_based_libraries_@id",
+    "plate_based_libraries_@id",
+)
 
 
 def age_with_units(value, units) -> str | None:
@@ -88,9 +105,14 @@ class DB2Flattener:
         # Initialize gatherer
         self.gatherer = DB2Gatherer(self.connection, configs)
 
-    def flatten_matrix_file_set(self, matrix_file_set_uuid, output_prefix=None):
+    def flatten_matrix_file_set(self, matrix_file_set_uuid, *, biohub_version: str):
         """
-        Flatten a MatrixFileSet into library-indexed data and save as CSV file
+        Flatten a MatrixFileSet into library-indexed data and save CSVs under
+        `{CRO_orders}_{timestamp}/` (or `MatrixFileSet_{uuid8}_{timestamp}/`
+        when no CRO_order values are present).
+
+        biohub_version is the resolved template suffix (e.g. ``v1``) used for
+        BIOHUB samples_template / guide_template filenames.
         """
         print(f"Processing MatrixFileSet {matrix_file_set_uuid}")
 
@@ -103,15 +125,8 @@ class DB2Flattener:
 
         print("Creating DataFrames...")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = output_prefix or f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}"
-        main_output = f"{prefix}_MAIN.csv"
-        biohub_output = f"{prefix}_BIOHUB.csv"
-        geo_output = f"{prefix}_GEO.csv"
-        sra_biosample_output = f"{prefix}_SRA_BIOSAMPLE.csv"
-        sra_file_output = f"{prefix}_SRA_FILE.csv"
-        sample_output = f"{prefix}_SAMPLES.csv"
-        guide_output = f"{prefix}_GUIDE_METADATA.csv"
+        # Fail before creating output dirs when any GM lacks exactly one alias.
+        self._validate_genetic_modification_aliases(complete_data)
 
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
@@ -130,6 +145,24 @@ class DB2Flattener:
             sample_df = self._attach_plate_library_id(main_df, sample_df)
             sample_df = self.create_samples_dataframe(sample_df)
 
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cro_orders = self._unique_cro_orders(main_df)
+        if cro_orders:
+            dir_name = f"{'_'.join(cro_orders)}_{timestamp}"
+        else:
+            dir_name = f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}"
+
+        outdir = Path(dir_name)
+        geo_dir = outdir / "GEO"
+        sra_dir = outdir / "SRA"
+        biohub_dir = outdir / "BIOHUB"
+        for subdir in (geo_dir, sra_dir, biohub_dir):
+            subdir.mkdir(parents=True, exist_ok=True)
+
+        main_output = outdir / "MAIN.csv"
+        geo_output = geo_dir / "geo_metadata.csv"
+        sample_output = geo_dir / "demultiplexing_samples.csv"
+
         # Save main DataFrame to CSV
         print(f"Saving main DataFrame to {main_output}...")
         main_df.to_csv(main_output, index=False)
@@ -139,13 +172,15 @@ class DB2Flattener:
         print(f"   Columns: {len(main_df.columns)}")
 
         # Multiplexed files contribute one Biohub row per sample. Other files
-        # still contribute their main_df rows.
-        biohub_df = self.create_biohub_dataframe(
-            self.biohub_source_dataframe(main_df, biohub_samples)
+        # still contribute their main_df rows. Split by GeneticModification set.
+        self._write_biohub_outputs(
+            biohub_dir,
+            geo_dir,
+            main_df,
+            biohub_samples,
+            complete_data,
+            biohub_version=biohub_version,
         )
-        print(f"Saving biohub DataFrame to {biohub_output}...")
-        biohub_df.to_csv(biohub_output, index=False)
-        print(f"✅ Biohub CSV file created: {biohub_output}")
 
         # Create GEO DataFrame from main DataFrame
         geo_df = self.create_geo_dataframe(main_df)
@@ -153,32 +188,13 @@ class DB2Flattener:
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
 
-        # Create SRA/BioSample DataFrame from main DataFrame
+        # SRA sheets: chunk by sample_name so each set stays under 5 TB of files
         sra_biosample_df = self.create_sra_biosample_dataframe(main_df)
-        print(f"Saving SRA/BioSample DataFrame to {sra_biosample_output}...")
-        sra_biosample_df.to_csv(sra_biosample_output, index=False)
-        print(f"✅ SRA/BioSample CSV file created: {sra_biosample_output}")
-        print(f"   Rows: {len(sra_biosample_df)}")
-        print(f"   Columns: {len(sra_biosample_df.columns)}")
-
         sequence_file_set_df = self.create_sequence_file_set_dataframe(complete_data)
         sra_files_df = self.create_sra_files_dataframe(
             main_df, sequence_file_set_df=sequence_file_set_df
         )
-        print(f"Saving SRA file DataFrame to {sra_file_output}...")
-        sra_files_df.to_csv(sra_file_output, index=False)
-        print(f"✅ SRA file CSV file created: {sra_file_output}")
-        print(f"   Rows: {len(sra_files_df)}")
-        print(f"   Columns: {len(sra_files_df.columns)}")
-
-        guide_file = self._resolve_guide_rna_file(complete_data)
-        guide_df = self.create_guide_metadata_dataframe(guide_file)
-        if guide_df is not None and not guide_df.empty:
-            print(f"Saving guide metadata DataFrame to {guide_output}...")
-            guide_df.to_csv(guide_output, index=False)
-            print(f"✅ Guide metadata CSV file created: {guide_output}")
-            print(f"   Rows: {len(guide_df)}")
-            print(f"   Columns: {len(guide_df.columns)}")
+        self._write_sra_chunked_outputs(sra_dir, sra_files_df, sra_biosample_df)
 
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
@@ -189,7 +205,24 @@ class DB2Flattener:
             print(f"   Rows: {len(sample_df)}")
             print(f"   Columns: {len(sample_df.columns)}")
 
-        return main_output
+        print(f"✅ Output directory created: {outdir}")
+        return str(outdir)
+
+    @staticmethod
+    def _unique_cro_orders(main_df):
+        """Sorted unique CRO_order values from MAIN ``sequence_file_sets_CRO_order``."""
+        col = "sequence_file_sets_CRO_order"
+        if col not in main_df.columns:
+            return []
+        orders = []
+        for val in main_df[col]:
+            if is_empty(val):
+                continue
+            for part in str(val).split("; "):
+                part = part.strip()
+                if part:
+                    orders.append(part)
+        return sorted(set(orders))
 
     def create_dataframe(self, complete_data):
         """Create main library/raw-file DataFrame and sample DataFrame keyed by raw matrix file"""
@@ -562,6 +595,10 @@ class DB2Flattener:
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = strip_author_metadata_column_prefix(geo_df)
         geo_df = collapse_duplicate_columns(geo_df)
+        if "genetic_modification_alias" in geo_df.columns:
+            geo_df["genetic_modification_alias"] = geo_df["genetic_modification_alias"].map(
+                self._map_geo_genetic_modification_alias
+            )
         geo_df = self._summarize_geo_experimental_condition(geo_df)
         geo_df = self._summarize_geo_treatment(geo_df)
         geo_df = self._add_geo_molecule(geo_df)
@@ -647,6 +684,13 @@ class DB2Flattener:
             return val
         mapped = [GENETIC_PERTURBATION_MAP.get(part, part) for part in parts]
         return "; ".join(mapped)
+
+    @classmethod
+    def _map_geo_genetic_modification_alias(cls, val):
+        """Sanitize a GEO genetic_modification_alias cell; empty stays empty."""
+        if is_empty(val):
+            return val
+        return cls._genetic_modification_alias_label(val)
 
     @staticmethod
     def _pool_mixed_geo_strategy(val):
@@ -1191,8 +1235,9 @@ class DB2Flattener:
         """
         One row per SequenceFileSet: library link and filenames from linked files.
 
-        Filenames come from index1, index2, read1, read2, read3 in that order.
-        Each SequenceFile prefers sra_file_names, else the s3_uri basename.
+        Filenames come from index1, index2, read1, read2, read3, trimmed_cram,
+        untrimmed_cram in that order. Each SequenceFile prefers sra_file_names,
+        else the s3_uri basename.
         Intermediate only; not written as a CSV.
         """
         if not complete_data:
@@ -1221,6 +1266,7 @@ class DB2Flattener:
                     else:
                         library_atid = library_ref or None
                     names = []
+                    total_size = 0
                     for slot in SEQUENCE_FILE_SET_FILE_SLOTS:
                         ref = file_set.get(slot)
                         if is_empty(ref):
@@ -1232,10 +1278,12 @@ class DB2Flattener:
                         if not seq_file:
                             continue
                         names.extend(self._sequence_file_filenames(seq_file))
+                        total_size += self._coerce_file_size(seq_file.get("file_size"))
                     names = list(dict.fromkeys(names))
                     row = {
                         "sequence_file_set_@id": set_id,
                         "library_@id": library_atid,
+                        "file_size": total_size,
                     }
                     for i, name in enumerate(names):
                         col = "filename" if i == 0 else f"filename{i + 1}"
@@ -1256,6 +1304,132 @@ class DB2Flattener:
         if not is_empty(s3_uri):
             return cls._sra_filename_parts(s3_uri, basename=True)
         return []
+
+    @staticmethod
+    def _coerce_file_size(val) -> int:
+        """Parse a single file_size cell to a non-negative int; missing/invalid → 0."""
+        if is_empty(val):
+            return 0
+        try:
+            return max(0, int(float(val)))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _sra_file_size_from_sequence_file_sets(cls, sra_rows, sequence_file_set_df) -> pd.Series:
+        """Sum SequenceFileSet file_size totals per library (same source as CRISPR)."""
+        if (
+            sra_rows.empty
+            or "_library_atid" not in sra_rows.columns
+            or sequence_file_set_df is None
+            or sequence_file_set_df.empty
+            or "library_@id" not in sequence_file_set_df.columns
+            or "file_size" not in sequence_file_set_df.columns
+        ):
+            return pd.Series(0, index=sra_rows.index, dtype=int)
+
+        sizes = sequence_file_set_df.copy()
+        sizes["file_size"] = sizes["file_size"].map(cls._coerce_file_size)
+        by_library = sizes.groupby("library_@id", sort=False)["file_size"].sum()
+        return (
+            sra_rows["_library_atid"]
+            .map(by_library)
+            .fillna(0)
+            .map(cls._coerce_file_size)
+            .astype(int)
+        )
+
+    @staticmethod
+    def _drop_empty_sra_filename_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Drop filename / filenameN columns that are empty for every row."""
+        if df is None or df.empty:
+            return df
+        drop_cols = []
+        for col in df.columns:
+            if col != "filename" and not re.fullmatch(r"filename\d+", str(col)):
+                continue
+            if all(is_empty(v) for v in df[col].tolist()):
+                drop_cols.append(col)
+        return df.drop(columns=drop_cols) if drop_cols else df
+
+    def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
+        """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TB sample_name packs."""
+        chunks = self._chunk_sra_by_sample_name(sra_files_df)
+        for set_n, file_chunk in enumerate(chunks, start=1):
+            write_files = file_chunk.drop(columns=["file_size"], errors="ignore")
+            write_files = self._drop_empty_sra_filename_columns(write_files)
+            sample_names = set()
+            if "sample_name" in write_files.columns:
+                sample_names = {
+                    name for name in write_files["sample_name"].tolist() if not is_empty(name)
+                }
+            if (
+                sra_biosample_df is not None
+                and not sra_biosample_df.empty
+                and "sample_name" in sra_biosample_df.columns
+            ):
+                bio_chunk = sra_biosample_df[
+                    sra_biosample_df["sample_name"].isin(sample_names)
+                ].copy()
+            else:
+                bio_chunk = pd.DataFrame()
+
+            file_output = sra_dir / f"sra_file_set{set_n}.csv"
+            bio_output = sra_dir / f"sra_biosample_set{set_n}.csv"
+            print(f"Saving SRA file DataFrame to {file_output}...")
+            write_files.to_csv(file_output, index=False)
+            print(f"✅ SRA file CSV file created: {file_output}")
+            print(f"   Rows: {len(write_files)}")
+            print(f"   Columns: {len(write_files.columns)}")
+            print(f"Saving SRA/BioSample DataFrame to {bio_output}...")
+            bio_chunk.to_csv(bio_output, index=False)
+            print(f"✅ SRA/BioSample CSV file created: {bio_output}")
+            print(f"   Rows: {len(bio_chunk)}")
+            print(f"   Columns: {len(bio_chunk.columns)}")
+
+    @classmethod
+    def _chunk_sra_by_sample_name(
+        cls, sra_files_df, max_bytes: int = SRA_CHUNK_MAX_BYTES
+    ) -> list[pd.DataFrame]:
+        """Pack SRA_FILE rows by sample_name into chunks totaling ≤ max_bytes."""
+        if sra_files_df is None or sra_files_df.empty:
+            return [pd.DataFrame() if sra_files_df is None else sra_files_df.copy()]
+
+        df = sra_files_df.copy()
+        if "sample_name" not in df.columns:
+            print("Warning: SRA_FILE has no sample_name; writing as a single chunk")
+            return [df]
+
+        if "file_size" not in df.columns:
+            df["file_size"] = 0
+        df["file_size"] = df["file_size"].map(cls._coerce_file_size)
+
+        order = list(dict.fromkeys(df["sample_name"].tolist()))
+        groups = []
+        for name in order:
+            part = df.loc[df["sample_name"] == name]
+            groups.append((name, part, int(part["file_size"].sum())))
+
+        chunks: list[pd.DataFrame] = []
+        current_parts: list[pd.DataFrame] = []
+        current_size = 0
+        for name, part, size in groups:
+            if current_parts and current_size + size > max_bytes:
+                chunks.append(pd.concat(current_parts, ignore_index=True))
+                current_parts = []
+                current_size = 0
+            if not current_parts and size > max_bytes:
+                print(
+                    f"Warning: sample_name {name!r} totals {size} bytes "
+                    f"(> {max_bytes}); writing alone in its own SRA set"
+                )
+                chunks.append(part.reset_index(drop=True))
+                continue
+            current_parts.append(part)
+            current_size += size
+        if current_parts:
+            chunks.append(pd.concat(current_parts, ignore_index=True))
+        return chunks or [df.iloc[0:0].copy()]
 
     def create_sra_files_dataframe(self, main_df, sequence_file_set_df=None) -> pd.DataFrame:
         """
@@ -1492,6 +1666,10 @@ class DB2Flattener:
         ]
         if helper_cols:
             sra_df = sra_df.drop(columns=helper_cols)
+        if "file_size" in sra_df.columns:
+            sra_df["file_size"] = sra_df["file_size"].map(self._coerce_file_size)
+        else:
+            sra_df["file_size"] = 0
         return sra_df.reset_index(drop=True)
 
     @staticmethod
@@ -1608,10 +1786,12 @@ class DB2Flattener:
         filename_basename: bool,
     ) -> pd.DataFrame:
         """
-        Attach filenames: MAIN join for non-CRISPR; per SequenceFileSet for CRISPR.
+        Attach filenames and file_size for SRA rows.
 
-        CRISPR rows expand to one row per set when sequence_file_set_df has matches.
-        CRISPR with no sets keeps one row and no filenames.
+        Non-CRISPR: MAIN filenames; file_size is the sum of matching SequenceFileSet
+        totals (same SequenceFile object sums as CRISPR), one row per library.
+        CRISPR: expand to one row per SequenceFileSet when matches exist; keep one
+        row with no filenames when none do.
         """
         if sra_df.empty:
             return sra_df
@@ -1624,9 +1804,13 @@ class DB2Flattener:
         non_crispr = sra_df.loc[~is_crispr].copy()
         crispr = sra_df.loc[is_crispr].copy()
 
-        if not non_crispr.empty and filename_source and filename_source in non_crispr.columns:
-            non_crispr = cls._add_sra_filenames(
-                non_crispr, filename_source, basename=filename_basename
+        if not non_crispr.empty:
+            if filename_source and filename_source in non_crispr.columns:
+                non_crispr = cls._add_sra_filenames(
+                    non_crispr, filename_source, basename=filename_basename
+                )
+            non_crispr["file_size"] = cls._sra_file_size_from_sequence_file_sets(
+                non_crispr, sequence_file_set_df
             )
 
         if not crispr.empty:
@@ -1645,6 +1829,10 @@ class DB2Flattener:
                     how="left",
                 )
                 crispr = cls._suffix_crispr_library_ids(crispr)
+            if "file_size" not in crispr.columns:
+                crispr["file_size"] = 0
+            else:
+                crispr["file_size"] = crispr["file_size"].map(cls._coerce_file_size)
 
         parts = [part for part in (non_crispr, crispr) if not part.empty]
         if not parts:
@@ -1653,7 +1841,10 @@ class DB2Flattener:
 
     @staticmethod
     def _suffix_crispr_library_ids(crispr: pd.DataFrame) -> pd.DataFrame:
-        """Append .1, .2, … to library_ID for CRISPR rows matched to a SequenceFileSet."""
+        """Append .1, .2, … to library_ID when a CRISPR library has multiple SequenceFileSets.
+
+        A library with only one matched SequenceFileSet keeps the unsuffixed library_ID.
+        """
         if crispr.empty or "library_ID" not in crispr.columns:
             return crispr
         if "sequence_file_set_@id" not in crispr.columns:
@@ -1669,11 +1860,19 @@ class DB2Flattener:
             return crispr
         matched_rows = crispr.loc[matched]
         if group_col:
+            group_sizes = matched_rows.groupby(group_col, sort=False)[group_col].transform("size")
             suffixes = matched_rows.groupby(group_col, sort=False).cumcount().add(1)
+            multi = group_sizes.gt(1)
         else:
             suffixes = pd.Series(range(1, len(matched_rows) + 1), index=matched_rows.index)
-        base = matched_rows["library_ID"].map(lambda v: "" if is_empty(v) else str(v))
-        crispr.loc[matched, "library_ID"] = base + "." + suffixes.astype(str)
+            multi = pd.Series(len(matched_rows) > 1, index=matched_rows.index)
+        suffix_idx = multi[multi].index
+        if suffix_idx.empty:
+            return crispr
+        base = matched_rows.loc[suffix_idx, "library_ID"].map(
+            lambda v: "" if is_empty(v) else str(v)
+        )
+        crispr.loc[suffix_idx, "library_ID"] = base + "." + suffixes.loc[suffix_idx].astype(str)
         return crispr
 
     # Anything not listed sorts alphabetically after these
@@ -2109,10 +2308,10 @@ class DB2Flattener:
 
     def create_guide_metadata_dataframe(self, file_info):
         """
-        Build a guide-metadata DataFrame from the single shared guide RNA TabularFile.
+        Build a guide-metadata DataFrame from one guide RNA TabularFile.
 
-        file_info comes from _resolve_guide_rna_file. None (no file, or more than
-        one unique TabularFile) returns None.
+        file_info is the TabularFile object (or embed) for a single BIOHUB set.
+        None returns None.
         """
         if not file_info:
             return None
@@ -2124,37 +2323,213 @@ class DB2Flattener:
             return None
         return guide_df[present].rename(columns=GUIDE_METADATA_COLUMN_MAP).copy()
 
-    def _resolve_guide_rna_file(self, complete_data):
-        """Return the single gathered guide TabularFile, or None."""
-        files = self._unique_guide_rna_files(complete_data)
-        if not files:
-            return None
-        if len(files) > 1:
-            labels = [
-                file_info.get("@id") or file_info.get("s3_uri") or str(file_info)
-                for file_info in files
-            ]
-            print(
-                f"Warning: found {len(files)} unique guide RNA TabularFiles; "
-                f"expected one. Skipping GUIDE_METADATA. Files: {labels}"
-            )
-            return None
-        return files[0]
+    def _write_biohub_outputs(
+        self,
+        biohub_dir,
+        geo_dir,
+        main_df,
+        biohub_samples,
+        complete_data,
+        *,
+        biohub_version: str,
+    ):
+        """Write BIOHUB samples/guide templates, split by GeneticModification set.
 
-    @staticmethod
-    def _unique_guide_rna_files(complete_data):
-        """Collect unique TabularFile refs, preferring objects already gathered."""
-        resolved = complete_data.get("resolved_objects", {})
-        genetic_modifications = resolved.get("GeneticModification", {})
-        gathered = resolved.get("TabularFile", {})
-        unique = {}
-        for gm in genetic_modifications.values():
+        Guide frames are also copied to GEO as ``{alias}_guide_metadata.csv``.
+        """
+        source = self.biohub_source_dataframe(main_df, biohub_samples)
+        sets = self._biohub_guide_sets(complete_data)
+
+        if not sets:
+            biohub_df = self.create_biohub_dataframe(source)
+            biohub_output = biohub_dir / f"samples_template_set1_{biohub_version}.csv"
+            print(f"Saving biohub DataFrame to {biohub_output}...")
+            biohub_df.to_csv(biohub_output, index=False)
+            print(f"✅ Biohub CSV file created: {biohub_output}")
+            return
+
+        assigned_index = set()
+        set_subsets = []
+        for biohub_set in sets:
+            library_ids = biohub_set["library_ids"]
+            if source.empty:
+                subset = source
+            else:
+                mask = source.apply(
+                    lambda row, libs=library_ids: bool(self._row_library_ids(row) & libs),
+                    axis=1,
+                )
+                subset = source.loc[mask]
+                assigned_index.update(subset.index.tolist())
+            set_subsets.append((biohub_set, subset))
+
+        if not source.empty:
+            unassigned = len(source.index.difference(assigned_index))
+            if unassigned:
+                message = (
+                    f"{unassigned} BIOHUB source row(s) have no matching GeneticModification set"
+                )
+                print(f"Warning: {message}")
+                raise ValueError(message)
+
+        for biohub_set, subset in set_subsets:
+            set_n = biohub_set["set_number"]
+            biohub_df = self.create_biohub_dataframe(subset)
+            samples_output = biohub_dir / f"samples_template_set{set_n}_{biohub_version}.csv"
+            print(f"Saving biohub DataFrame to {samples_output}...")
+            biohub_df.to_csv(samples_output, index=False)
+            print(f"✅ Biohub CSV file created: {samples_output}")
+
+            file_info = biohub_set["file_info"]
+            if not file_info:
+                continue
+            guide_df = self.create_guide_metadata_dataframe(file_info)
+            if guide_df is None or guide_df.empty:
+                continue
+            guide_output = biohub_dir / f"guide_template_set{set_n}_{biohub_version}.csv"
+            print(f"Saving guide metadata DataFrame to {guide_output}...")
+            guide_df.to_csv(guide_output, index=False)
+            print(f"✅ Guide metadata CSV file created: {guide_output}")
+            print(f"   Rows: {len(guide_df)}")
+            print(f"   Columns: {len(guide_df.columns)}")
+
+            alias = biohub_set["alias"]
+            geo_guide_output = geo_dir / f"{alias}_guide_metadata.csv"
+            print(f"Saving GEO guide metadata DataFrame to {geo_guide_output}...")
+            guide_df.to_csv(geo_guide_output, index=False)
+            print(f"✅ GEO guide metadata CSV file created: {geo_guide_output}")
+
+    def _biohub_guide_sets(self, complete_data):
+        """
+        One BIOHUB set per GeneticModification (sorted by @id).
+
+        Each set expects exactly one guide TabularFile. Divergence (0 or >1 files
+        on a GM, or a TabularFile claimed by two GMs) is warned and that set's
+        guide file is skipped; samples are still written for the set.
+        """
+        resolved = complete_data.get("resolved_objects") or {}
+        genetic_modifications = resolved.get("GeneticModification") or {}
+        if not genetic_modifications:
+            return []
+
+        gathered = resolved.get("TabularFile") or {}
+        gm_to_libraries = {gm_id: set() for gm_id in genetic_modifications}
+        for lib_data in (complete_data.get("libraries") or {}).values():
+            library = lib_data.get("library") or {}
+            lib_atid = library.get("@id")
+            if not lib_atid:
+                continue
+            for gm in lib_data.get("genetic_modifications") or []:
+                gm_id = gm.get("@id") if isinstance(gm, dict) else None
+                if gm_id in gm_to_libraries:
+                    gm_to_libraries[gm_id].add(lib_atid)
+
+        library_to_gms = {}
+        for gm_id, libs in gm_to_libraries.items():
+            for lib_atid in libs:
+                library_to_gms.setdefault(lib_atid, set()).add(gm_id)
+        for lib_atid, gm_ids in sorted(library_to_gms.items()):
+            if len(gm_ids) > 1:
+                raise ValueError(
+                    f"Library {lib_atid} is linked to multiple GeneticModifications: "
+                    f"{sorted(gm_ids)}; expected one GM per library"
+                )
+
+        claimed_files = {}
+        sets = []
+        for set_number, gm_id in enumerate(sorted(genetic_modifications), start=1):
+            gm = genetic_modifications[gm_id]
+            file_entries = []
             for file_info in normalize_guide_rna_file_refs(gm.get("guide_rna_files")):
                 key = file_info.get("@id") or file_info.get("s3_uri")
                 if not key:
                     continue
-                unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
-        return list(unique.values())
+                resolved_file = gathered.get(file_info.get("@id"), file_info)
+                file_entries.append((key, resolved_file))
+
+            file_info = None
+            if not file_entries:
+                print(
+                    f"Warning: GeneticModification {gm_id} has no guide_rna_files; "
+                    f"skipping guide_template for set{set_number}"
+                )
+            elif len(file_entries) > 1:
+                labels = [key for key, _ in file_entries]
+                print(
+                    f"Warning: GeneticModification {gm_id} has {len(file_entries)} "
+                    f"guide_rna_files; expected one. Skipping guide_template for "
+                    f"set{set_number}. Files: {labels}"
+                )
+            else:
+                key, resolved_file = file_entries[0]
+                prior_gm = claimed_files.get(key)
+                if prior_gm is not None:
+                    print(
+                        f"Warning: guide TabularFile {key} is shared by "
+                        f"{prior_gm} and {gm_id}; skipping guide_template for "
+                        f"set{set_number}"
+                    )
+                else:
+                    claimed_files[key] = gm_id
+                    file_info = resolved_file
+
+            sets.append(
+                {
+                    "set_number": set_number,
+                    "gm_id": gm_id,
+                    "file_info": file_info,
+                    "library_ids": gm_to_libraries[gm_id],
+                    "alias": self._genetic_modification_alias_label(gm.get("aliases"), gm_id=gm_id),
+                }
+            )
+        return sets
+
+    @classmethod
+    def _genetic_modification_alias_label(cls, aliases, *, gm_id=None) -> str:
+        """Require exactly one GM alias; strip lab prefix and sanitize for GEO/filenames."""
+        parts = []
+        for item in to_items(aliases):
+            if is_empty(item):
+                continue
+            for part in str(item).split(";"):
+                part = part.strip()
+                if part:
+                    parts.append(part)
+        # Preserve order while dropping duplicates
+        unique = list(dict.fromkeys(parts))
+        if len(unique) != 1:
+            gm_label = gm_id if gm_id is not None else "GeneticModification"
+            raise ValueError(f"{gm_label} must have exactly one alias; found {unique!r}")
+        label = unique[0]
+        if ":" in label:
+            label = label.split(":", 1)[1]
+        return re.sub(r"[^A-Za-z0-9._-]", "_", label)
+
+    @classmethod
+    def _validate_genetic_modification_aliases(cls, complete_data) -> None:
+        """Raise if any GeneticModification lacks exactly one alias."""
+        resolved = (complete_data or {}).get("resolved_objects") or {}
+        genetic_modifications = resolved.get("GeneticModification") or {}
+        for gm_id, gm in genetic_modifications.items():
+            aliases = gm.get("aliases") if isinstance(gm, dict) else None
+            cls._genetic_modification_alias_label(aliases, gm_id=gm_id)
+
+    @classmethod
+    def _row_library_ids(cls, row):
+        """Library @ids on a biohub-source row (droplet and/or plate)."""
+        ids = set()
+        for col in BIOHUB_LIBRARY_ID_COLS:
+            if col not in row.index:
+                continue
+            val = row[col]
+            if is_empty(val):
+                continue
+            for item in to_items(val):
+                for part in str(item).split("; "):
+                    part = part.strip()
+                    if part:
+                        ids.add(part)
+        return ids
 
     @staticmethod
     def _frame_has_plate_library(df) -> bool:
@@ -2222,15 +2597,15 @@ class DB2Flattener:
             and column not in exploded.columns
             and column not in extras
         )
-        # Used only to recognize a plate experiment after per-sample rows replace
-        # main. create_biohub_dataframe does not write this column.
-        plate_id = "plate_based_libraries_@id"
-        if (
-            plate_id in main_df.columns
-            and plate_id not in exploded.columns
-            and plate_id not in extras
-        ):
-            extras.append(plate_id)
+        # Library @ids: plate recognition after per-sample rows replace main, and
+        # BIOHUB set splitting. create_biohub_dataframe does not write these.
+        for lib_id_col in BIOHUB_LIBRARY_ID_COLS:
+            if (
+                lib_id_col in main_df.columns
+                and lib_id_col not in exploded.columns
+                and lib_id_col not in extras
+            ):
+                extras.append(lib_id_col)
         if extras:
             file_level = main_df.loc[
                 main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),

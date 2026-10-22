@@ -14,6 +14,12 @@ GUIDE_FILE = {
     "file_format": "tsv",
 }
 
+GUIDE_FILE_OTHER = {
+    "@id": "/tabular_files/22222222-2222-2222-2222-222222222222/",
+    "s3_uri": "s3://submissions-lattice/BCP/tabular_files/other.tsv",
+    "file_format": "tsv",
+}
+
 GUIDE_ROWS = pd.DataFrame(
     {
         "guide_id": ["g1", "g2"],
@@ -25,6 +31,11 @@ GUIDE_ROWS = pd.DataFrame(
         "extra_col": ["drop-me", "drop-me"],
     }
 )
+
+GM_AAA = "/genetic_modifications/aaa/"
+GM_BBB = "/genetic_modifications/bbb/"
+LIB_A = "/droplet_based_libraries/lib-a/"
+LIB_B = "/droplet_based_libraries/lib-b/"
 
 
 def make_flattener(monkeypatch, read_df=None):
@@ -42,44 +53,66 @@ def make_flattener(monkeypatch, read_df=None):
     return flattener, calls
 
 
-def complete_data_with_gms(*gms):
-    return {
+def complete_data_with_gms(*gms, libraries=None):
+    normalized = []
+    for gm in gms:
+        gm = dict(gm)
+        if "aliases" not in gm:
+            slug = gm["@id"].rstrip("/").rsplit("/", 1)[-1]
+            gm["aliases"] = [f"lab:gm-{slug}"]
+        normalized.append(gm)
+    data = {
         "resolved_objects": {
-            "GeneticModification": {gm["@id"]: gm for gm in gms},
-        }
+            "GeneticModification": {gm["@id"]: gm for gm in normalized},
+        },
+        "libraries": libraries or {},
+    }
+    return data
+
+
+def library_entry(lib_atid, *gm_atids):
+    return {
+        "library": {"@id": lib_atid},
+        "genetic_modifications": [{"@id": gm_id} for gm_id in gm_atids],
     }
 
 
-def guide_df_from_data(flattener, data):
-    return flattener.create_guide_metadata_dataframe(flattener._resolve_guide_rna_file(data))
+def guide_df_from_first_set(flattener, data):
+    sets = flattener._biohub_guide_sets(data)
+    if not sets or not sets[0]["file_info"]:
+        return None
+    return flattener.create_guide_metadata_dataframe(sets[0]["file_info"])
 
 
-def test_no_genetic_modifications_returns_none(monkeypatch):
+def test_no_genetic_modifications_returns_empty_sets(monkeypatch):
     flattener, calls = make_flattener(monkeypatch)
-    assert flattener._resolve_guide_rna_file({"libraries": {}}) is None
-    assert flattener._resolve_guide_rna_file({"resolved_objects": {}}) is None
+    assert flattener._biohub_guide_sets({"libraries": {}}) == []
+    assert flattener._biohub_guide_sets({"resolved_objects": {}}) == []
     assert flattener.create_guide_metadata_dataframe(None) is None
     assert calls == []
 
 
-def test_gm_without_guide_rna_files_returns_none(monkeypatch):
+def test_gm_without_guide_rna_files_skips_guide(monkeypatch, capsys):
     flattener, calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "strategy": "interference screen"}
-    )
-    assert guide_df_from_data(flattener, data) is None
+    data = complete_data_with_gms({"@id": GM_AAA, "strategy": "interference screen"})
+    sets = flattener._biohub_guide_sets(data)
+    assert len(sets) == 1
+    assert sets[0]["file_info"] is None
+    assert sets[0]["set_number"] == 1
+    assert guide_df_from_first_set(flattener, data) is None
     assert calls == []
+    assert "has no guide_rna_files" in capsys.readouterr().out
 
 
 def test_one_unique_file_subsets_columns(monkeypatch):
     flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
     data = complete_data_with_gms(
         {
-            "@id": "/genetic_modifications/aaa/",
+            "@id": GM_AAA,
             "guide_rna_files": GUIDE_FILE,
         }
     )
-    result = guide_df_from_data(flattener, data)
+    result = guide_df_from_first_set(flattener, data)
     assert list(result.columns) == [
         "id",
         "protospacer_sequence",
@@ -92,56 +125,69 @@ def test_one_unique_file_subsets_columns(monkeypatch):
     assert len(calls) == 1
 
 
-def test_same_file_on_two_gms_is_read_once(monkeypatch):
+def test_same_file_on_two_gms_warns_and_skips_second_guide(monkeypatch, capsys):
     flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
     data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": [GUIDE_FILE]},
-        {"@id": "/genetic_modifications/bbb/", "guide_rna_files": [GUIDE_FILE]},
+        {"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE]},
+        {"@id": GM_BBB, "guide_rna_files": [GUIDE_FILE]},
     )
-    result = guide_df_from_data(flattener, data)
-    assert result is not None
-    assert len(calls) == 1
-
-
-def test_two_distinct_files_warns_and_skips(monkeypatch, capsys):
-    flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
-    other = {
-        "@id": "/tabular_files/22222222-2222-2222-2222-222222222222/",
-        "s3_uri": "s3://submissions-lattice/BCP/tabular_files/other.tsv",
-        "file_format": "tsv",
-    }
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE},
-        {"@id": "/genetic_modifications/bbb/", "guide_rna_files": other},
-    )
-    assert guide_df_from_data(flattener, data) is None
+    sets = flattener._biohub_guide_sets(data)
+    assert len(sets) == 2
+    assert sets[0]["gm_id"] == GM_AAA
+    assert sets[0]["file_info"] == GUIDE_FILE
+    assert sets[1]["gm_id"] == GM_BBB
+    assert sets[1]["file_info"] is None
+    assert "shared by" in capsys.readouterr().out
     assert calls == []
-    captured = capsys.readouterr()
-    assert "found 2 unique guide RNA TabularFiles" in captured.out
-    assert GUIDE_FILE["@id"] in captured.out
-    assert other["@id"] in captured.out
+
+
+def test_two_distinct_files_yield_two_sets(monkeypatch):
+    flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
+    data = complete_data_with_gms(
+        {"@id": GM_AAA, "guide_rna_files": GUIDE_FILE},
+        {"@id": GM_BBB, "guide_rna_files": GUIDE_FILE_OTHER},
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert len(sets) == 2
+    assert sets[0]["set_number"] == 1
+    assert sets[0]["file_info"] == GUIDE_FILE
+    assert sets[1]["set_number"] == 2
+    assert sets[1]["file_info"] == GUIDE_FILE_OTHER
+    assert calls == []
+
+
+def test_gm_with_multiple_guide_files_skips_guide(monkeypatch, capsys):
+    flattener, _calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "guide_rna_files": [GUIDE_FILE, GUIDE_FILE_OTHER],
+        }
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert len(sets) == 1
+    assert sets[0]["file_info"] is None
+    assert "expected one" in capsys.readouterr().out
 
 
 def test_guide_rna_files_as_id_strings_use_gathered_tabular_file(monkeypatch):
     flattener, calls = make_flattener(monkeypatch, read_df=GUIDE_ROWS)
     data = complete_data_with_gms(
         {
-            "@id": "/genetic_modifications/aaa/",
+            "@id": GM_AAA,
             "guide_rna_files": [GUIDE_FILE["@id"]],
         }
     )
     data["resolved_objects"]["TabularFile"] = {GUIDE_FILE["@id"]: GUIDE_FILE}
-    result = guide_df_from_data(flattener, data)
+    result = guide_df_from_first_set(flattener, data)
     assert result is not None
     assert calls == [GUIDE_FILE]
 
 
 def test_missing_expected_columns_returns_none(monkeypatch, capsys):
     flattener, _calls = make_flattener(monkeypatch, read_df=pd.DataFrame({"unrelated": [1]}))
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
-    )
-    assert guide_df_from_data(flattener, data) is None
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    assert guide_df_from_first_set(flattener, data) is None
     assert "none of the expected GUIDE_METADATA columns" in capsys.readouterr().out
 
 
@@ -150,11 +196,85 @@ def test_keeps_only_present_guide_columns(monkeypatch):
         monkeypatch,
         read_df=pd.DataFrame({"guide_id": ["g1"], "guide_role": ["targeting"]}),
     )
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
-    )
-    result = guide_df_from_data(flattener, data)
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
     assert list(result.columns) == ["id", "role"]
+
+
+def test_biohub_sets_map_libraries_to_gms(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": GM_AAA, "guide_rna_files": GUIDE_FILE},
+        {"@id": GM_BBB, "guide_rna_files": GUIDE_FILE_OTHER},
+        libraries={
+            "uuid-a": library_entry(LIB_A, GM_AAA),
+            "uuid-b": library_entry(LIB_B, GM_BBB),
+        },
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["library_ids"] == {LIB_A}
+    assert sets[1]["library_ids"] == {LIB_B}
+
+
+def test_biohub_sets_rejects_library_linked_to_multiple_gms(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": GM_AAA, "guide_rna_files": GUIDE_FILE},
+        {"@id": GM_BBB, "guide_rna_files": GUIDE_FILE_OTHER},
+        libraries={"uuid-a": library_entry(LIB_A, GM_AAA, GM_BBB)},
+    )
+    with pytest.raises(ValueError, match=rf"{LIB_A}.*{GM_AAA}.*{GM_BBB}"):
+        flattener._biohub_guide_sets(data)
+
+
+def test_biohub_sets_sorted_by_gm_id(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": GM_BBB, "guide_rna_files": GUIDE_FILE_OTHER},
+        {"@id": GM_AAA, "guide_rna_files": GUIDE_FILE},
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert [s["gm_id"] for s in sets] == [GM_AAA, GM_BBB]
+    assert [s["set_number"] for s in sets] == [1, 2]
+
+
+def test_biohub_sets_include_cleaned_alias(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "aliases": ["lab:gm-screen-a"],
+            "guide_rna_files": GUIDE_FILE,
+        }
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["alias"] == "gm-screen-a"
+
+
+def test_biohub_sets_sanitize_alias_for_filename(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "aliases": ["lab:foo/bar baz"],
+            "guide_rna_files": GUIDE_FILE,
+        }
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["alias"] == "foo_bar_baz"
+
+
+def test_biohub_sets_reject_multiple_aliases(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "aliases": ["lab:gm-a", "lab:gm-b"],
+            "guide_rna_files": GUIDE_FILE,
+        }
+    )
+    with pytest.raises(ValueError, match="exactly one alias"):
+        flattener._biohub_guide_sets(data)
 
 
 @pytest.mark.parametrize(
@@ -234,35 +354,19 @@ def test_read_tabular_file_sniffs_tsv_without_format_hints(monkeypatch):
     assert list(result["guide_id"]) == ["g1"]
 
 
-def test_resolve_guide_rna_file_returns_complete_embed(monkeypatch):
+def test_biohub_set_prefers_gathered_tabular_file(monkeypatch):
     flattener, _calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": GUIDE_FILE}
-    )
-    assert flattener._resolve_guide_rna_file(data) == GUIDE_FILE
-
-
-def test_resolve_guide_rna_file_id_only_without_gathered_object(monkeypatch):
-    flattener, _calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": [GUIDE_FILE["@id"]]}
-    )
-    assert flattener._resolve_guide_rna_file(data) == {"@id": GUIDE_FILE["@id"]}
-
-
-def test_resolve_guide_rna_file_prefers_gathered_tabular_file(monkeypatch):
-    flattener, _calls = make_flattener(monkeypatch)
-    data = complete_data_with_gms(
-        {"@id": "/genetic_modifications/aaa/", "guide_rna_files": [GUIDE_FILE["@id"]]}
-    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE["@id"]]})
     data["resolved_objects"]["TabularFile"] = {GUIDE_FILE["@id"]: GUIDE_FILE}
-    assert flattener._resolve_guide_rna_file(data) == GUIDE_FILE
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["file_info"] == GUIDE_FILE
 
 
-def test_resolve_guide_rna_file_none_without_warning(monkeypatch, capsys):
+def test_biohub_set_id_only_without_gathered_object(monkeypatch):
     flattener, _calls = make_flattener(monkeypatch)
-    assert flattener._resolve_guide_rna_file({"libraries": {}}) is None
-    assert "Warning" not in capsys.readouterr().out
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": [GUIDE_FILE["@id"]]})
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["file_info"] == {"@id": GUIDE_FILE["@id"]}
 
 
 def test_create_guide_metadata_reuses_resolved_file_info(monkeypatch):

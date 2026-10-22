@@ -82,7 +82,7 @@ def test_paired_libraries_each_get_a_row():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, OPTIONS_COLUMN]
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, OPTIONS_COLUMN, "file_size"]
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_A"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
     assert list(sra_df[DESIGN_DESCRIPTION_COLUMN]) == ["", ""]
@@ -363,7 +363,7 @@ def test_library_strategy_is_blank_when_feature_types_are_missing_or_unmapped():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == SRA_FILE_COLUMNS
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "file_size"]
     assert sra_df[LIBRARY_STRATEGY_COLUMN].isna().all()
     assert sra_df[LIBRARY_SOURCE_COLUMN].isna().all()
     assert sra_df[LIBRARY_SELECTION_COLUMN].isna().all()
@@ -908,7 +908,7 @@ def test_filenames_from_one_s3_uri_basename():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "filename"]
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "filename", "file_size"]
     assert list(sra_df["filename"]) == ["R1.fastq.gz"]
     assert "filename2" not in sra_df.columns
     _assert_no_title_source_cols(sra_df)
@@ -945,7 +945,7 @@ def test_filenames_omitted_when_neither_source_column_exists():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == SRA_FILE_COLUMNS
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "file_size"]
     assert "filename" not in sra_df.columns
 
 
@@ -983,14 +983,17 @@ def test_create_sequence_file_set_dataframe_one_row_per_set():
                             {
                                 "@id": "/sequence_files/r1a/",
                                 "sra_file_names": ["setA_R1.fastq.gz"],
+                                "file_size": 100,
                             },
                             {
                                 "@id": "/sequence_files/r2a/",
                                 "sra_file_names": ["setA_R2.fastq.gz"],
+                                "file_size": 50,
                             },
                             {
                                 "@id": "/sequence_files/r1b/",
                                 "s3_uri": "s3://bucket/setB_R1.fastq.gz",
+                                "file_size": 25,
                             },
                         ],
                         "sequence_file_sets": [
@@ -1020,7 +1023,53 @@ def test_create_sequence_file_set_dataframe_one_row_per_set():
     assert by_id.loc["/sequence_file_sets/a/", "library_@id"] == "/droplet_based_libraries/cri/"
     assert by_id.loc["/sequence_file_sets/a/", "filename"] == "setA_R1.fastq.gz"
     assert by_id.loc["/sequence_file_sets/a/", "filename2"] == "setA_R2.fastq.gz"
+    assert by_id.loc["/sequence_file_sets/a/", "file_size"] == 150
     assert by_id.loc["/sequence_file_sets/b/", "filename"] == "setB_R1.fastq.gz"
+    assert by_id.loc["/sequence_file_sets/b/", "file_size"] == 25
+
+
+def test_create_sequence_file_set_dataframe_includes_cram_slots():
+    complete_data = {
+        "libraries": {
+            "lib-uuid": {
+                "library": {"@id": "/droplet_based_libraries/gex/", "uuid": "lib-uuid"},
+                "raw_matrix_files": [
+                    {
+                        "sequence_files": [
+                            {
+                                "@id": "/sequence_files/trim/",
+                                "sra_file_names": ["sample.trimmed.cram"],
+                                "file_size": 200,
+                            },
+                            {
+                                "@id": "/sequence_files/untrim/",
+                                "s3_uri": "s3://bucket/sample.untrimmed.cram",
+                                "file_size": 300,
+                            },
+                        ],
+                        "sequence_file_sets": [
+                            {
+                                "@id": "/sequence_file_sets/cram/",
+                                "library": "/droplet_based_libraries/gex/",
+                                "trimmed_cram": "/sequence_files/trim/",
+                                "untrimmed_cram": "/sequence_files/untrim/",
+                            },
+                        ],
+                    }
+                ],
+            }
+        },
+        "resolved_objects": {"SequenceFile": {}},
+    }
+
+    sfs_df = make_flattener().create_sequence_file_set_dataframe(complete_data)
+
+    assert len(sfs_df) == 1
+    row = sfs_df.iloc[0]
+    assert row["sequence_file_set_@id"] == "/sequence_file_sets/cram/"
+    assert row["filename"] == "sample.trimmed.cram"
+    assert row["filename2"] == "sample.untrimmed.cram"
+    assert row["file_size"] == 500
 
 
 def test_crispr_expands_one_row_per_sequence_file_set():
@@ -1093,7 +1142,7 @@ def test_crispr_with_one_sequence_file_set_keeps_one_row():
     )
 
     assert len(sra_df) == 1
-    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_CRI.1"]
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_CRI"]
     assert list(sra_df["filename"]) == ["setA_R1.fastq.gz"]
     assert list(sra_df["filename2"]) == ["setA_R2.fastq.gz"]
 
