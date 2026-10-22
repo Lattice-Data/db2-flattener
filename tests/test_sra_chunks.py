@@ -99,6 +99,30 @@ def test_write_sra_chunked_outputs_pairs_biosample(tmp_path, monkeypatch):
     assert list(set2_bio["sample_name"]) == ["B"]
 
 
+def test_write_sra_drops_empty_filename_columns(tmp_path):
+    flattener = make_flattener()
+    sra_dir = tmp_path / "SRA"
+    sra_dir.mkdir()
+    sra_files = pd.DataFrame(
+        {
+            "sample_name": ["A", "B"],
+            "library_ID": ["A_GEX", "B_GEX"],
+            "filename": ["a_R1.fastq.gz", "b_R1.fastq.gz"],
+            "filename2": [pd.NA, pd.NA],
+            "filename3": [None, ""],
+            "file_size": [10, 10],
+        }
+    )
+    biosample = pd.DataFrame({"sample_name": ["A", "B"]})
+    flattener._write_sra_chunked_outputs(sra_dir, sra_files, biosample)
+
+    written = pd.read_csv(sra_dir / "sra_file_set1.csv")
+    assert "filename" in written.columns
+    assert "filename2" not in written.columns
+    assert "filename3" not in written.columns
+    assert list(written["filename"]) == ["a_R1.fastq.gz", "b_R1.fastq.gz"]
+
+
 def test_crispr_row_carries_sequence_file_set_file_size():
     main_df = pd.DataFrame(
         {

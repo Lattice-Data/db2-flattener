@@ -60,7 +60,15 @@ from db2_flattener.utils import (
 SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE_MAP.values())
 
 # SequenceFileSet slots that link to SequenceFiles, in filename column order
-SEQUENCE_FILE_SET_FILE_SLOTS = ("index1", "index2", "read1", "read2", "read3")
+SEQUENCE_FILE_SET_FILE_SLOTS = (
+    "index1",
+    "index2",
+    "read1",
+    "read2",
+    "read3",
+    "trimmed_cram",
+    "untrimmed_cram",
+)
 
 # Max total SequenceFile bytes per SRA file/biosample chunk (5 TB)
 SRA_CHUNK_MAX_BYTES = 5 * 1000**4  # 5_000_000_000_000
@@ -1213,8 +1221,9 @@ class DB2Flattener:
         """
         One row per SequenceFileSet: library link and filenames from linked files.
 
-        Filenames come from index1, index2, read1, read2, read3 in that order.
-        Each SequenceFile prefers sra_file_names, else the s3_uri basename.
+        Filenames come from index1, index2, read1, read2, read3, trimmed_cram,
+        untrimmed_cram in that order. Each SequenceFile prefers sra_file_names,
+        else the s3_uri basename.
         Intermediate only; not written as a CSV.
         """
         if not complete_data:
@@ -1316,11 +1325,25 @@ class DB2Flattener:
             .astype(int)
         )
 
+    @staticmethod
+    def _drop_empty_sra_filename_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Drop filename / filenameN columns that are empty for every row."""
+        if df is None or df.empty:
+            return df
+        drop_cols = []
+        for col in df.columns:
+            if col != "filename" and not re.fullmatch(r"filename\d+", str(col)):
+                continue
+            if all(is_empty(v) for v in df[col].tolist()):
+                drop_cols.append(col)
+        return df.drop(columns=drop_cols) if drop_cols else df
+
     def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
         """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TB sample_name packs."""
         chunks = self._chunk_sra_by_sample_name(sra_files_df)
         for set_n, file_chunk in enumerate(chunks, start=1):
             write_files = file_chunk.drop(columns=["file_size"], errors="ignore")
+            write_files = self._drop_empty_sra_filename_columns(write_files)
             sample_names = set()
             if "sample_name" in write_files.columns:
                 sample_names = {

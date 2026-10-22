@@ -1028,6 +1028,50 @@ def test_create_sequence_file_set_dataframe_one_row_per_set():
     assert by_id.loc["/sequence_file_sets/b/", "file_size"] == 25
 
 
+def test_create_sequence_file_set_dataframe_includes_cram_slots():
+    complete_data = {
+        "libraries": {
+            "lib-uuid": {
+                "library": {"@id": "/droplet_based_libraries/gex/", "uuid": "lib-uuid"},
+                "raw_matrix_files": [
+                    {
+                        "sequence_files": [
+                            {
+                                "@id": "/sequence_files/trim/",
+                                "sra_file_names": ["sample.trimmed.cram"],
+                                "file_size": 200,
+                            },
+                            {
+                                "@id": "/sequence_files/untrim/",
+                                "s3_uri": "s3://bucket/sample.untrimmed.cram",
+                                "file_size": 300,
+                            },
+                        ],
+                        "sequence_file_sets": [
+                            {
+                                "@id": "/sequence_file_sets/cram/",
+                                "library": "/droplet_based_libraries/gex/",
+                                "trimmed_cram": "/sequence_files/trim/",
+                                "untrimmed_cram": "/sequence_files/untrim/",
+                            },
+                        ],
+                    }
+                ],
+            }
+        },
+        "resolved_objects": {"SequenceFile": {}},
+    }
+
+    sfs_df = make_flattener().create_sequence_file_set_dataframe(complete_data)
+
+    assert len(sfs_df) == 1
+    row = sfs_df.iloc[0]
+    assert row["sequence_file_set_@id"] == "/sequence_file_sets/cram/"
+    assert row["filename"] == "sample.trimmed.cram"
+    assert row["filename2"] == "sample.untrimmed.cram"
+    assert row["file_size"] == 500
+
+
 def test_crispr_expands_one_row_per_sequence_file_set():
     main_df = pd.DataFrame(
         {
