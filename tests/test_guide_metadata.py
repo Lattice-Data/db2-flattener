@@ -54,9 +54,16 @@ def make_flattener(monkeypatch, read_df=None):
 
 
 def complete_data_with_gms(*gms, libraries=None):
+    normalized = []
+    for gm in gms:
+        gm = dict(gm)
+        if "aliases" not in gm:
+            slug = gm["@id"].rstrip("/").rsplit("/", 1)[-1]
+            gm["aliases"] = [f"lab:gm-{slug}"]
+        normalized.append(gm)
     data = {
         "resolved_objects": {
-            "GeneticModification": {gm["@id"]: gm for gm in gms},
+            "GeneticModification": {gm["@id"]: gm for gm in normalized},
         },
         "libraries": libraries or {},
     }
@@ -231,6 +238,32 @@ def test_biohub_sets_include_cleaned_alias(monkeypatch):
     )
     sets = flattener._biohub_guide_sets(data)
     assert sets[0]["alias"] == "gm-screen-a"
+
+
+def test_biohub_sets_sanitize_alias_for_filename(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "aliases": ["lab:foo/bar baz"],
+            "guide_rna_files": GUIDE_FILE,
+        }
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["alias"] == "foo_bar_baz"
+
+
+def test_biohub_sets_reject_multiple_aliases(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "aliases": ["lab:gm-a", "lab:gm-b"],
+            "guide_rna_files": GUIDE_FILE,
+        }
+    )
+    with pytest.raises(ValueError, match="exactly one alias"):
+        flattener._biohub_guide_sets(data)
 
 
 @pytest.mark.parametrize(

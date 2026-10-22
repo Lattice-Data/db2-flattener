@@ -849,7 +849,7 @@ def test_create_geo_dataframe_maps_genetic_modification_alias():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["genetic_modification_alias"]) == ["lab:gm-screen-a"]
+    assert list(geo_df["genetic_modification_alias"]) == ["gm-screen-a"]
     assert "genetic_modifications_aliases" not in geo_df.columns
 
 

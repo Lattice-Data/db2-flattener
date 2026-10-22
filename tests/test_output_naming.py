@@ -139,6 +139,7 @@ def test_guide_template_set_written_when_present(tmp_path, monkeypatch):
             "gm_id": "/genetic_modifications/aaa/",
             "file_info": {"@id": "/tabular_files/x/"},
             "library_ids": {lib_id},
+            "alias": "gm-screen-a",
         }
     ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
@@ -150,6 +151,7 @@ def test_guide_template_set_written_when_present(tmp_path, monkeypatch):
     assert result == outdir_name
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
     assert (outdir / "BIOHUB" / "guide_template_set1_v1.csv").is_file()
+    assert (outdir / "GEO" / "gm-screen-a_guide_metadata.csv").is_file()
     assert not (outdir / "BIOHUB" / "samples_template_v1.csv").exists()
 
 
@@ -171,6 +173,7 @@ def test_empty_guide_df_skips_guide_template(tmp_path, monkeypatch):
             "gm_id": "/genetic_modifications/aaa/",
             "file_info": {"@id": "/tabular_files/x/"},
             "library_ids": {lib_id},
+            "alias": "gm-screen-a",
         }
     ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame()
@@ -180,3 +183,4 @@ def test_empty_guide_df_skips_guide_template(tmp_path, monkeypatch):
     outdir = tmp_path / f"ABC-123_{TIMESTAMP}"
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
     assert not (outdir / "BIOHUB" / "guide_template_set1_v1.csv").exists()
+    assert not (outdir / "GEO" / "gm-screen-a_guide_metadata.csv").exists()

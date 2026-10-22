@@ -57,6 +57,12 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
             "raw_matrix_file_alias": ["rmf1", "rmf2"],
             "raw_file_samples": ["s1", "s2"],
             "droplet_based_libraries_@id": [LIB_A, LIB_B],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["Gene Expression"],
+            ],
+            "genetic_modifications_aliases": ["lab:gm-a", "lab:gm-b"],
             "sequence_file_sets_CRO_order": ["ABC-123", "ABC-123"],
         }
     )
@@ -111,6 +117,7 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame(
         {"id": [file_info["@id"].rsplit("/", 2)[-2]]}
     )
+    flattener.create_geo_dataframe = lambda main: DB2Flattener.create_geo_dataframe(flattener, main)
 
     result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
     outdir = Path(result)
@@ -136,6 +143,12 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
     assert list(guide2["id"]) == ["guide-b"]
     assert list(pd.read_csv(geo / "gm-a_guide_metadata.csv")["id"]) == ["guide-a"]
     assert list(pd.read_csv(geo / "gm-b_guide_metadata.csv")["id"]) == ["guide-b"]
+
+    geo_meta = pd.read_csv(geo / "geo_metadata.csv")
+    assert "genetic_modification_alias" in geo_meta.columns
+    assert set(geo_meta["genetic_modification_alias"]) == {"gm-a", "gm-b"}
+    for label in geo_meta["genetic_modification_alias"]:
+        assert (geo / f"{label}_guide_metadata.csv").is_file()
 
 
 def test_no_gms_writes_samples_template_set1_v1(tmp_path, monkeypatch):
@@ -181,7 +194,11 @@ def test_unassigned_rows_fail(tmp_path, monkeypatch, capsys):
         },
         "resolved_objects": {
             "GeneticModification": {
-                GM_AAA: {"@id": GM_AAA, "guide_rna_files": GUIDE_A},
+                GM_AAA: {
+                    "@id": GM_AAA,
+                    "aliases": ["lab:gm-a"],
+                    "guide_rna_files": GUIDE_A,
+                },
             },
             "TabularFile": {GUIDE_A["@id"]: GUIDE_A},
         },

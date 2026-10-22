@@ -125,6 +125,9 @@ class DB2Flattener:
 
         print("Creating DataFrames...")
 
+        # Fail before creating output dirs when any GM lacks exactly one alias.
+        self._validate_genetic_modification_aliases(complete_data)
+
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
         main_df = main_df.dropna(axis=1, how="all")
@@ -592,6 +595,10 @@ class DB2Flattener:
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = strip_author_metadata_column_prefix(geo_df)
         geo_df = collapse_duplicate_columns(geo_df)
+        if "genetic_modification_alias" in geo_df.columns:
+            geo_df["genetic_modification_alias"] = geo_df["genetic_modification_alias"].map(
+                self._map_geo_genetic_modification_alias
+            )
         geo_df = self._summarize_geo_experimental_condition(geo_df)
         geo_df = self._summarize_geo_treatment(geo_df)
         geo_df = self._add_geo_molecule(geo_df)
@@ -677,6 +684,13 @@ class DB2Flattener:
             return val
         mapped = [GENETIC_PERTURBATION_MAP.get(part, part) for part in parts]
         return "; ".join(mapped)
+
+    @classmethod
+    def _map_geo_genetic_modification_alias(cls, val):
+        """Sanitize a GEO genetic_modification_alias cell; empty stays empty."""
+        if is_empty(val):
+            return val
+        return cls._genetic_modification_alias_label(val)
 
     @staticmethod
     def _pool_mixed_geo_strategy(val):
@@ -2379,17 +2393,11 @@ class DB2Flattener:
             print(f"   Rows: {len(guide_df)}")
             print(f"   Columns: {len(guide_df.columns)}")
 
-            alias = biohub_set.get("alias")
-            if not alias:
-                print(
-                    f"Warning: GeneticModification {biohub_set['gm_id']} has no alias; "
-                    f"skipping GEO guide_metadata copy for set{set_n}"
-                )
-            else:
-                geo_guide_output = geo_dir / f"{alias}_guide_metadata.csv"
-                print(f"Saving GEO guide metadata DataFrame to {geo_guide_output}...")
-                guide_df.to_csv(geo_guide_output, index=False)
-                print(f"✅ GEO guide metadata CSV file created: {geo_guide_output}")
+            alias = biohub_set["alias"]
+            geo_guide_output = geo_dir / f"{alias}_guide_metadata.csv"
+            print(f"Saving GEO guide metadata DataFrame to {geo_guide_output}...")
+            guide_df.to_csv(geo_guide_output, index=False)
+            print(f"✅ GEO guide metadata CSV file created: {geo_guide_output}")
 
     def _biohub_guide_sets(self, complete_data):
         """
@@ -2460,10 +2468,40 @@ class DB2Flattener:
                     "gm_id": gm_id,
                     "file_info": file_info,
                     "library_ids": gm_to_libraries[gm_id],
-                    "alias": self._get_clean_alias(gm),
+                    "alias": self._genetic_modification_alias_label(gm.get("aliases"), gm_id=gm_id),
                 }
             )
         return sets
+
+    @classmethod
+    def _genetic_modification_alias_label(cls, aliases, *, gm_id=None) -> str:
+        """Require exactly one GM alias; strip lab prefix and sanitize for GEO/filenames."""
+        parts = []
+        for item in to_items(aliases):
+            if is_empty(item):
+                continue
+            for part in str(item).split(";"):
+                part = part.strip()
+                if part:
+                    parts.append(part)
+        # Preserve order while dropping duplicates
+        unique = list(dict.fromkeys(parts))
+        if len(unique) != 1:
+            gm_label = gm_id if gm_id is not None else "GeneticModification"
+            raise ValueError(f"{gm_label} must have exactly one alias; found {unique!r}")
+        label = unique[0]
+        if ":" in label:
+            label = label.split(":", 1)[1]
+        return re.sub(r"[^A-Za-z0-9._-]", "_", label)
+
+    @classmethod
+    def _validate_genetic_modification_aliases(cls, complete_data) -> None:
+        """Raise if any GeneticModification lacks exactly one alias."""
+        resolved = (complete_data or {}).get("resolved_objects") or {}
+        genetic_modifications = resolved.get("GeneticModification") or {}
+        for gm_id, gm in genetic_modifications.items():
+            aliases = gm.get("aliases") if isinstance(gm, dict) else None
+            cls._genetic_modification_alias_label(aliases, gm_id=gm_id)
 
     @classmethod
     def _row_library_ids(cls, row):
