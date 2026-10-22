@@ -34,7 +34,8 @@ def make_flattener(sample_df, *, cro_orders=None):
     f.create_sra_files_dataframe = lambda main, sequence_file_set_df=None: pd.DataFrame(
         {"library_ID": ["lib1"]}
     )
-    f._resolve_guide_rna_file = lambda complete_data: None
+    # No GeneticModifications → samples_template_v1.csv fallback
+    f._biohub_guide_sets = lambda complete_data: []
     f.create_guide_metadata_dataframe = lambda file_info: None
     f._attach_plate_library_id = lambda main, sample: sample
     f.create_samples_dataframe = lambda sample: sample
@@ -58,7 +59,7 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
         pd.DataFrame({"sample_alias": ["s1"]}),
         cro_orders=["ABC-123"],
     )
-    result = flattener.flatten_matrix_file_set(UUID)
+    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
 
     outdir_name = f"ABC-123_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -68,7 +69,7 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
     assert (outdir / "GEO" / "demultiplexing_samples.csv").is_file()
     assert (outdir / "SRA" / "sra_biosample.csv").is_file()
     assert (outdir / "SRA" / "sra_file.csv").is_file()
-    assert (outdir / "BIOHUB" / "samples_template.csv").is_file()
+    assert (outdir / "BIOHUB" / "samples_template_v1.csv").is_file()
 
 
 def test_multiple_cro_orders_concatenated_sorted(tmp_path, monkeypatch):
@@ -80,7 +81,7 @@ def test_multiple_cro_orders_concatenated_sorted(tmp_path, monkeypatch):
         pd.DataFrame({"sample_alias": ["s1", "s2"]}),
         cro_orders=["DEF-456; ABC-123", "ABC-123"],
     )
-    result = flattener.flatten_matrix_file_set(UUID)
+    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
 
     outdir_name = f"ABC-123_DEF-456_{TIMESTAMP}"
     assert result == outdir_name
@@ -92,7 +93,7 @@ def test_missing_cro_order_falls_back_to_uuid(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
-    result = flattener.flatten_matrix_file_set(UUID)
+    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
 
     outdir_name = f"MatrixFileSet_{UUID[:8]}_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -101,7 +102,7 @@ def test_missing_cro_order_falls_back_to_uuid(tmp_path, monkeypatch):
     assert (outdir / "GEO" / "geo_metadata.csv").is_file()
     assert (outdir / "SRA" / "sra_biosample.csv").is_file()
     assert (outdir / "SRA" / "sra_file.csv").is_file()
-    assert (outdir / "BIOHUB" / "samples_template.csv").is_file()
+    assert (outdir / "BIOHUB" / "samples_template_v1.csv").is_file()
 
 
 def test_empty_sample_df_skips_demultiplexing_samples(tmp_path, monkeypatch):
@@ -109,7 +110,7 @@ def test_empty_sample_df_skips_demultiplexing_samples(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     flattener = make_flattener(pd.DataFrame(), cro_orders=["ABC-123"])
-    result = flattener.flatten_matrix_file_set(UUID)
+    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
 
     outdir_name = f"ABC-123_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -117,10 +118,10 @@ def test_empty_sample_df_skips_demultiplexing_samples(tmp_path, monkeypatch):
     assert (outdir / "MAIN.csv").is_file()
     assert (outdir / "GEO" / "geo_metadata.csv").is_file()
     assert not (outdir / "GEO" / "demultiplexing_samples.csv").exists()
-    assert not (outdir / "BIOHUB" / "guide_template.csv").exists()
+    assert not (outdir / "BIOHUB" / "guide_template_set1_v1.csv").exists()
 
 
-def test_guide_template_written_when_present(tmp_path, monkeypatch):
+def test_guide_template_set_written_when_present(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
@@ -128,13 +129,24 @@ def test_guide_template_written_when_present(tmp_path, monkeypatch):
         pd.DataFrame({"sample_alias": ["s1"]}),
         cro_orders=["ABC-123"],
     )
-    flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"guide_id": ["g1"]})
+    flattener._biohub_guide_sets = lambda complete_data: [
+        {
+            "set_number": 1,
+            "gm_id": "/genetic_modifications/aaa/",
+            "file_info": {"@id": "/tabular_files/x/"},
+            "library_ids": set(),
+        }
+    ]
+    flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
 
-    result = flattener.flatten_matrix_file_set(UUID)
+    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
 
     outdir_name = f"ABC-123_{TIMESTAMP}"
+    outdir = tmp_path / outdir_name
     assert result == outdir_name
-    assert (tmp_path / outdir_name / "BIOHUB" / "guide_template.csv").is_file()
+    assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
+    assert (outdir / "BIOHUB" / "guide_template_set1_v1.csv").is_file()
+    assert not (outdir / "BIOHUB" / "samples_template_v1.csv").exists()
 
 
 def test_empty_guide_df_skips_guide_template(tmp_path, monkeypatch):
@@ -145,9 +157,18 @@ def test_empty_guide_df_skips_guide_template(tmp_path, monkeypatch):
         pd.DataFrame({"sample_alias": ["s1"]}),
         cro_orders=["ABC-123"],
     )
+    flattener._biohub_guide_sets = lambda complete_data: [
+        {
+            "set_number": 1,
+            "gm_id": "/genetic_modifications/aaa/",
+            "file_info": {"@id": "/tabular_files/x/"},
+            "library_ids": set(),
+        }
+    ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame()
 
-    flattener.flatten_matrix_file_set(UUID)
+    flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
 
     outdir = tmp_path / f"ABC-123_{TIMESTAMP}"
-    assert not (outdir / "BIOHUB" / "guide_template.csv").exists()
+    assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
+    assert not (outdir / "BIOHUB" / "guide_template_set1_v1.csv").exists()

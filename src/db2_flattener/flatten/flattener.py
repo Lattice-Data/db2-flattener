@@ -62,6 +62,12 @@ SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE
 # SequenceFileSet slots that link to SequenceFiles, in filename column order
 SEQUENCE_FILE_SET_FILE_SLOTS = ("index1", "index2", "read1", "read2", "read3")
 
+# MAIN / biohub-source columns used to assign rows to a GeneticModification set
+BIOHUB_LIBRARY_ID_COLS = (
+    "droplet_based_libraries_@id",
+    "plate_based_libraries_@id",
+)
+
 
 def age_with_units(value, units) -> str | None:
     """
@@ -88,11 +94,14 @@ class DB2Flattener:
         # Initialize gatherer
         self.gatherer = DB2Gatherer(self.connection, configs)
 
-    def flatten_matrix_file_set(self, matrix_file_set_uuid):
+    def flatten_matrix_file_set(self, matrix_file_set_uuid, *, biohub_version: str):
         """
         Flatten a MatrixFileSet into library-indexed data and save CSVs under
         `{CRO_orders}_{timestamp}/` (or `MatrixFileSet_{uuid8}_{timestamp}/`
         when no CRO_order values are present).
+
+        biohub_version is the resolved template suffix (e.g. ``v1``) used for
+        BIOHUB samples_template / guide_template filenames.
         """
         print(f"Processing MatrixFileSet {matrix_file_set_uuid}")
 
@@ -141,8 +150,6 @@ class DB2Flattener:
         sample_output = geo_dir / "demultiplexing_samples.csv"
         sra_biosample_output = sra_dir / "sra_biosample.csv"
         sra_file_output = sra_dir / "sra_file.csv"
-        biohub_output = biohub_dir / "samples_template.csv"
-        guide_output = biohub_dir / "guide_template.csv"
 
         # Save main DataFrame to CSV
         print(f"Saving main DataFrame to {main_output}...")
@@ -153,13 +160,14 @@ class DB2Flattener:
         print(f"   Columns: {len(main_df.columns)}")
 
         # Multiplexed files contribute one Biohub row per sample. Other files
-        # still contribute their main_df rows.
-        biohub_df = self.create_biohub_dataframe(
-            self.biohub_source_dataframe(main_df, biohub_samples)
+        # still contribute their main_df rows. Split by GeneticModification set.
+        self._write_biohub_outputs(
+            biohub_dir,
+            main_df,
+            biohub_samples,
+            complete_data,
+            biohub_version=biohub_version,
         )
-        print(f"Saving biohub DataFrame to {biohub_output}...")
-        biohub_df.to_csv(biohub_output, index=False)
-        print(f"✅ Biohub CSV file created: {biohub_output}")
 
         # Create GEO DataFrame from main DataFrame
         geo_df = self.create_geo_dataframe(main_df)
@@ -184,15 +192,6 @@ class DB2Flattener:
         print(f"✅ SRA file CSV file created: {sra_file_output}")
         print(f"   Rows: {len(sra_files_df)}")
         print(f"   Columns: {len(sra_files_df.columns)}")
-
-        guide_file = self._resolve_guide_rna_file(complete_data)
-        guide_df = self.create_guide_metadata_dataframe(guide_file)
-        if guide_df is not None and not guide_df.empty:
-            print(f"Saving guide metadata DataFrame to {guide_output}...")
-            guide_df.to_csv(guide_output, index=False)
-            print(f"✅ Guide metadata CSV file created: {guide_output}")
-            print(f"   Rows: {len(guide_df)}")
-            print(f"   Columns: {len(guide_df.columns)}")
 
         # Save sample DataFrame if it exists
         if sample_df is not None and not sample_df.empty:
@@ -2140,10 +2139,10 @@ class DB2Flattener:
 
     def create_guide_metadata_dataframe(self, file_info):
         """
-        Build a guide-metadata DataFrame from the single shared guide RNA TabularFile.
+        Build a guide-metadata DataFrame from one guide RNA TabularFile.
 
-        file_info comes from _resolve_guide_rna_file. None (no file, or more than
-        one unique TabularFile) returns None.
+        file_info is the TabularFile object (or embed) for a single BIOHUB set.
+        None returns None.
         """
         if not file_info:
             return None
@@ -2155,37 +2154,151 @@ class DB2Flattener:
             return None
         return guide_df[present].rename(columns=GUIDE_METADATA_COLUMN_MAP).copy()
 
-    def _resolve_guide_rna_file(self, complete_data):
-        """Return the single gathered guide TabularFile, or None."""
-        files = self._unique_guide_rna_files(complete_data)
-        if not files:
-            return None
-        if len(files) > 1:
-            labels = [
-                file_info.get("@id") or file_info.get("s3_uri") or str(file_info)
-                for file_info in files
-            ]
-            print(
-                f"Warning: found {len(files)} unique guide RNA TabularFiles; "
-                f"expected one. Skipping GUIDE_METADATA. Files: {labels}"
-            )
-            return None
-        return files[0]
+    def _write_biohub_outputs(
+        self, biohub_dir, main_df, biohub_samples, complete_data, *, biohub_version: str
+    ):
+        """Write BIOHUB samples/guide templates, split by GeneticModification set."""
+        source = self.biohub_source_dataframe(main_df, biohub_samples)
+        sets = self._biohub_guide_sets(complete_data)
 
-    @staticmethod
-    def _unique_guide_rna_files(complete_data):
-        """Collect unique TabularFile refs, preferring objects already gathered."""
-        resolved = complete_data.get("resolved_objects", {})
-        genetic_modifications = resolved.get("GeneticModification", {})
-        gathered = resolved.get("TabularFile", {})
-        unique = {}
-        for gm in genetic_modifications.values():
+        if not sets:
+            biohub_df = self.create_biohub_dataframe(source)
+            biohub_output = biohub_dir / f"samples_template_{biohub_version}.csv"
+            print(f"Saving biohub DataFrame to {biohub_output}...")
+            biohub_df.to_csv(biohub_output, index=False)
+            print(f"✅ Biohub CSV file created: {biohub_output}")
+            return
+
+        assigned_index = set()
+        for biohub_set in sets:
+            set_n = biohub_set["set_number"]
+            library_ids = biohub_set["library_ids"]
+            if source.empty:
+                subset = source
+            else:
+                mask = source.apply(
+                    lambda row, libs=library_ids: bool(self._row_library_ids(row) & libs),
+                    axis=1,
+                )
+                subset = source.loc[mask]
+                assigned_index.update(subset.index.tolist())
+
+            biohub_df = self.create_biohub_dataframe(subset)
+            samples_output = biohub_dir / f"samples_template_set{set_n}_{biohub_version}.csv"
+            print(f"Saving biohub DataFrame to {samples_output}...")
+            biohub_df.to_csv(samples_output, index=False)
+            print(f"✅ Biohub CSV file created: {samples_output}")
+
+            file_info = biohub_set["file_info"]
+            if not file_info:
+                continue
+            guide_df = self.create_guide_metadata_dataframe(file_info)
+            if guide_df is None or guide_df.empty:
+                continue
+            guide_output = biohub_dir / f"guide_template_set{set_n}_{biohub_version}.csv"
+            print(f"Saving guide metadata DataFrame to {guide_output}...")
+            guide_df.to_csv(guide_output, index=False)
+            print(f"✅ Guide metadata CSV file created: {guide_output}")
+            print(f"   Rows: {len(guide_df)}")
+            print(f"   Columns: {len(guide_df.columns)}")
+
+        if not source.empty:
+            unassigned = len(source.index.difference(assigned_index))
+            if unassigned:
+                print(
+                    f"Warning: {unassigned} BIOHUB source row(s) have no matching "
+                    "GeneticModification set; omitted from samples_template_set* files"
+                )
+
+    def _biohub_guide_sets(self, complete_data):
+        """
+        One BIOHUB set per GeneticModification (sorted by @id).
+
+        Each set expects exactly one guide TabularFile. Divergence (0 or >1 files
+        on a GM, or a TabularFile claimed by two GMs) is warned and that set's
+        guide file is skipped; samples are still written for the set.
+        """
+        resolved = complete_data.get("resolved_objects") or {}
+        genetic_modifications = resolved.get("GeneticModification") or {}
+        if not genetic_modifications:
+            return []
+
+        gathered = resolved.get("TabularFile") or {}
+        gm_to_libraries = {gm_id: set() for gm_id in genetic_modifications}
+        for lib_data in (complete_data.get("libraries") or {}).values():
+            library = lib_data.get("library") or {}
+            lib_atid = library.get("@id")
+            if not lib_atid:
+                continue
+            for gm in lib_data.get("genetic_modifications") or []:
+                gm_id = gm.get("@id") if isinstance(gm, dict) else None
+                if gm_id in gm_to_libraries:
+                    gm_to_libraries[gm_id].add(lib_atid)
+
+        claimed_files = {}
+        sets = []
+        for set_number, gm_id in enumerate(sorted(genetic_modifications), start=1):
+            gm = genetic_modifications[gm_id]
+            file_entries = []
             for file_info in normalize_guide_rna_file_refs(gm.get("guide_rna_files")):
                 key = file_info.get("@id") or file_info.get("s3_uri")
                 if not key:
                     continue
-                unique.setdefault(key, gathered.get(file_info.get("@id"), file_info))
-        return list(unique.values())
+                resolved_file = gathered.get(file_info.get("@id"), file_info)
+                file_entries.append((key, resolved_file))
+
+            file_info = None
+            if not file_entries:
+                print(
+                    f"Warning: GeneticModification {gm_id} has no guide_rna_files; "
+                    f"skipping guide_template for set{set_number}"
+                )
+            elif len(file_entries) > 1:
+                labels = [key for key, _ in file_entries]
+                print(
+                    f"Warning: GeneticModification {gm_id} has {len(file_entries)} "
+                    f"guide_rna_files; expected one. Skipping guide_template for "
+                    f"set{set_number}. Files: {labels}"
+                )
+            else:
+                key, resolved_file = file_entries[0]
+                prior_gm = claimed_files.get(key)
+                if prior_gm is not None:
+                    print(
+                        f"Warning: guide TabularFile {key} is shared by "
+                        f"{prior_gm} and {gm_id}; skipping guide_template for "
+                        f"set{set_number}"
+                    )
+                else:
+                    claimed_files[key] = gm_id
+                    file_info = resolved_file
+
+            sets.append(
+                {
+                    "set_number": set_number,
+                    "gm_id": gm_id,
+                    "file_info": file_info,
+                    "library_ids": gm_to_libraries[gm_id],
+                }
+            )
+        return sets
+
+    @classmethod
+    def _row_library_ids(cls, row):
+        """Library @ids on a biohub-source row (droplet and/or plate)."""
+        ids = set()
+        for col in BIOHUB_LIBRARY_ID_COLS:
+            if col not in row.index:
+                continue
+            val = row[col]
+            if is_empty(val):
+                continue
+            for item in to_items(val):
+                for part in str(item).split("; "):
+                    part = part.strip()
+                    if part:
+                        ids.add(part)
+        return ids
 
     @staticmethod
     def _frame_has_plate_library(df) -> bool:
@@ -2253,15 +2366,15 @@ class DB2Flattener:
             and column not in exploded.columns
             and column not in extras
         )
-        # Used only to recognize a plate experiment after per-sample rows replace
-        # main. create_biohub_dataframe does not write this column.
-        plate_id = "plate_based_libraries_@id"
-        if (
-            plate_id in main_df.columns
-            and plate_id not in exploded.columns
-            and plate_id not in extras
-        ):
-            extras.append(plate_id)
+        # Library @ids: plate recognition after per-sample rows replace main, and
+        # BIOHUB set splitting. create_biohub_dataframe does not write these.
+        for lib_id_col in BIOHUB_LIBRARY_ID_COLS:
+            if (
+                lib_id_col in main_df.columns
+                and lib_id_col not in exploded.columns
+                and lib_id_col not in extras
+            ):
+                extras.append(lib_id_col)
         if extras:
             file_level = main_df.loc[
                 main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),

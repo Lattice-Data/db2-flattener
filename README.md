@@ -45,10 +45,18 @@ is written under a directory in the current working directory named
 MAIN, sorted and joined by `_`). If no CRO_order values are present, the
 directory is `MatrixFileSet_{uuid8}_{timestamp}`.
 
+Exactly one of these BIOHUB version flags is required:
+
+- `--biohub-version` / `-b` — explicit version (`1` or `v1`)
+- `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; `v#` is taken from
+  `{order}/metadata/` (`samples_template(_set#)?_v#.csv` /
+  `guide_template(_set#)?_v#.csv`). Missing/empty metadata → `v1`; otherwise
+  existing `v# + 1`. Errors if metadata/ has mixed versions.
+
 ```bash
-python flatten.py -u <matrix-file-set-uuid> -m db2_demo
-db2-flattener -u <matrix-file-set-uuid> -m db2_demo
-python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo
+python flatten.py -u <matrix-file-set-uuid> -m db2_demo -b v1
+db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
+python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -b 2
 ```
 
 Layout:
@@ -63,9 +71,11 @@ Layout:
     sra_biosample.csv
     sra_file.csv
   BIOHUB/
-    samples_template.csv
-    guide_template.csv           # omitted when empty
+    samples_template_v#.csv              # when no GeneticModifications
+    samples_template_setN_v#.csv         # one per GeneticModification
+    guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing
 ```
+
 
 ## Fetch latest schema from Lattice
 
