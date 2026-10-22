@@ -2424,6 +2424,17 @@ class DB2Flattener:
                 if gm_id in gm_to_libraries:
                     gm_to_libraries[gm_id].add(lib_atid)
 
+        library_to_gms = {}
+        for gm_id, libs in gm_to_libraries.items():
+            for lib_atid in libs:
+                library_to_gms.setdefault(lib_atid, set()).add(gm_id)
+        for lib_atid, gm_ids in sorted(library_to_gms.items()):
+            if len(gm_ids) > 1:
+                raise ValueError(
+                    f"Library {lib_atid} is linked to multiple GeneticModifications: "
+                    f"{sorted(gm_ids)}; expected one GM per library"
+                )
+
         claimed_files = {}
         sets = []
         for set_number, gm_id in enumerate(sorted(genetic_modifications), start=1):

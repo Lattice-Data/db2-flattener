@@ -216,6 +216,17 @@ def test_biohub_sets_map_libraries_to_gms(monkeypatch):
     assert sets[1]["library_ids"] == {LIB_B}
 
 
+def test_biohub_sets_rejects_library_linked_to_multiple_gms(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {"@id": GM_AAA, "guide_rna_files": GUIDE_FILE},
+        {"@id": GM_BBB, "guide_rna_files": GUIDE_FILE_OTHER},
+        libraries={"uuid-a": library_entry(LIB_A, GM_AAA, GM_BBB)},
+    )
+    with pytest.raises(ValueError, match=rf"{LIB_A}.*{GM_AAA}.*{GM_BBB}"):
+        flattener._biohub_guide_sets(data)
+
+
 def test_biohub_sets_sorted_by_gm_id(monkeypatch):
     flattener, _calls = make_flattener(monkeypatch)
     data = complete_data_with_gms(
