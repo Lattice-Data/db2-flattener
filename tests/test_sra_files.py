@@ -1093,7 +1093,7 @@ def test_crispr_with_one_sequence_file_set_keeps_one_row():
     )
 
     assert len(sra_df) == 1
-    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_CRI.1"]
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_CRI"]
     assert list(sra_df["filename"]) == ["setA_R1.fastq.gz"]
     assert list(sra_df["filename2"]) == ["setA_R2.fastq.gz"]
 

@@ -1684,7 +1684,10 @@ class DB2Flattener:
 
     @staticmethod
     def _suffix_crispr_library_ids(crispr: pd.DataFrame) -> pd.DataFrame:
-        """Append .1, .2, … to library_ID for CRISPR rows matched to a SequenceFileSet."""
+        """Append .1, .2, … to library_ID when a CRISPR library has multiple SequenceFileSets.
+
+        A library with only one matched SequenceFileSet keeps the unsuffixed library_ID.
+        """
         if crispr.empty or "library_ID" not in crispr.columns:
             return crispr
         if "sequence_file_set_@id" not in crispr.columns:
@@ -1700,11 +1703,19 @@ class DB2Flattener:
             return crispr
         matched_rows = crispr.loc[matched]
         if group_col:
+            group_sizes = matched_rows.groupby(group_col, sort=False)[group_col].transform("size")
             suffixes = matched_rows.groupby(group_col, sort=False).cumcount().add(1)
+            multi = group_sizes.gt(1)
         else:
             suffixes = pd.Series(range(1, len(matched_rows) + 1), index=matched_rows.index)
-        base = matched_rows["library_ID"].map(lambda v: "" if is_empty(v) else str(v))
-        crispr.loc[matched, "library_ID"] = base + "." + suffixes.astype(str)
+            multi = pd.Series(len(matched_rows) > 1, index=matched_rows.index)
+        suffix_idx = multi[multi].index
+        if suffix_idx.empty:
+            return crispr
+        base = matched_rows.loc[suffix_idx, "library_ID"].map(
+            lambda v: "" if is_empty(v) else str(v)
+        )
+        crispr.loc[suffix_idx, "library_ID"] = base + "." + suffixes.loc[suffix_idx].astype(str)
         return crispr
 
     # Anything not listed sorts alphabetically after these
