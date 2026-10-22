@@ -125,16 +125,20 @@ def test_guide_template_set_written_when_present(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
+    lib_id = "/droplet_based_libraries/lib1/"
     flattener = make_flattener(
         pd.DataFrame({"sample_alias": ["s1"]}),
         cro_orders=["ABC-123"],
     )
+    main, sample = flattener.create_dataframe({})
+    main["droplet_based_libraries_@id"] = lib_id
+    flattener.create_dataframe = lambda complete_data: (main.copy(), sample.copy())
     flattener._biohub_guide_sets = lambda complete_data: [
         {
             "set_number": 1,
             "gm_id": "/genetic_modifications/aaa/",
             "file_info": {"@id": "/tabular_files/x/"},
-            "library_ids": set(),
+            "library_ids": {lib_id},
         }
     ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
@@ -153,16 +157,20 @@ def test_empty_guide_df_skips_guide_template(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
+    lib_id = "/droplet_based_libraries/lib1/"
     flattener = make_flattener(
         pd.DataFrame({"sample_alias": ["s1"]}),
         cro_orders=["ABC-123"],
     )
+    main, sample = flattener.create_dataframe({})
+    main["droplet_based_libraries_@id"] = lib_id
+    flattener.create_dataframe = lambda complete_data: (main.copy(), sample.copy())
     flattener._biohub_guide_sets = lambda complete_data: [
         {
             "set_number": 1,
             "gm_id": "/genetic_modifications/aaa/",
             "file_info": {"@id": "/tabular_files/x/"},
-            "library_ids": set(),
+            "library_ids": {lib_id},
         }
     ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame()
