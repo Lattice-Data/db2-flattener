@@ -63,17 +63,37 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
         "libraries": {
             "uuid-a": {
                 "library": {"@id": LIB_A},
-                "genetic_modifications": [{"@id": GM_AAA, "guide_rna_files": GUIDE_A}],
+                "genetic_modifications": [
+                    {
+                        "@id": GM_AAA,
+                        "aliases": ["lab:gm-a"],
+                        "guide_rna_files": GUIDE_A,
+                    }
+                ],
             },
             "uuid-b": {
                 "library": {"@id": LIB_B},
-                "genetic_modifications": [{"@id": GM_BBB, "guide_rna_files": GUIDE_B}],
+                "genetic_modifications": [
+                    {
+                        "@id": GM_BBB,
+                        "aliases": ["lab:gm-b"],
+                        "guide_rna_files": GUIDE_B,
+                    }
+                ],
             },
         },
         "resolved_objects": {
             "GeneticModification": {
-                GM_AAA: {"@id": GM_AAA, "guide_rna_files": GUIDE_A},
-                GM_BBB: {"@id": GM_BBB, "guide_rna_files": GUIDE_B},
+                GM_AAA: {
+                    "@id": GM_AAA,
+                    "aliases": ["lab:gm-a"],
+                    "guide_rna_files": GUIDE_A,
+                },
+                GM_BBB: {
+                    "@id": GM_BBB,
+                    "aliases": ["lab:gm-b"],
+                    "guide_rna_files": GUIDE_B,
+                },
             },
             "TabularFile": {GUIDE_A["@id"]: GUIDE_A, GUIDE_B["@id"]: GUIDE_B},
         },
@@ -94,12 +114,15 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
     result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
     outdir = Path(result)
     biohub = outdir / "BIOHUB"
+    geo = outdir / "GEO"
 
     assert (biohub / "samples_template_set1_v1.csv").is_file()
     assert (biohub / "samples_template_set2_v1.csv").is_file()
     assert (biohub / "guide_template_set1_v1.csv").is_file()
     assert (biohub / "guide_template_set2_v1.csv").is_file()
     assert not (biohub / "samples_template_v1.csv").exists()
+    assert (geo / "gm-a_guide_metadata.csv").is_file()
+    assert (geo / "gm-b_guide_metadata.csv").is_file()
 
     set1 = pd.read_csv(biohub / "samples_template_set1_v1.csv")
     set2 = pd.read_csv(biohub / "samples_template_set2_v1.csv")
@@ -110,6 +133,8 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
     guide2 = pd.read_csv(biohub / "guide_template_set2_v1.csv")
     assert list(guide1["id"]) == ["guide-a"]
     assert list(guide2["id"]) == ["guide-b"]
+    assert list(pd.read_csv(geo / "gm-a_guide_metadata.csv")["id"]) == ["guide-a"]
+    assert list(pd.read_csv(geo / "gm-b_guide_metadata.csv")["id"]) == ["guide-b"]
 
 
 def test_no_gms_writes_samples_template_v1(tmp_path, monkeypatch):

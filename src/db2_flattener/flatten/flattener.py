@@ -163,6 +163,7 @@ class DB2Flattener:
         # still contribute their main_df rows. Split by GeneticModification set.
         self._write_biohub_outputs(
             biohub_dir,
+            geo_dir,
             main_df,
             biohub_samples,
             complete_data,
@@ -2155,9 +2156,19 @@ class DB2Flattener:
         return guide_df[present].rename(columns=GUIDE_METADATA_COLUMN_MAP).copy()
 
     def _write_biohub_outputs(
-        self, biohub_dir, main_df, biohub_samples, complete_data, *, biohub_version: str
+        self,
+        biohub_dir,
+        geo_dir,
+        main_df,
+        biohub_samples,
+        complete_data,
+        *,
+        biohub_version: str,
     ):
-        """Write BIOHUB samples/guide templates, split by GeneticModification set."""
+        """Write BIOHUB samples/guide templates, split by GeneticModification set.
+
+        Guide frames are also copied to GEO as ``{alias}_guide_metadata.csv``.
+        """
         source = self.biohub_source_dataframe(main_df, biohub_samples)
         sets = self._biohub_guide_sets(complete_data)
 
@@ -2201,6 +2212,18 @@ class DB2Flattener:
             print(f"✅ Guide metadata CSV file created: {guide_output}")
             print(f"   Rows: {len(guide_df)}")
             print(f"   Columns: {len(guide_df.columns)}")
+
+            alias = biohub_set.get("alias")
+            if not alias:
+                print(
+                    f"Warning: GeneticModification {biohub_set['gm_id']} has no alias; "
+                    f"skipping GEO guide_metadata copy for set{set_n}"
+                )
+            else:
+                geo_guide_output = geo_dir / f"{alias}_guide_metadata.csv"
+                print(f"Saving GEO guide metadata DataFrame to {geo_guide_output}...")
+                guide_df.to_csv(geo_guide_output, index=False)
+                print(f"✅ GEO guide metadata CSV file created: {geo_guide_output}")
 
         if not source.empty:
             unassigned = len(source.index.difference(assigned_index))
@@ -2279,6 +2302,7 @@ class DB2Flattener:
                     "gm_id": gm_id,
                     "file_info": file_info,
                     "library_ids": gm_to_libraries[gm_id],
+                    "alias": self._get_clean_alias(gm),
                 }
             )
         return sets

@@ -65,8 +65,9 @@ Layout:
 {CRO_orders}_{timestamp}/
   MAIN.csv
   GEO/
-    geo_metadata.csv
-    demultiplexing_samples.csv   # omitted when empty
+    geo_metadata.csv                     # includes genetic_modification_alias when present
+    demultiplexing_samples.csv           # omitted when empty; same alias column when present
+    {gm_alias}_guide_metadata.csv        # copy of each BIOHUB guide template
   SRA/
     sra_biosample.csv
     sra_file.csv

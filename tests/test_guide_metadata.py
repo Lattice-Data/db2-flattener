@@ -222,6 +222,19 @@ def test_biohub_sets_sorted_by_gm_id(monkeypatch):
     assert [s["set_number"] for s in sets] == [1, 2]
 
 
+def test_biohub_sets_include_cleaned_alias(monkeypatch):
+    flattener, _calls = make_flattener(monkeypatch)
+    data = complete_data_with_gms(
+        {
+            "@id": GM_AAA,
+            "aliases": ["lab:gm-screen-a"],
+            "guide_rna_files": GUIDE_FILE,
+        }
+    )
+    sets = flattener._biohub_guide_sets(data)
+    assert sets[0]["alias"] == "gm-screen-a"
+
+
 @pytest.mark.parametrize(
     "file_info, expected",
     [
