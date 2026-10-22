@@ -141,5 +141,5 @@ def test_non_crispr_sums_sequence_files_file_size():
     assert list(sra_df["file_size"]) == [150]
 
 
-def test_sra_chunk_max_bytes_is_five_tib():
-    assert SRA_CHUNK_MAX_BYTES == 5 * 1024**4
+def test_sra_chunk_max_bytes_is_five_tb():
+    assert SRA_CHUNK_MAX_BYTES == 5 * 1000**4

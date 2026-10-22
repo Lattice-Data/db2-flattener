@@ -62,8 +62,8 @@ SAMPLE_URL_PREFIXES = tuple(f"{name.replace(' ', '_')}s" for name in TISSUE_TYPE
 # SequenceFileSet slots that link to SequenceFiles, in filename column order
 SEQUENCE_FILE_SET_FILE_SLOTS = ("index1", "index2", "read1", "read2", "read3")
 
-# Max total SequenceFile bytes per SRA file/biosample chunk (5 TiB)
-SRA_CHUNK_MAX_BYTES = 5 * 1024**4
+# Max total SequenceFile bytes per SRA file/biosample chunk (5 TB)
+SRA_CHUNK_MAX_BYTES = 5 * 1000**4  # 5_000_000_000_000
 
 # MAIN / biohub-source columns used to assign rows to a GeneticModification set
 BIOHUB_LIBRARY_ID_COLS = (
@@ -177,7 +177,7 @@ class DB2Flattener:
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
 
-        # SRA sheets: chunk by sample_name so each set stays under 5 TiB of files
+        # SRA sheets: chunk by sample_name so each set stays under 5 TB of files
         sra_biosample_df = self.create_sra_biosample_dataframe(main_df)
         sequence_file_set_df = self.create_sequence_file_set_dataframe(complete_data)
         sra_files_df = self.create_sra_files_dataframe(
@@ -1304,7 +1304,7 @@ class DB2Flattener:
         return total
 
     def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
-        """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TiB sample_name packs."""
+        """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TB sample_name packs."""
         chunks = self._chunk_sra_by_sample_name(sra_files_df)
         for set_n, file_chunk in enumerate(chunks, start=1):
             write_files = file_chunk.drop(columns=["file_size"], errors="ignore")
@@ -1438,7 +1438,7 @@ class DB2Flattener:
                 columns_to_keep.append(col)
         if filename_source and filename_source not in columns_to_keep:
             columns_to_keep.append(filename_source)
-        # Used only to size non-CRISPR rows for ≤5 TiB SRA chunking; dropped before write.
+        # Used only to size non-CRISPR rows for ≤5 TB SRA chunking; dropped before write.
         if "sequence_files_file_size" in main_df.columns:
             columns_to_keep.append("sequence_files_file_size")
         sra_df = main_df[columns_to_keep].copy()
