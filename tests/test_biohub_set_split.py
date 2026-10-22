@@ -199,8 +199,7 @@ def test_unassigned_rows_fail(tmp_path, monkeypatch, capsys):
     with pytest.raises(ValueError, match="no matching GeneticModification set"):
         flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
     assert (
-        "1 BIOHUB source row(s) have no matching GeneticModification set"
-        in capsys.readouterr().out
+        "1 BIOHUB source row(s) have no matching GeneticModification set" in capsys.readouterr().out
     )
     biohub = tmp_path / f"ABC-123_{TIMESTAMP}" / "BIOHUB"
     assert not list(biohub.glob("samples_template_set*_v1.csv"))

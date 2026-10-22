@@ -2330,8 +2330,7 @@ class DB2Flattener:
             unassigned = len(source.index.difference(assigned_index))
             if unassigned:
                 message = (
-                    f"{unassigned} BIOHUB source row(s) have no matching "
-                    "GeneticModification set"
+                    f"{unassigned} BIOHUB source row(s) have no matching GeneticModification set"
                 )
                 print(f"Warning: {message}")
                 raise ValueError(message)
