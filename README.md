@@ -39,8 +39,11 @@ export DB2_DEMO_SERVER=https://lattice-api-dev.demo.lattice-data.org/
 
 ## Flatten from this directory
 
-After the editable install, any of these work from the repository root. CSVs
-are written to the current working directory.
+After the editable install, any of these work from the repository root. Output
+is written under a directory in the current working directory named
+`{CRO_orders}_{timestamp}` (unique `sequence_file_sets_CRO_order` values from
+MAIN, sorted and joined by `_`). If no CRO_order values are present, the
+directory is `MatrixFileSet_{uuid8}_{timestamp}`.
 
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo
@@ -48,12 +51,21 @@ db2-flattener -u <matrix-file-set-uuid> -m db2_demo
 python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo
 ```
 
-Optional `-o` sets a shared path prefix. CSVs are written as
-`{prefix}_MAIN.csv`, `{prefix}_BIOHUB.csv`, `{prefix}_GEO.csv`,
-`{prefix}_SRA_BIOSAMPLE.csv`, `{prefix}_SRA_FILE.csv`, `{prefix}_SAMPLES.csv`,
-and `{prefix}_GUIDE_METADATA.csv`. SAMPLES and GUIDE_METADATA are omitted when
-there is nothing to write. Without `-o`, the prefix is
-`MatrixFileSet_{uuid}_{timestamp}`.
+Layout:
+
+```
+{CRO_orders}_{timestamp}/
+  MAIN.csv
+  GEO/
+    geo_metadata.csv
+    demultiplexing_samples.csv   # omitted when empty
+  SRA/
+    sra_biosample.csv
+    sra_file.csv
+  BIOHUB/
+    samples_template.csv
+    guide_template.csv           # omitted when empty
+```
 
 ## Fetch latest schema from Lattice
 

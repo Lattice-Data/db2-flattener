@@ -32,15 +32,6 @@ def main() -> None:
         help="mode/instance to run on",
         default="db2_demo",
     )
-    parser.add_argument(
-        "--output",
-        "-o",
-        help="Output path prefix (optional). Writes {prefix}_MAIN.csv, "
-        "{prefix}_BIOHUB.csv, {prefix}_GEO.csv, {prefix}_SRA_BIOSAMPLE.csv, "
-        "{prefix}_SRA_FILE.csv, {prefix}_SAMPLES.csv, and "
-        "{prefix}_GUIDE_METADATA.csv. "
-        "Defaults to MatrixFileSet_{uuid}_{timestamp}",
-    )
     args = parser.parse_args()
     print(f"{parser.prog} {__version__}")
 
@@ -52,10 +43,10 @@ def main() -> None:
             OBJECT_CONFIG=object_config,
         )
         flattener = DB2Flattener(connection, configs)
-        output_file = flattener.flatten_matrix_file_set(args.uuid, args.output)
+        output_dir = flattener.flatten_matrix_file_set(args.uuid)
 
-        if output_file:
-            print(f"\nSuccess! CSV file created: {output_file}")
+        if output_dir:
+            print(f"\nSuccess! Output directory created: {output_dir}")
         else:
             print(f"Failed to process MatrixFileSet {args.uuid}")
             sys.exit(1)

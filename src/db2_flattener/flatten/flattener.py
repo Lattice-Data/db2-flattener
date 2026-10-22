@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 import pandas as pd
@@ -88,9 +88,11 @@ class DB2Flattener:
         # Initialize gatherer
         self.gatherer = DB2Gatherer(self.connection, configs)
 
-    def flatten_matrix_file_set(self, matrix_file_set_uuid, output_prefix=None):
+    def flatten_matrix_file_set(self, matrix_file_set_uuid):
         """
-        Flatten a MatrixFileSet into library-indexed data and save as CSV file
+        Flatten a MatrixFileSet into library-indexed data and save CSVs under
+        `{CRO_orders}_{timestamp}/` (or `MatrixFileSet_{uuid8}_{timestamp}/`
+        when no CRO_order values are present).
         """
         print(f"Processing MatrixFileSet {matrix_file_set_uuid}")
 
@@ -102,16 +104,6 @@ class DB2Flattener:
             return None
 
         print("Creating DataFrames...")
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = output_prefix or f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}"
-        main_output = f"{prefix}_MAIN.csv"
-        biohub_output = f"{prefix}_BIOHUB.csv"
-        geo_output = f"{prefix}_GEO.csv"
-        sra_biosample_output = f"{prefix}_SRA_BIOSAMPLE.csv"
-        sra_file_output = f"{prefix}_SRA_FILE.csv"
-        sample_output = f"{prefix}_SAMPLES.csv"
-        guide_output = f"{prefix}_GUIDE_METADATA.csv"
 
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
@@ -129,6 +121,28 @@ class DB2Flattener:
             biohub_samples = sample_df.copy()
             sample_df = self._attach_plate_library_id(main_df, sample_df)
             sample_df = self.create_samples_dataframe(sample_df)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cro_orders = self._unique_cro_orders(main_df)
+        if cro_orders:
+            dir_name = f"{'_'.join(cro_orders)}_{timestamp}"
+        else:
+            dir_name = f"MatrixFileSet_{matrix_file_set_uuid[:8]}_{timestamp}"
+
+        outdir = Path(dir_name)
+        geo_dir = outdir / "GEO"
+        sra_dir = outdir / "SRA"
+        biohub_dir = outdir / "BIOHUB"
+        for subdir in (geo_dir, sra_dir, biohub_dir):
+            subdir.mkdir(parents=True, exist_ok=True)
+
+        main_output = outdir / "MAIN.csv"
+        geo_output = geo_dir / "geo_metadata.csv"
+        sample_output = geo_dir / "demultiplexing_samples.csv"
+        sra_biosample_output = sra_dir / "sra_biosample.csv"
+        sra_file_output = sra_dir / "sra_file.csv"
+        biohub_output = biohub_dir / "samples_template.csv"
+        guide_output = biohub_dir / "guide_template.csv"
 
         # Save main DataFrame to CSV
         print(f"Saving main DataFrame to {main_output}...")
@@ -189,7 +203,24 @@ class DB2Flattener:
             print(f"   Rows: {len(sample_df)}")
             print(f"   Columns: {len(sample_df.columns)}")
 
-        return main_output
+        print(f"✅ Output directory created: {outdir}")
+        return str(outdir)
+
+    @staticmethod
+    def _unique_cro_orders(main_df):
+        """Sorted unique CRO_order values from MAIN ``sequence_file_sets_CRO_order``."""
+        col = "sequence_file_sets_CRO_order"
+        if col not in main_df.columns:
+            return []
+        orders = []
+        for val in main_df[col]:
+            if is_empty(val):
+                continue
+            for part in str(val).split("; "):
+                part = part.strip()
+                if part:
+                    orders.append(part)
+        return sorted(set(orders))
 
     def create_dataframe(self, complete_data):
         """Create main library/raw-file DataFrame and sample DataFrame keyed by raw matrix file"""

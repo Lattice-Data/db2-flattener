@@ -9,13 +9,13 @@ class FakeConnection:
 
 
 class FakeFlattener:
-    return_value = "myrun_MAIN.csv"
+    return_value = "ABC-123_20260814_095000"
     error = None
 
     def __init__(self, connection, configs):
         pass
 
-    def flatten_matrix_file_set(self, uuid, output):
+    def flatten_matrix_file_set(self, uuid):
         if self.error is not None:
             raise self.error
         return self.return_value
@@ -41,7 +41,7 @@ def test_cli_success_prints_path(monkeypatch, capsys):
     cli.main()
     out = capsys.readouterr().out
     assert f"db2-flattener {__version__}" in out
-    assert "Success! CSV file created: myrun_MAIN.csv" in out
+    assert "Success! Output directory created: ABC-123_20260814_095000" in out
 
 
 def test_cli_no_data_exits_1(monkeypatch, capsys):
