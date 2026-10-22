@@ -34,7 +34,7 @@ def make_flattener(sample_df, *, cro_orders=None):
     f.create_sra_files_dataframe = lambda main, sequence_file_set_df=None: pd.DataFrame(
         {"sample_name": ["s1"], "library_ID": ["lib1"], "file_size": [0]}
     )
-    # No GeneticModifications → samples_template_v1.csv fallback
+    # No GeneticModifications → samples_template_set1_v1.csv
     f._biohub_guide_sets = lambda complete_data: []
     f.create_guide_metadata_dataframe = lambda file_info: None
     f._attach_plate_library_id = lambda main, sample: sample
@@ -69,7 +69,7 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
     assert (outdir / "GEO" / "demultiplexing_samples.csv").is_file()
     assert (outdir / "SRA" / "sra_biosample_set1.csv").is_file()
     assert (outdir / "SRA" / "sra_file_set1.csv").is_file()
-    assert (outdir / "BIOHUB" / "samples_template_v1.csv").is_file()
+    assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
 
 
 def test_multiple_cro_orders_concatenated_sorted(tmp_path, monkeypatch):
@@ -102,7 +102,7 @@ def test_missing_cro_order_falls_back_to_uuid(tmp_path, monkeypatch):
     assert (outdir / "GEO" / "geo_metadata.csv").is_file()
     assert (outdir / "SRA" / "sra_biosample_set1.csv").is_file()
     assert (outdir / "SRA" / "sra_file_set1.csv").is_file()
-    assert (outdir / "BIOHUB" / "samples_template_v1.csv").is_file()
+    assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
 
 
 def test_empty_sample_df_skips_demultiplexing_samples(tmp_path, monkeypatch):

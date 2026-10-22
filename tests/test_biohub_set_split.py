@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.schema.constants import Configs
@@ -137,7 +138,7 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
     assert list(pd.read_csv(geo / "gm-b_guide_metadata.csv")["id"]) == ["guide-b"]
 
 
-def test_no_gms_writes_samples_template_v1(tmp_path, monkeypatch):
+def test_no_gms_writes_samples_template_set1_v1(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
@@ -154,12 +155,12 @@ def test_no_gms_writes_samples_template_v1(tmp_path, monkeypatch):
 
     result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
     biohub = Path(result) / "BIOHUB"
-    assert (biohub / "samples_template_v1.csv").is_file()
-    assert not list(biohub.glob("samples_template_set*_v1.csv"))
+    assert (biohub / "samples_template_set1_v1.csv").is_file()
+    assert not (biohub / "samples_template_v1.csv").exists()
     assert not list(biohub.glob("guide_template_set*_v1.csv"))
 
 
-def test_unassigned_rows_warn(tmp_path, monkeypatch, capsys):
+def test_unassigned_rows_fail(tmp_path, monkeypatch, capsys):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
@@ -195,7 +196,11 @@ def test_unassigned_rows_warn(tmp_path, monkeypatch, capsys):
     )
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
 
-    flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    with pytest.raises(ValueError, match="no matching GeneticModification set"):
+        flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
     assert (
-        "1 BIOHUB source row(s) have no matching GeneticModification set" in capsys.readouterr().out
+        "1 BIOHUB source row(s) have no matching GeneticModification set"
+        in capsys.readouterr().out
     )
+    biohub = tmp_path / f"ABC-123_{TIMESTAMP}" / "BIOHUB"
+    assert not list(biohub.glob("samples_template_set*_v1.csv"))

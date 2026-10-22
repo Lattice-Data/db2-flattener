@@ -2305,15 +2305,15 @@ class DB2Flattener:
 
         if not sets:
             biohub_df = self.create_biohub_dataframe(source)
-            biohub_output = biohub_dir / f"samples_template_{biohub_version}.csv"
+            biohub_output = biohub_dir / f"samples_template_set1_{biohub_version}.csv"
             print(f"Saving biohub DataFrame to {biohub_output}...")
             biohub_df.to_csv(biohub_output, index=False)
             print(f"✅ Biohub CSV file created: {biohub_output}")
             return
 
         assigned_index = set()
+        set_subsets = []
         for biohub_set in sets:
-            set_n = biohub_set["set_number"]
             library_ids = biohub_set["library_ids"]
             if source.empty:
                 subset = source
@@ -2324,7 +2324,20 @@ class DB2Flattener:
                 )
                 subset = source.loc[mask]
                 assigned_index.update(subset.index.tolist())
+            set_subsets.append((biohub_set, subset))
 
+        if not source.empty:
+            unassigned = len(source.index.difference(assigned_index))
+            if unassigned:
+                message = (
+                    f"{unassigned} BIOHUB source row(s) have no matching "
+                    "GeneticModification set"
+                )
+                print(f"Warning: {message}")
+                raise ValueError(message)
+
+        for biohub_set, subset in set_subsets:
+            set_n = biohub_set["set_number"]
             biohub_df = self.create_biohub_dataframe(subset)
             samples_output = biohub_dir / f"samples_template_set{set_n}_{biohub_version}.csv"
             print(f"Saving biohub DataFrame to {samples_output}...")
@@ -2355,14 +2368,6 @@ class DB2Flattener:
                 print(f"Saving GEO guide metadata DataFrame to {geo_guide_output}...")
                 guide_df.to_csv(geo_guide_output, index=False)
                 print(f"✅ GEO guide metadata CSV file created: {geo_guide_output}")
-
-        if not source.empty:
-            unassigned = len(source.index.difference(assigned_index))
-            if unassigned:
-                print(
-                    f"Warning: {unassigned} BIOHUB source row(s) have no matching "
-                    "GeneticModification set; omitted from samples_template_set* files"
-                )
 
     def _biohub_guide_sets(self, complete_data):
         """

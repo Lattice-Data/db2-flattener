@@ -72,8 +72,7 @@ Layout:
     sra_biosample_setN.csv               # paired with sra_file_setN; ≤5 TB per set
     sra_file_setN.csv                    # sample_name groups packed under 5 TB
   BIOHUB/
-    samples_template_v#.csv              # when no GeneticModifications
-    samples_template_setN_v#.csv         # one per GeneticModification
+    samples_template_setN_v#.csv         # one per GeneticModification; set1 when none
     guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing
 ```
 
