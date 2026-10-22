@@ -38,8 +38,7 @@ def main() -> None:
         "--s3-order-dir",
         "-s",
         help="S3 URI of the order subdirectory. BIOHUB v# is taken from "
-        "metadata/ under this path (missing/empty → v1; else existing v# + 1). "
-        "Errors if metadata/ has mixed versions.",
+        "metadata/ under this path (missing/empty → v1; else highest found v# + 1).",
     )
     version_group.add_argument(
         "--biohub-version",

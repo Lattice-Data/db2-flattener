@@ -41,17 +41,11 @@ def next_biohub_version_from_versions(versions: set[int]) -> str:
     """
     From versions found under metadata/, return the next template suffix.
 
-    Empty → v1. One distinct version → that + 1. Mixed versions → error.
+    Empty → v1. Otherwise highest found v# + 1.
     """
     if not versions:
         return "v1"
-    if len(versions) > 1:
-        found = ", ".join(f"v{n}" for n in sorted(versions))
-        raise ValueError(
-            f"metadata/ has mixed BIOHUB template versions ({found}); "
-            "expected a single version across all samples_template* / guide_template* files"
-        )
-    return f"v{next(iter(versions)) + 1}"
+    return f"v{max(versions) + 1}"
 
 
 def resolve_biohub_version_from_s3(s3_order_dir: str, *, fs=None) -> str:

@@ -51,7 +51,7 @@ Exactly one of these BIOHUB version flags is required:
 - `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; `v#` is taken from
   `{order}/metadata/` (`samples_template(_set#)?_v#.csv` /
   `guide_template(_set#)?_v#.csv`). Missing/empty metadata → `v1`; otherwise
-  existing `v# + 1`. Errors if metadata/ has mixed versions.
+  highest found `v#` + 1.
 
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo -b v1

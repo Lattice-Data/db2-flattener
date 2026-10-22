@@ -46,9 +46,8 @@ def test_next_version_increments():
     assert next_biohub_version_from_versions({3}) == "v4"
 
 
-def test_next_version_mixed_raises():
-    with pytest.raises(ValueError, match="mixed BIOHUB template versions"):
-        next_biohub_version_from_versions({1, 2})
+def test_next_version_uses_max():
+    assert next_biohub_version_from_versions({1, 2}) == "v3"
 
 
 def test_resolve_explicit_version():
@@ -120,7 +119,7 @@ def test_s3_single_version_increments():
     assert resolve_biohub_version_from_s3(ORDER, fs=fs) == "v3"
 
 
-def test_s3_mixed_versions_raise():
+def test_s3_mixed_versions_use_max():
     fs = FakeFS(
         exists_paths={ORDER, METADATA},
         ls_map={
@@ -130,8 +129,7 @@ def test_s3_mixed_versions_raise():
             ]
         },
     )
-    with pytest.raises(ValueError, match="mixed"):
-        resolve_biohub_version_from_s3(ORDER, fs=fs)
+    assert resolve_biohub_version_from_s3(ORDER, fs=fs) == "v3"
 
 
 def test_s3_order_dir_missing_raises():
