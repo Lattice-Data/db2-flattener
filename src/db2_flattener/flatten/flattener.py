@@ -1293,15 +1293,28 @@ class DB2Flattener:
             return 0
 
     @classmethod
-    def _sum_file_sizes(cls, val) -> int:
-        """Sum file sizes from a scalar, list, or '; '-joined MAIN cell."""
-        total = 0
-        for item in to_items(val):
-            if is_empty(item):
-                continue
-            for part in str(item).split(";"):
-                total += cls._coerce_file_size(part.strip())
-        return total
+    def _sra_file_size_from_sequence_file_sets(cls, sra_rows, sequence_file_set_df) -> pd.Series:
+        """Sum SequenceFileSet file_size totals per library (same source as CRISPR)."""
+        if (
+            sra_rows.empty
+            or "_library_atid" not in sra_rows.columns
+            or sequence_file_set_df is None
+            or sequence_file_set_df.empty
+            or "library_@id" not in sequence_file_set_df.columns
+            or "file_size" not in sequence_file_set_df.columns
+        ):
+            return pd.Series(0, index=sra_rows.index, dtype=int)
+
+        sizes = sequence_file_set_df.copy()
+        sizes["file_size"] = sizes["file_size"].map(cls._coerce_file_size)
+        by_library = sizes.groupby("library_@id", sort=False)["file_size"].sum()
+        return (
+            sra_rows["_library_atid"]
+            .map(by_library)
+            .fillna(0)
+            .map(cls._coerce_file_size)
+            .astype(int)
+        )
 
     def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
         """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TB sample_name packs."""
@@ -1436,9 +1449,6 @@ class DB2Flattener:
                 columns_to_keep.append(col)
         if filename_source and filename_source not in columns_to_keep:
             columns_to_keep.append(filename_source)
-        # Used only to size non-CRISPR rows for ≤5 TB SRA chunking; dropped before write.
-        if "sequence_files_file_size" in main_df.columns:
-            columns_to_keep.append("sequence_files_file_size")
         sra_df = main_df[columns_to_keep].copy()
         sra_df.rename(columns=PROP_MAP_SRA_FILE, inplace=True)
         if "raw_file_samples" in sra_df.columns:
@@ -1597,8 +1607,6 @@ class DB2Flattener:
         ]
         if filename_source and filename_source in sra_df.columns:
             ordered.append(filename_source)
-        if "sequence_files_file_size" in sra_df.columns:
-            ordered.append("sequence_files_file_size")
         sra_df = sra_df[ordered]
         sra_df = self._apply_sra_filenames(
             sra_df,
@@ -1616,7 +1624,6 @@ class DB2Flattener:
                 "_is_crispr",
                 "library_@id",
                 "sequence_file_set_@id",
-                "sequence_files_file_size",
             )
             if c in sra_df.columns
         ]
@@ -1742,10 +1749,12 @@ class DB2Flattener:
         filename_basename: bool,
     ) -> pd.DataFrame:
         """
-        Attach filenames: MAIN join for non-CRISPR; per SequenceFileSet for CRISPR.
+        Attach filenames and file_size for SRA rows.
 
-        CRISPR rows expand to one row per set when sequence_file_set_df has matches.
-        CRISPR with no sets keeps one row and no filenames.
+        Non-CRISPR: MAIN filenames; file_size is the sum of matching SequenceFileSet
+        totals (same SequenceFile object sums as CRISPR), one row per library.
+        CRISPR: expand to one row per SequenceFileSet when matches exist; keep one
+        row with no filenames when none do.
         """
         if sra_df.empty:
             return sra_df
@@ -1763,19 +1772,13 @@ class DB2Flattener:
                 non_crispr = cls._add_sra_filenames(
                     non_crispr, filename_source, basename=filename_basename
                 )
-            if "sequence_files_file_size" in non_crispr.columns:
-                non_crispr["file_size"] = non_crispr["sequence_files_file_size"].map(
-                    cls._sum_file_sizes
-                )
-                non_crispr = non_crispr.drop(columns=["sequence_files_file_size"])
-            else:
-                non_crispr["file_size"] = 0
+            non_crispr["file_size"] = cls._sra_file_size_from_sequence_file_sets(
+                non_crispr, sequence_file_set_df
+            )
 
         if not crispr.empty:
             if filename_source and filename_source in crispr.columns:
                 crispr = crispr.drop(columns=[filename_source])
-            if "sequence_files_file_size" in crispr.columns:
-                crispr = crispr.drop(columns=["sequence_files_file_size"])
             if (
                 sequence_file_set_df is not None
                 and not sequence_file_set_df.empty

@@ -124,7 +124,7 @@ def test_crispr_row_carries_sequence_file_set_file_size():
     assert list(sra_df["file_size"]) == [999]
 
 
-def test_non_crispr_sums_sequence_files_file_size():
+def test_non_crispr_sums_sequence_file_set_file_sizes():
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
@@ -132,11 +132,61 @@ def test_non_crispr_sums_sequence_files_file_size():
             "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
             "droplet_based_libraries_feature_types": [["Gene Expression"]],
             "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
-            "sequence_files_file_size": ["100; 50"],
         }
     )
-    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+    sequence_file_set_df = pd.DataFrame(
+        [
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/a/",
+                "library_@id": "/droplet_based_libraries/gex/",
+                "filename": "R1.fastq.gz",
+                "file_size": 100,
+            },
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/b/",
+                "library_@id": "/droplet_based_libraries/gex/",
+                "filename": "R2.fastq.gz",
+                "file_size": 50,
+            },
+        ]
+    )
+    sra_df = make_flattener().create_sra_files_dataframe(
+        main_df, sequence_file_set_df=sequence_file_set_df
+    )
     assert list(sra_df["file_size"]) == [150]
+
+
+def test_non_crispr_counts_equal_sequence_file_set_sizes():
+    """Equal set totals must both count (MAIN _join_unique would have undercounted)."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
+        }
+    )
+    sequence_file_set_df = pd.DataFrame(
+        [
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/a/",
+                "library_@id": "/droplet_based_libraries/gex/",
+                "filename": "R1.fastq.gz",
+                "file_size": 100,
+            },
+            {
+                "sequence_file_set_@id": "/sequence_file_sets/b/",
+                "library_@id": "/droplet_based_libraries/gex/",
+                "filename": "R2.fastq.gz",
+                "file_size": 100,
+            },
+        ]
+    )
+    sra_df = make_flattener().create_sra_files_dataframe(
+        main_df, sequence_file_set_df=sequence_file_set_df
+    )
+    assert list(sra_df["file_size"]) == [200]
 
 
 def test_sra_chunk_max_bytes_is_five_tb():
