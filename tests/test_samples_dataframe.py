@@ -5,7 +5,6 @@ import pandas as pd
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.schema.constants import (
     GENETIC_PERTURBATION_MAP,
-    GEO_EXPERIMENTAL_CONDITION_COLS,
     PROP_MAP_SAMPLES,
     Configs,
 )
@@ -46,15 +45,14 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["tissues_developmental_stages_term_name"] == "donor_dev_stage"
     assert PROP_MAP_SAMPLES["tissues_sources_title"] == "source"
     assert PROP_MAP_SAMPLES["cell_lines_sources_title"] == "source"
-    assert PROP_MAP_SAMPLES["treatments_ontological_term_term_name"] == "treatment"
-    assert PROP_MAP_SAMPLES["treatments_description"] == "treatment_description"
+    assert PROP_MAP_SAMPLES["experimental_conditions_summary"] == "experimental_condition_summary"
+    assert (
+        PROP_MAP_SAMPLES["experimental_conditions_controlled_term_term_name"]
+        == "experimental_condition_term"
+    )
     assert PROP_MAP_SAMPLES["genetic_modifications_aliases"] == "genetic_modification_alias"
     assert PROP_MAP_SAMPLES["genetic_modifications_strategy"] == "genetic_modifications_strategy"
-    assert "treatments_lower_bound_duration" not in PROP_MAP_SAMPLES
-    assert "treatments_upper_bound_duration" not in PROP_MAP_SAMPLES
-    assert "treatments_duration_units" not in PROP_MAP_SAMPLES
-    for col in GEO_EXPERIMENTAL_CONDITION_COLS:
-        assert col not in PROP_MAP_SAMPLES
+    assert not any(key.startswith("treatments_") for key in PROP_MAP_SAMPLES)
 
 
 def test_create_samples_dataframe_renames_and_drops_unmapped():
@@ -77,8 +75,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
             "tissues_selection_methods": ["positive"],
             "tissues_developmental_stages_term_name": ["adult"],
             "tissues_sources_title": ["Vendor X"],
-            "treatments_ontological_term_term_name": ["LPS"],
-            "treatments_description": ["stimulation"],
+            "experimental_conditions_summary": ["LPS for 4 hours"],
             "genetic_modifications_aliases": ["lab:gm-screen-a"],
             "genetic_modifications_strategy": ["knockout screen"],
             "raw_file_samples": ["s1"],
@@ -106,9 +103,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert list(result["selection_methods"]) == ["positive"]
     assert list(result["donor_dev_stage"]) == ["adult"]
     assert list(result["source"]) == ["Vendor X"]
-    assert list(result["treatment"]) == ["LPS"]
-    assert list(result["treatment_description"]) == ["stimulation"]
-    assert "treatment_duration" not in result.columns
+    assert list(result["experimental_condition_summary"]) == ["LPS for 4 hours"]
     assert list(result["genetic_modification_alias"]) == ["lab:gm-screen-a"]
     assert "genetic_modifications_aliases" not in result.columns
     assert list(result["genetic_modifications_strategy"]) == ["CRISPR knockout screen"]
@@ -284,53 +279,6 @@ def test_create_samples_dataframe_coalesces_human_and_non_human_donors():
     assert list(result["organism"]) == ["Homo sapiens", "Mus musculus"]
 
 
-def test_create_samples_dataframe_joins_description_and_duration():
-    flattener = make_flattener()
-    with_duration = flattener.create_samples_dataframe(
-        pd.DataFrame(
-            {
-                "sample_alias": ["s1", "s2"],
-                "treatments_description": ["stimulation", None],
-                "treatments_lower_bound_duration": [4, 2],
-                "treatments_upper_bound_duration": [4, 8],
-                "treatments_duration_units": ["hours", "hours"],
-            }
-        )
-    )
-    without_duration = flattener.create_samples_dataframe(
-        pd.DataFrame(
-            {
-                "sample_alias": ["s3", "s4"],
-                "treatments_description": ["washout", None],
-            }
-        )
-    )
-
-    assert list(with_duration["treatment_description"]) == [
-        "stimulation; 4 hours",
-        "2-8 hours",
-    ]
-    assert list(without_duration["treatment_description"]) == ["washout", "na"]
-    assert "treatment_duration" not in with_duration.columns
-    assert "treatments_lower_bound_duration" not in with_duration.columns
-    assert "treatments_upper_bound_duration" not in with_duration.columns
-    assert "treatments_duration_units" not in with_duration.columns
-
-
-def test_create_samples_dataframe_fills_empty_treatment():
-    flattener = make_flattener()
-    sample_df = pd.DataFrame(
-        {
-            "sample_alias": ["s1", "s2", "s3"],
-            "treatments_ontological_term_term_name": ["LPS", None, ""],
-        }
-    )
-
-    result = flattener.create_samples_dataframe(sample_df)
-
-    assert list(result["treatment"]) == ["LPS", "no treatment", "no treatment"]
-
-
 def test_create_samples_dataframe_strips_author_metadata_prefix():
     flattener = make_flattener()
     sample_df = pd.DataFrame(
@@ -349,71 +297,18 @@ def test_create_samples_dataframe_strips_author_metadata_prefix():
     assert "tissues_author_metadata_diet" not in result.columns
 
 
-def _assert_no_exp_source_cols(sample_df):
-    for col in (*GEO_EXPERIMENTAL_CONDITION_COLS, "_exp_duration"):
-        assert col not in sample_df.columns
-
-
-def test_create_samples_dataframe_experimental_condition_equal_duration():
-    flattener = make_flattener()
-    result = flattener.create_samples_dataframe(
-        pd.DataFrame(
-            {
-                "sample_alias": ["s1"],
-                "experimental_conditions_condition": ["treatment"],
-                "experimental_conditions_text_value": ["LPS"],
-                "experimental_conditions_lower_bound_duration": [4],
-                "experimental_conditions_upper_bound_duration": [4],
-                "experimental_conditions_duration_units": ["hours"],
-            }
-        )
-    )
-
-    assert list(result["experimental_condition"]) == ["treatment; LPS 4 hours"]
-    _assert_no_exp_source_cols(result)
-
-
-def test_create_samples_dataframe_experimental_condition_unequal_duration():
-    flattener = make_flattener()
-    result = flattener.create_samples_dataframe(
-        pd.DataFrame(
-            {
-                "sample_alias": ["s1"],
-                "experimental_conditions_condition": ["treatment"],
-                "experimental_conditions_text_value": ["LPS"],
-                "experimental_conditions_lower_bound_duration": [2],
-                "experimental_conditions_upper_bound_duration": [4],
-                "experimental_conditions_duration_units": ["hours"],
-            }
-        )
-    )
-
-    assert list(result["experimental_condition"]) == ["treatment; LPS 2-4 hours"]
-    _assert_no_exp_source_cols(result)
-
-
-def test_create_samples_dataframe_experimental_condition_no_duration_columns():
-    flattener = make_flattener()
-    result = flattener.create_samples_dataframe(
-        pd.DataFrame(
-            {
-                "sample_alias": ["s1"],
-                "experimental_conditions_condition": ["treatment"],
-                "experimental_conditions_text_value": ["LPS"],
-            }
-        )
-    )
-
-    assert list(result["experimental_condition"]) == ["treatment; LPS"]
-    _assert_no_exp_source_cols(result)
-
-
-def test_create_samples_dataframe_experimental_condition_does_not_collapse_rows():
+def test_create_samples_dataframe_drops_treatment_and_built_condition_columns():
     flattener = make_flattener()
     result = flattener.create_samples_dataframe(
         pd.DataFrame(
             {
                 "sample_alias": ["s1", "s2"],
+                "treatments_ontological_term_term_name": ["LPS", None],
+                "treatments_description": ["stimulation", None],
+                "treatments_lower_bound_duration": [4, None],
+                "experimental_conditions_summary": ["LPS for 4 hours", "control"],
+                "experimental_conditions_controlled_term_term_name": ["lipopolysaccharide", None],
+                "experimental_conditions_controlled_term_term_id": ["CHEBI:16412", None],
                 "experimental_conditions_condition": ["treatment", "control"],
                 "experimental_conditions_text_value": ["LPS", "PBS"],
             }
@@ -421,8 +316,12 @@ def test_create_samples_dataframe_experimental_condition_does_not_collapse_rows(
     )
 
     assert list(result["pre_pooled_sample"]) == ["s1", "s2"]
-    assert list(result["experimental_condition"]) == ["treatment; LPS", "control; PBS"]
-    _assert_no_exp_source_cols(result)
+    assert list(result["experimental_condition_summary"]) == ["LPS for 4 hours", "control"]
+    assert result["experimental_condition_term"].iloc[0] == "lipopolysaccharide"
+    assert pd.isna(result["experimental_condition_term"].iloc[1])
+    for col in ("treatment", "treatment_description", "experimental_condition"):
+        assert col not in result.columns
+    assert not any(col.startswith(("treatments_", "experimental_conditions_")) for col in result)
 
 
 def test_create_samples_dataframe_donor_ethnicity_sra_pooling():

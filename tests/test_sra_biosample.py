@@ -34,8 +34,7 @@ AGE_LOWER_COLUMN = "age_lower_bound"
 AGE_UPPER_COLUMN = "age_upper_bound"
 ETHNICITY_COLUMN = "ethnicity"
 SUSPENSION_COLUMN = "suspension_type"
-PERTURBATION_COLUMN = "experimental_perturbation"
-FACTORS_COLUMN = "experimental_perturbation_factors"
+CONDITION_SUMMARY_COLUMN = "experimental_condition_summary"
 INTENDED_CELL_TYPE_COLUMN = "intended_cell_type"
 ENRICHED_COLUMN = "suspension_enriched_cell_types"
 DEPLETED_COLUMN = "suspension_depleted_cell_types"
@@ -749,7 +748,7 @@ def test_provider_ignores_lab_columns_on_non_sample_objects():
     main_df["droplet_based_libraries_lab"] = [LAB, LAB]
     main_df["human_donors_lab"] = [LAB, LAB]
     main_df["sequence_files_lab"] = [LAB, LAB]
-    main_df["treatments_lab"] = [LAB, LAB]
+    main_df["experimental_conditions_lab"] = [LAB, LAB]
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -860,26 +859,7 @@ def test_ethnicity_omitted_for_non_tissue_sample_types(id_col):
     assert ETHNICITY_COLUMN not in sra_df.columns
 
 
-# experimental_perturbation
-
-
-@pytest.mark.parametrize(
-    ("lower", "upper", "units", "expected"),
-    [
-        pytest.param(8, 8, "hour", "8 hour", id="equal-bounds"),
-        pytest.param(8, 24, "hour", "8-24 hour", id="unequal-bounds"),
-        pytest.param(8.0, 8.0, "hour", "8 hour", id="float-loses-the-dot-zero"),
-        pytest.param(8, None, "hour", "8 hour", id="lower-only"),
-        pytest.param(None, 24, "hour", "24 hour", id="upper-only"),
-        pytest.param(8, 8, None, "8", id="no-units"),
-        # verbatim, not pluralised - '8 hour stimulation' reads adjectivally
-        pytest.param(2, 2, "hour", "2 hour", id="units-not-pluralised"),
-        pytest.param(None, None, "hour", "", id="no-bounds"),
-        pytest.param(None, None, None, "", id="nothing"),
-    ],
-)
-def test_duration_text(lower, upper, units, expected):
-    assert make_flattener()._duration_text(lower, upper, units) == expected
+# experimental_condition_summary
 
 
 @pytest.mark.parametrize(
@@ -896,119 +876,68 @@ def test_format_pooled_values(values, expected):
     assert make_flattener()._format_pooled_values(values) == expected
 
 
-def perturbation_main_df(rows=2, **columns):
-    base = {
-        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * rows,
-        "treatments_lower_bound_duration": [8] * rows,
-        "treatments_upper_bound_duration": [8] * rows,
-        "treatments_duration_units": ["hour"] * rows,
-        "treatments_description": ["stimulation"] * rows,
-    }
-    base.update(columns)
-    return main_frame(base)
+def condition_main_df(summaries):
+    return main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * len(summaries),
+            "experimental_conditions_summary": list(summaries),
+        }
+    )
 
 
-def test_perturbation_partly_treated_library_marks_the_gap():
-    """The Treg shape: half the samples treated, half not."""
-    main_df = perturbation_main_df(
-        treatments_lower_bound_duration=[8, None],
-        treatments_upper_bound_duration=[8, None],
-        treatments_duration_units=["hour", None],
-        treatments_description=["stimulation", None],
+def test_condition_summary_single_value_is_bare():
+    main_df = condition_main_df(["LPS for 4 hours", "LPS for 4 hours"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "LPS for 4 hours"
+
+
+def test_condition_summary_pools_distinct_values():
+    main_df = condition_main_df(["LPS for 4 hours", "control"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours, control"
+
+
+def test_condition_summary_splits_a_sample_with_several_conditions():
+    main_df = condition_main_df(["LPS for 4 hours; control", "control"])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours, control"
+
+
+def test_condition_summary_sample_without_condition_adds_no_gap():
+    main_df = condition_main_df(["LPS for 4 hours", None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "LPS for 4 hours"
+
+
+def test_condition_summary_absent_when_no_sample_has_one():
+    main_df = condition_main_df([None, None])
+
+    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    assert CONDITION_SUMMARY_COLUMN not in sra_df.columns
+
+
+def test_no_treatment_derived_columns():
+    main_df = main_frame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "treatments_description": ["stimulation"],
+            "treatments_ontological_term_term_name": ["IL2_HUMAN"],
+        }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, PERTURBATION_COLUMN] == "pooled: 8 hour stimulation, no treatment"
-
-
-def test_perturbation_pools_two_treatments():
-    main_df = perturbation_main_df(
-        treatments_lower_bound_duration=[8, 24],
-        treatments_upper_bound_duration=[8, 24],
-        treatments_description=["stimulation", "fasting"],
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, PERTURBATION_COLUMN] == "pooled: 24 hour fasting, 8 hour stimulation"
-
-
-def test_perturbation_unequal_bounds():
-    main_df = perturbation_main_df(treatments_upper_bound_duration=[24, 24])
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, PERTURBATION_COLUMN] == "8-24 hour stimulation"
-
-
-def test_perturbation_warns_when_a_sample_has_several_treatments(capsys):
-    """
-    create_dataframe collapses them into one cell with the duration and the
-    description sorted independently, so the pairing is gone. Warn, do not guess.
-    """
-    main_df = perturbation_main_df(
-        treatments_lower_bound_duration=["8; 24"] * 2,
-        treatments_upper_bound_duration=["8; 24"] * 2,
-        treatments_description=["stimulation; washout"] * 2,
-    )
-
-    make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert "several treatments collapsed into one cell" in capsys.readouterr().out
-
-
-def test_perturbation_does_not_warn_for_a_single_treatment(capsys):
-    make_flattener().create_sra_biosample_dataframe(perturbation_main_df())
-
-    assert "several treatments" not in capsys.readouterr().out
-
-
-# experimental_perturbation_factors
-
-
-def factors_main_df(rows=2, **columns):
-    base = {
-        "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * rows,
-        "treatments_ontological_term_term_name": [["anti-CD2_HUMAN", "IL2_HUMAN"]] * rows,
-    }
-    base.update(columns)
-    return main_frame(base)
-
-
-def test_factors_bracket_a_multi_factor_sample():
-    sra_df = make_flattener().create_sra_biosample_dataframe(factors_main_df())
-
-    assert sra_df.loc[0, FACTORS_COLUMN] == "[IL2_HUMAN, anti-CD2_HUMAN]"
-
-
-def test_factors_single_factor_is_not_bracketed():
-    main_df = factors_main_df(treatments_ontological_term_term_name=["IL2_HUMAN"] * 2)
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, FACTORS_COLUMN] == "IL2_HUMAN"
-
-
-def test_factors_untreated_sample_contributes_na():
-    """The Treg shape: half the samples treated, half not."""
-    main_df = factors_main_df(
-        treatments_ontological_term_term_name=[["anti-CD2_HUMAN", "IL2_HUMAN"], None]
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, FACTORS_COLUMN] == "pooled: [IL2_HUMAN, anti-CD2_HUMAN], na"
-
-
-def test_factors_pool_two_distinct_sets():
-    main_df = factors_main_df(
-        treatments_ontological_term_term_name=[["anti-CD2_HUMAN", "IL2_HUMAN"], ["IL6_HUMAN"]]
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, FACTORS_COLUMN] == "pooled: IL6_HUMAN, [IL2_HUMAN, anti-CD2_HUMAN]"
+    assert "experimental_perturbation" not in sra_df.columns
+    assert "experimental_perturbation_factors" not in sra_df.columns
 
 
 # preservation_method
