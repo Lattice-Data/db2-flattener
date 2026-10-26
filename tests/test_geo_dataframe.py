@@ -778,7 +778,7 @@ def test_create_geo_dataframe_title_includes_experimental_condition_summary():
     assert "experimental_conditions_summary" not in geo_df.columns
 
 
-def test_create_geo_dataframe_title_falls_back_without_summary():
+def test_create_geo_dataframe_title_without_summary():
     flattener = make_flattener()
     main_df = pd.DataFrame([gex_row(tissues_suspension_type="cell")])
 
@@ -787,7 +787,7 @@ def test_create_geo_dataframe_title_falls_back_without_summary():
     assert list(geo_df["*title"]) == ["libA scRNA-seq"]
 
 
-def test_create_geo_dataframe_title_fallback_pooled_and_strategy():
+def test_create_geo_dataframe_title_pooled_and_strategy():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [
@@ -804,7 +804,7 @@ def test_create_geo_dataframe_title_fallback_pooled_and_strategy():
     assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled; CRISPR knockout screen"]
 
 
-def test_create_geo_dataframe_title_fallback_maps_differing_strategies_in_library():
+def test_create_geo_dataframe_title_maps_differing_strategies_in_library():
     """Per-sample matrix files carrying different strategies collapse to a list."""
     flattener = make_flattener()
     main_df = pd.DataFrame(
@@ -830,7 +830,7 @@ def test_create_geo_dataframe_title_fallback_maps_differing_strategies_in_librar
     ]
 
 
-def test_create_geo_dataframe_title_fallback_pooled_from_joined_samples():
+def test_create_geo_dataframe_title_pooled_from_joined_samples():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [gex_row(raw_file_samples="sample1; sample2", tissues_suspension_type="cell")]
@@ -890,30 +890,6 @@ def test_create_geo_dataframe_title_per_library():
 
     assert geo_df.loc["libA", "*title"] == "libA; stimulated"
     assert geo_df.loc["libB", "*title"] == "libB scRNA-seq"
-
-
-def test_create_geo_dataframe_title_leads_with_sorted_cro_orders():
-    flattener = make_flattener()
-    main_df = pd.DataFrame(
-        [
-            gex_row(
-                sequence_file_sets_CRO_order="ORD-2; ORD-1",
-                experimental_conditions_summary="LPS for 4 hours",
-                tissues_suspension_type="cell",
-            ),
-            gex_row(
-                raw_matrix_file_alias="libA-2.h5",
-                sequence_file_sets_CRO_order="ORD-3",
-                experimental_conditions_summary="LPS for 4 hours",
-                tissues_suspension_type="cell",
-            ),
-        ]
-    )
-
-    geo_df = flattener.create_geo_dataframe(main_df)
-
-    assert list(geo_df["*title"]) == ["ORD-1; ORD-2; ORD-3; libA scRNA-seq; LPS for 4 hours"]
-    assert "sequence_file_sets_CRO_order" not in geo_df.columns
 
 
 def test_create_geo_dataframe_titles_stay_unique_for_a_shared_summary():

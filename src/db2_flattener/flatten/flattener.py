@@ -9,7 +9,6 @@ from db2_flattener.gather import lattice as DB2lattice
 from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
-    CRO_ORDER_COL,
     EXPERIMENTAL_CONDITION_SUMMARY_COL,
     GENETIC_PERTURBATION_MAP,
     GEO_FLEX_LIBRARY_PROTOCOLS,
@@ -540,8 +539,6 @@ class DB2Flattener:
 
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
-        if CRO_ORDER_COL in geo_source.columns:
-            subset_keys.append(CRO_ORDER_COL)
         subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
@@ -677,15 +674,15 @@ class DB2Flattener:
         strategy_col: str = "*library strategy",
     ) -> pd.DataFrame:
         """
-        Build title as '<CRO order>; <library name> <library strategy>; <summary>;
-        pooled; <genetic modification strategy>'.
+        Build title as '<library name> <library strategy>; <summary>; pooled;
+        <genetic modification strategy>'.
 
-        The library name is in every title, which keeps GEO titles unique
-        (GEO requires that), and the format is the same whether or not a
-        library has an ExperimentalCondition. Empty parts are skipped; see _geo_title.
+        The library name is the library's CRO_group_identifier. It leads every
+        title, which keeps GEO titles unique (GEO requires that), and the format
+        is the same whether or not a library has an ExperimentalCondition.
+        Empty parts are skipped; see _geo_title.
         drop_source=False keeps the summary column, for a sheet that also
-        reports it under its own name. The CRO order column is always dropped,
-        since neither sheet reports it on its own.
+        reports it under its own name.
         """
         geo_df = geo_df.copy()
         geo_df[title_col] = geo_df.apply(
@@ -695,10 +692,9 @@ class DB2Flattener:
             name_col=name_col,
             strategy_col=strategy_col,
         )
-        drop_cols = [CRO_ORDER_COL] if CRO_ORDER_COL in geo_df.columns else []
         if drop_source and source_col in geo_df.columns:
-            drop_cols.append(source_col)
-        return geo_df.drop(columns=drop_cols) if drop_cols else geo_df
+            geo_df = geo_df.drop(columns=[source_col])
+        return geo_df
 
     @staticmethod
     def _geo_title(
@@ -710,7 +706,6 @@ class DB2Flattener:
         """
         One row's title; see _add_geo_title for the order.
 
-        A library with several CRO orders gets them sorted and joined with '; '.
         'pooled' only when the row has more than one distinct sample. Any cell
         may be a list after collapse_dataframe, or a '; '-joined string, so each
         is read through _distinct_parts. A library whose samples carry several
@@ -733,7 +728,6 @@ class DB2Flattener:
             if part
         )
         groups = [
-            "; ".join(parts(row.get(CRO_ORDER_COL))),
             left,
             "; ".join(parts(row.get(summary_col))),
             "pooled" if len(parts(row.get("samples"))) > 1 else "",
@@ -1359,7 +1353,6 @@ class DB2Flattener:
             "raw_file_samples",
             "genetic_modifications_strategy",
             EXPERIMENTAL_CONDITION_SUMMARY_COL,
-            CRO_ORDER_COL,
         ):
             if col in main_df.columns and col not in seen:
                 seen.add(col)

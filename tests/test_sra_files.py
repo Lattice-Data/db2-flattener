@@ -6,8 +6,8 @@ library_selection are derived from feature_types. library_layout is derived
 from sequence_file_sets_run_cardinality. platform is derived from
 sequence_file_sets_sequencing_platform; instrument_model is that same
 field without a value transform. filetype is sequence_files_file_format
-without a value transform. title follows GEO *title: CRO order, library and
-strategy, ExperimentalCondition summary, pooled, genetic modification strategy.
+without a value transform. title follows GEO *title: library and strategy,
+ExperimentalCondition summary, pooled, genetic modification strategy.
 Every library is kept, including non-GEX.
 """
 
@@ -464,13 +464,13 @@ def test_title_includes_experimental_condition_summary():
     _assert_no_title_source_cols(sra_df)
 
 
-def test_title_falls_back_without_summary():
+def test_title_without_summary():
     sra_df = make_flattener().create_sra_files_dataframe(title_main_df())
 
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq"]
 
 
-def test_title_fallback_pooled_and_strategy():
+def test_title_pooled_and_strategy():
     main_df = title_main_df(
         raw_file_samples=["sample1; sample2"],
         genetic_modifications_strategy=["knockout screen"],
@@ -497,7 +497,7 @@ def test_title_joins_distinct_summaries_across_duplicate_rows():
     _assert_no_title_source_cols(sra_df)
 
 
-def test_title_fallback_maps_differing_strategies_in_library():
+def test_title_maps_differing_strategies_in_library():
     """Rows for one library @id carrying different strategies collapse to a list."""
     main_df = pd.concat(
         [
@@ -518,21 +518,6 @@ def test_title_fallback_maps_differing_strategies_in_library():
     assert list(sra_df[TITLE_COLUMN]) == [
         "LIB_A RNA-Seq; pooled; CRISPR activation screen; CRISPR knockout screen"
     ]
-
-
-def test_title_leads_with_sorted_cro_orders():
-    main_df = pd.concat(
-        [
-            title_main_df(sequence_file_sets_CRO_order=["ORD-2; ORD-1"]),
-            title_main_df(sequence_file_sets_CRO_order=["ORD-1"]),
-        ],
-        ignore_index=True,
-    )
-
-    sra_df = make_flattener().create_sra_files_dataframe(main_df)
-
-    assert list(sra_df[TITLE_COLUMN]) == ["ORD-1; ORD-2; LIB_A RNA-Seq"]
-    assert "sequence_file_sets_CRO_order" not in sra_df.columns
 
 
 def test_title_dedupes_within_joined_summaries():
