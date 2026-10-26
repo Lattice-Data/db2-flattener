@@ -580,7 +580,7 @@ class DB2Flattener:
         col = PROP_MAP_GEO[EXPERIMENTAL_CONDITION_SUMMARY_COL]
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._join_distinct_summaries)
-        geo_df = self._add_geo_title(geo_df, source_col=col, drop_source=False, fallback=True)
+        geo_df = self._add_geo_title(geo_df, source_col=col, drop_source=False)
         col = "*single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
@@ -670,55 +670,46 @@ class DB2Flattener:
         title_col: str = "*title",
         source_col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL,
         drop_source: bool = True,
-        fallback: bool = False,
         name_col: str = "*library name",
         strategy_col: str = "*library strategy",
     ) -> pd.DataFrame:
         """
-        Build title from the ExperimentalCondition summary.
+        Build title as
+        '<library name> <library strategy>; <summary>; pooled; <genetic modification strategy>'.
 
-        A library whose samples carry several distinct summaries (pooled, or a
-        sample with several conditions) gets them sorted and joined with '; '.
-        Duplicates are removed by _join_distinct_summaries.
-        drop_source=False keeps the source column, for a sheet that also
+        The library name leads every title, which keeps GEO titles unique
+        (GEO requires that) and the format the same whether or not a library
+        has an ExperimentalCondition. Empty parts are skipped; see _geo_title.
+        drop_source=False keeps the summary column, for a sheet that also
         reports it under its own name.
-        fallback=True titles a row with no summary from its library fields
-        instead (see _fallback_geo_title), read from name_col and strategy_col.
         """
-        source = source_col
         geo_df = geo_df.copy()
-        if source in geo_df.columns:
-            geo_df[title_col] = geo_df[source].map(DB2Flattener._join_distinct_summaries)
-        else:
-            geo_df[title_col] = None
-
-        if fallback:
-            missing = geo_df[title_col].isna()
-            if missing.any():
-                geo_df.loc[missing, title_col] = geo_df.loc[missing].apply(
-                    DB2Flattener._fallback_geo_title,
-                    axis=1,
-                    name_col=name_col,
-                    strategy_col=strategy_col,
-                )
-
-        if drop_source and source in geo_df.columns:
-            geo_df = geo_df.drop(columns=[source])
+        geo_df[title_col] = geo_df.apply(
+            DB2Flattener._geo_title,
+            axis=1,
+            summary_col=source_col,
+            name_col=name_col,
+            strategy_col=strategy_col,
+        )
+        if drop_source and source_col in geo_df.columns:
+            geo_df = geo_df.drop(columns=[source_col])
         return geo_df
 
     @staticmethod
-    def _fallback_geo_title(
+    def _geo_title(
         row: pd.Series,
+        summary_col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL,
         name_col: str = "*library name",
         strategy_col: str = "*library strategy",
     ):
         """
-        '<library name> <library strategy>; pooled; <genetic modification strategy>'.
+        One row's title; see _add_geo_title for the order.
 
-        'pooled' only when the row has more than one distinct sample. Empty
-        parts are skipped. Any cell may be a list after collapse_dataframe, or
-        a '; '-joined string, so each is read through _distinct_parts; genetic
-        modification strategies are also mapped through GENETIC_PERTURBATION_MAP,
+        'pooled' only when the row has more than one distinct sample. Any cell
+        may be a list after collapse_dataframe, or a '; '-joined string, so each
+        is read through _distinct_parts. A library whose samples carry several
+        distinct summaries gets them sorted and joined with '; '. Genetic
+        modification strategies are mapped through GENETIC_PERTURBATION_MAP,
         since _map_geo_genetic_strategy leaves list cells unmapped.
         """
         parts = DB2Flattener._distinct_parts
@@ -737,6 +728,7 @@ class DB2Flattener:
         )
         groups = [
             left,
+            "; ".join(parts(row.get(summary_col))),
             "pooled" if len(parts(row.get("samples"))) > 1 else "",
             "; ".join(dict.fromkeys(strategies)),
         ]
@@ -1477,7 +1469,6 @@ class DB2Flattener:
         sra_df = self._add_geo_title(
             sra_df,
             title_col="title",
-            fallback=True,
             name_col="sample_name",
             strategy_col="library_strategy",
         )

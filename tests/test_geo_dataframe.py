@@ -756,7 +756,7 @@ def test_create_geo_dataframe_maps_genetic_modification_alias():
     assert "genetic_modifications_aliases" not in geo_df.columns
 
 
-def test_create_geo_dataframe_title_is_experimental_condition_summary():
+def test_create_geo_dataframe_title_includes_experimental_condition_summary():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [
@@ -764,13 +764,16 @@ def test_create_geo_dataframe_title_is_experimental_condition_summary():
                 raw_file_samples=["sample1", "sample2"],
                 genetic_modifications_strategy="knockout screen",
                 experimental_conditions_summary="Liver cells stimulated with LPS",
+                tissues_suspension_type="cell",
             )
         ]
     )
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["*title"]) == ["Liver cells stimulated with LPS"]
+    assert list(geo_df["*title"]) == [
+        "libA scRNA-seq; Liver cells stimulated with LPS; pooled; CRISPR knockout screen"
+    ]
     assert list(geo_df["experimental_condition_summary"]) == ["Liver cells stimulated with LPS"]
     assert "experimental_conditions_summary" not in geo_df.columns
 
@@ -850,7 +853,7 @@ def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["*title"]) == ["alpha; zeta"]
+    assert list(geo_df["*title"]) == ["libA; alpha; zeta"]
 
 
 def test_create_geo_dataframe_title_dedupes_within_joined_summaries():
@@ -865,7 +868,7 @@ def test_create_geo_dataframe_title_dedupes_within_joined_summaries():
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert list(geo_df["*title"]) == ["a; b"]
+    assert list(geo_df["*title"]) == ["libA; a; b"]
     assert list(geo_df["experimental_condition_summary"]) == ["a; b"]
 
 
@@ -885,5 +888,31 @@ def test_create_geo_dataframe_title_per_library():
 
     geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
 
-    assert geo_df.loc["libA", "*title"] == "stimulated"
+    assert geo_df.loc["libA", "*title"] == "libA; stimulated"
     assert geo_df.loc["libB", "*title"] == "libB scRNA-seq"
+
+
+def test_create_geo_dataframe_titles_stay_unique_for_a_shared_summary():
+    """GEO requires unique sample titles; replicates often share a condition."""
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                experimental_conditions_summary="LPS for 4 hours",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                droplet_based_libraries_CRO_group_identifier="libB",
+                raw_matrix_file_alias="libB.h5",
+                experimental_conditions_summary="LPS for 4 hours",
+                tissues_suspension_type="cell",
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == [
+        "libA scRNA-seq; LPS for 4 hours",
+        "libB scRNA-seq; LPS for 4 hours",
+    ]

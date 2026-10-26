@@ -6,8 +6,8 @@ library_selection are derived from feature_types. library_layout is derived
 from sequence_file_sets_run_cardinality. platform is derived from
 sequence_file_sets_sequencing_platform; instrument_model is that same
 field without a value transform. filetype is sequence_files_file_format
-without a value transform. title is the ExperimentalCondition summary,
-as on GEO *title.
+without a value transform. title follows GEO *title: library and strategy,
+ExperimentalCondition summary, pooled, genetic modification strategy.
 Every library is kept, including non-GEX.
 """
 
@@ -447,7 +447,7 @@ def title_main_df(**columns):
     return pd.DataFrame(base)
 
 
-def test_title_is_experimental_condition_summary():
+def test_title_includes_experimental_condition_summary():
     main_df = title_main_df(
         raw_file_samples=["sample1; sample2"],
         genetic_modifications_strategy=["knockout screen"],
@@ -457,7 +457,9 @@ def test_title_is_experimental_condition_summary():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[TITLE_COLUMN]) == ["Cells stimulated with LPS"]
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; Cells stimulated with LPS; pooled; CRISPR knockout screen"
+    ]
     assert list(sra_df[STRATEGY_COLUMN]) == ["CRISPR knockout screen"]
     _assert_no_title_source_cols(sra_df)
 
@@ -491,7 +493,7 @@ def test_title_joins_distinct_summaries_across_duplicate_rows():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[TITLE_COLUMN]) == ["alpha; zeta"]
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; alpha; zeta"]
     _assert_no_title_source_cols(sra_df)
 
 
@@ -530,7 +532,7 @@ def test_title_dedupes_within_joined_summaries():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[TITLE_COLUMN]) == ["a; b"]
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; a; b"]
 
 
 def test_design_description_is_blank_and_gex_only_omits_options():
