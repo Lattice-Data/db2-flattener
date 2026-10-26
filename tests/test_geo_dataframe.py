@@ -756,14 +756,14 @@ def test_create_geo_dataframe_maps_genetic_modification_alias():
     assert "genetic_modifications_aliases" not in geo_df.columns
 
 
-def test_create_geo_dataframe_title_is_experimental_condition_description():
+def test_create_geo_dataframe_title_is_experimental_condition_summary():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [
             gex_row(
                 raw_file_samples=["sample1", "sample2"],
                 genetic_modifications_strategy="knockout screen",
-                experimental_conditions_description="Liver cells stimulated with LPS",
+                experimental_conditions_summary="Liver cells stimulated with LPS",
             )
         ]
     )
@@ -771,10 +771,11 @@ def test_create_geo_dataframe_title_is_experimental_condition_description():
     geo_df = flattener.create_geo_dataframe(main_df)
 
     assert list(geo_df["*title"]) == ["Liver cells stimulated with LPS"]
-    assert "experimental_conditions_description" not in geo_df.columns
+    assert list(geo_df["experimental_condition_summary"]) == ["Liver cells stimulated with LPS"]
+    assert "experimental_conditions_summary" not in geo_df.columns
 
 
-def test_create_geo_dataframe_title_empty_without_description():
+def test_create_geo_dataframe_title_empty_without_summary():
     flattener = make_flattener()
     main_df = pd.DataFrame([gex_row()])
 
@@ -784,13 +785,13 @@ def test_create_geo_dataframe_title_empty_without_description():
     assert geo_df["*title"].isna().all()
 
 
-def test_create_geo_dataframe_title_joins_distinct_descriptions_in_library():
+def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [
-            gex_row(experimental_conditions_description="zeta"),
-            gex_row(raw_matrix_file_alias="libA-2.h5", experimental_conditions_description="alpha"),
-            gex_row(raw_matrix_file_alias="libA-3.h5", experimental_conditions_description="zeta"),
+            gex_row(experimental_conditions_summary="zeta"),
+            gex_row(raw_matrix_file_alias="libA-2.h5", experimental_conditions_summary="alpha"),
+            gex_row(raw_matrix_file_alias="libA-3.h5", experimental_conditions_summary="zeta"),
         ]
     ).dropna(axis=1, how="all")
 
@@ -803,11 +804,11 @@ def test_create_geo_dataframe_title_per_library():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [
-            gex_row(experimental_conditions_description="stimulated"),
+            gex_row(experimental_conditions_summary="stimulated"),
             gex_row(
                 droplet_based_libraries_CRO_group_identifier="libB",
                 raw_matrix_file_alias="libB.h5",
-                experimental_conditions_description=None,
+                experimental_conditions_summary=None,
             ),
         ]
     )

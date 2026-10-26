@@ -6,7 +6,7 @@ library_selection are derived from feature_types. library_layout is derived
 from sequence_file_sets_run_cardinality. platform is derived from
 sequence_file_sets_sequencing_platform; instrument_model is that same
 field without a value transform. filetype is sequence_files_file_format
-without a value transform. title is the ExperimentalCondition description,
+without a value transform. title is the ExperimentalCondition summary,
 as on GEO *title.
 Every library is kept, including non-GEX.
 """
@@ -430,7 +430,7 @@ def _assert_no_title_source_cols(sra_df):
         "sequence_files_file_format",
         "sequence_files_sra_file_names",
         "sequence_files_s3_uri",
-        "experimental_conditions_description",
+        "experimental_conditions_summary",
     ]
     for col in leaked:
         assert col not in sra_df.columns
@@ -447,11 +447,11 @@ def title_main_df(**columns):
     return pd.DataFrame(base)
 
 
-def test_title_is_experimental_condition_description():
+def test_title_is_experimental_condition_summary():
     main_df = title_main_df(
         raw_file_samples=["sample1; sample2"],
         genetic_modifications_strategy=["knockout screen"],
-        experimental_conditions_description=["Cells stimulated with LPS"],
+        experimental_conditions_summary=["Cells stimulated with LPS"],
         treatments_description=["LPS stimulation"],
     )
 
@@ -462,18 +462,18 @@ def test_title_is_experimental_condition_description():
     _assert_no_title_source_cols(sra_df)
 
 
-def test_title_is_blank_without_description():
+def test_title_is_blank_without_summary():
     sra_df = make_flattener().create_sra_files_dataframe(title_main_df())
 
     assert TITLE_COLUMN in sra_df.columns
     assert sra_df[TITLE_COLUMN].isna().all()
 
 
-def test_title_joins_distinct_descriptions_across_duplicate_rows():
+def test_title_joins_distinct_summaries_across_duplicate_rows():
     main_df = pd.concat(
         [
-            title_main_df(experimental_conditions_description=["zeta"]),
-            title_main_df(experimental_conditions_description=["alpha"]),
+            title_main_df(experimental_conditions_summary=["zeta"]),
+            title_main_df(experimental_conditions_summary=["alpha"]),
         ],
         ignore_index=True,
     )

@@ -134,7 +134,7 @@ PROP_MAP_BIOHUB = {
     "cell_lines_suspension_type": "suspension_type",
     "tissues_preservation_method": "preservation_method",
     "cell_lines_preservation_method": "preservation_method",
-    "experimental_conditions_controlled_term_term_id": "experimental_condition_ontology_term_id",
+    "experimental_conditions_controlled_terms_term_id": "experimental_condition_ontology_term_id",
     "experimental_conditions_summary": "experimental_condition_summary",
     "genetic_modifications_strategy": "genetic_perturbation_strategy",
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
@@ -167,7 +167,7 @@ PROP_MAP_SAMPLES = {
     "tissues_sources_title": "source",
     "cell_lines_sources_title": "source",
     "experimental_conditions_summary": "experimental_condition_summary",
-    "experimental_conditions_controlled_term_term_name": "experimental_condition_term",
+    "experimental_conditions_controlled_terms_term_name": "experimental_condition_term",
     "genetic_modifications_aliases": "genetic_modification_alias",
     "genetic_modifications_strategy": "genetic_modifications_strategy",
 }
@@ -264,8 +264,8 @@ GEO_INSTRUMENT_MODEL_MAP = {
     "Ultima Genomics UG 100": "UG 100",
 }
 
-# Sample titles on GEO and SRA_FILE are the ExperimentalCondition description
-EXPERIMENTAL_CONDITION_DESCRIPTION_COL = "experimental_conditions_description"
+# Sample titles on GEO and SRA_FILE are the ExperimentalCondition summary
+EXPERIMENTAL_CONDITION_SUMMARY_COL = "experimental_conditions_summary"
 
 GEO_LIBRARY_STRATEGY_FEATURE_COL = "droplet_based_libraries_feature_types"
 GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL = "plate_based_libraries_feature_types"

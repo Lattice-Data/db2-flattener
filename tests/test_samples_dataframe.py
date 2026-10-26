@@ -47,7 +47,7 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["cell_lines_sources_title"] == "source"
     assert PROP_MAP_SAMPLES["experimental_conditions_summary"] == "experimental_condition_summary"
     assert (
-        PROP_MAP_SAMPLES["experimental_conditions_controlled_term_term_name"]
+        PROP_MAP_SAMPLES["experimental_conditions_controlled_terms_term_name"]
         == "experimental_condition_term"
     )
     assert PROP_MAP_SAMPLES["genetic_modifications_aliases"] == "genetic_modification_alias"
@@ -307,8 +307,8 @@ def test_create_samples_dataframe_drops_treatment_and_built_condition_columns():
                 "treatments_description": ["stimulation", None],
                 "treatments_lower_bound_duration": [4, None],
                 "experimental_conditions_summary": ["LPS for 4 hours", "control"],
-                "experimental_conditions_controlled_term_term_name": ["lipopolysaccharide", None],
-                "experimental_conditions_controlled_term_term_id": ["CHEBI:16412", None],
+                "experimental_conditions_controlled_terms_term_name": ["lipopolysaccharide", None],
+                "experimental_conditions_controlled_terms_term_id": ["CHEBI:16412", None],
                 "experimental_conditions_condition": ["treatment", "control"],
                 "experimental_conditions_text_value": ["LPS", "PBS"],
             }

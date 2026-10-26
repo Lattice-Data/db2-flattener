@@ -9,7 +9,7 @@ from db2_flattener.gather import lattice as DB2lattice
 from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
-    EXPERIMENTAL_CONDITION_DESCRIPTION_COL,
+    EXPERIMENTAL_CONDITION_SUMMARY_COL,
     GENETIC_PERTURBATION_MAP,
     GEO_FLEX_LIBRARY_PROTOCOLS,
     GEO_INSTRUMENT_MODEL_MAP,
@@ -426,6 +426,9 @@ class DB2Flattener:
         if col in sample_df.columns:
             sample_df[col] = sample_df[col].replace(GENETIC_PERTURBATION_MAP)
 
+        # An ExperimentalCondition can carry several controlled terms
+        sample_df = join_sequence_column(sample_df, "experimental_condition_term", sep="; ")
+
         sample_df = self._add_samples_donor_ethnicity(sample_df)
         sample_df = join_sequence_column(sample_df, "sample_probe_barcode")
         sample_df = join_sequence_column(sample_df, "RT_index", sep=",")
@@ -536,8 +539,6 @@ class DB2Flattener:
 
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
-        if EXPERIMENTAL_CONDITION_DESCRIPTION_COL in geo_source.columns:
-            subset_keys.append(EXPERIMENTAL_CONDITION_DESCRIPTION_COL)
         subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
@@ -576,7 +577,11 @@ class DB2Flattener:
         col = "*library strategy"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_strategy)
-        geo_df = self._add_geo_title(geo_df)
+        geo_df = self._add_geo_title(
+            geo_df,
+            source_col=PROP_MAP_GEO[EXPERIMENTAL_CONDITION_SUMMARY_COL],
+            drop_source=False,
+        )
         col = "*single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
@@ -660,14 +665,22 @@ class DB2Flattener:
         return val
 
     @staticmethod
-    def _add_geo_title(geo_df: pd.DataFrame, *, title_col: str = "*title") -> pd.DataFrame:
+    def _add_geo_title(
+        geo_df: pd.DataFrame,
+        *,
+        title_col: str = "*title",
+        source_col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL,
+        drop_source: bool = True,
+    ) -> pd.DataFrame:
         """
-        Build title from the ExperimentalCondition description, then drop the source.
+        Build title from the ExperimentalCondition summary.
 
-        A library whose samples carry several distinct descriptions (pooled, or a
+        A library whose samples carry several distinct summaries (pooled, or a
         sample with several conditions) gets them sorted and joined with '; '.
+        drop_source=False keeps the source column, for a sheet that also
+        reports it under its own name.
         """
-        source = EXPERIMENTAL_CONDITION_DESCRIPTION_COL
+        source = source_col
         geo_df = geo_df.copy()
         if source not in geo_df.columns:
             geo_df[title_col] = None
@@ -680,7 +693,7 @@ class DB2Flattener:
             return "; ".join(items) or None
 
         geo_df[title_col] = geo_df[source].map(_title)
-        return geo_df.drop(columns=[source])
+        return geo_df.drop(columns=[source]) if drop_source else geo_df
 
     @staticmethod
     def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
@@ -1271,7 +1284,7 @@ class DB2Flattener:
         for col in (
             "raw_file_samples",
             "genetic_modifications_strategy",
-            EXPERIMENTAL_CONDITION_DESCRIPTION_COL,
+            EXPERIMENTAL_CONDITION_SUMMARY_COL,
         ):
             if col in main_df.columns and col not in seen:
                 seen.add(col)

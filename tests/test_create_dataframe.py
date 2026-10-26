@@ -1180,7 +1180,7 @@ def test_biohub_experimental_condition_ontology_term_id_defaults():
     controlled_only = pd.DataFrame(
         {
             **base,
-            "experimental_conditions_controlled_term_term_id": ["EFO:0000002", None, ""],
+            "experimental_conditions_controlled_terms_term_id": ["EFO:0000002", None, ""],
         }
     )
     biohub_controlled = f.create_biohub_dataframe(controlled_only)
@@ -1200,7 +1200,7 @@ def test_biohub_experimental_condition_ontology_term_id_sorts_multiple_terms():
             "human_donors_cxg_donor_id": ["donor1"],
             "human_donors_sex": ["female"],
             "human_donors_taxa_term_id": ["NCBITaxon:9606"],
-            "experimental_conditions_controlled_term_term_id": [["EFO:0000002", "EFO:0000001"]],
+            "experimental_conditions_controlled_terms_term_id": [["EFO:0000002", "EFO:0000001"]],
         }
     )
     biohub_df = f.create_biohub_dataframe(main_df)
