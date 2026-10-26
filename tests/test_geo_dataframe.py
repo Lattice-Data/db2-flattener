@@ -801,6 +801,32 @@ def test_create_geo_dataframe_title_fallback_pooled_and_strategy():
     assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled; CRISPR knockout screen"]
 
 
+def test_create_geo_dataframe_title_fallback_maps_differing_strategies_in_library():
+    """Per-sample matrix files carrying different strategies collapse to a list."""
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                raw_file_samples="sample1",
+                genetic_modifications_strategy="knockout screen",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                raw_matrix_file_alias="libA-2.h5",
+                raw_file_samples="sample2",
+                genetic_modifications_strategy="activation screen",
+                tissues_suspension_type="cell",
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == [
+        "libA scRNA-seq; pooled; CRISPR activation screen; CRISPR knockout screen"
+    ]
+
+
 def test_create_geo_dataframe_title_fallback_pooled_from_joined_samples():
     flattener = make_flattener()
     main_df = pd.DataFrame(

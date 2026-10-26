@@ -495,6 +495,29 @@ def test_title_joins_distinct_summaries_across_duplicate_rows():
     _assert_no_title_source_cols(sra_df)
 
 
+def test_title_fallback_maps_differing_strategies_in_library():
+    """Rows for one library @id carrying different strategies collapse to a list."""
+    main_df = pd.concat(
+        [
+            title_main_df(
+                raw_file_samples=["sample1"],
+                genetic_modifications_strategy=["knockout screen"],
+            ),
+            title_main_df(
+                raw_file_samples=["sample2"],
+                genetic_modifications_strategy=["activation screen"],
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == [
+        "LIB_A RNA-Seq; pooled; CRISPR activation screen; CRISPR knockout screen"
+    ]
+
+
 def test_title_dedupes_within_joined_summaries():
     """A sample with two conditions arrives joined as 'a; b'."""
     main_df = pd.concat(

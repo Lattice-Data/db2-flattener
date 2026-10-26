@@ -715,33 +715,49 @@ class DB2Flattener:
         """
         '<library name> <library strategy>; pooled; <genetic modification strategy>'.
 
-        'pooled' only when the row has more than one sample. Empty parts are
-        skipped.
+        'pooled' only when the row has more than one distinct sample. Empty
+        parts are skipped. Any cell may be a list after collapse_dataframe, or
+        a '; '-joined string, so each is read through _distinct_parts; genetic
+        modification strategies are also mapped through GENETIC_PERTURBATION_MAP,
+        since _map_geo_genetic_strategy leaves list cells unmapped.
         """
-
-        def _cell_text(val) -> str:
-            return "" if is_empty(val) else str(val).strip()
-
-        samples = row.get("samples")
-        if isinstance(samples, (list, tuple)):
-            sample_count = len([item for item in samples if not is_empty(item)])
-        else:
-            sample_count = len([part for part in _cell_text(samples).split("; ") if part])
+        parts = DB2Flattener._distinct_parts
+        strategies = [
+            GENETIC_PERTURBATION_MAP.get(part, part)
+            for part in parts(row.get("genetic_modifications_strategy"))
+        ]
 
         left = " ".join(
             part
             for part in (
-                _cell_text(row.get(name_col)),
-                _cell_text(row.get(strategy_col)),
+                "; ".join(parts(row.get(name_col))),
+                "; ".join(parts(row.get(strategy_col))),
             )
             if part
         )
         groups = [
             left,
-            "pooled" if sample_count > 1 else "",
-            _cell_text(row.get("genetic_modifications_strategy")),
+            "pooled" if len(parts(row.get("samples"))) > 1 else "",
+            "; ".join(dict.fromkeys(strategies)),
         ]
         return "; ".join(group for group in groups if group) or None
+
+    @staticmethod
+    def _distinct_parts(value) -> list[str]:
+        """
+        Distinct non-empty items of a cell, sorted.
+
+        A cell may be a scalar, a list (after collapse_dataframe), or a
+        '; '-joined string (how create_dataframe joins several values), so
+        every item is split on '; ' first.
+        """
+        items = {
+            part.strip()
+            for item in to_items(value)
+            if not is_empty(item)
+            for part in str(item).split("; ")
+        } - {""}
+        return sorted(items)
 
     @staticmethod
     def _join_distinct_summaries(value):
@@ -751,13 +767,7 @@ class DB2Flattener:
         Each item is split on '; ' first, because create_dataframe joins a
         sample's several conditions that way: ['a; b', 'a'] becomes 'a; b'.
         """
-        items = {
-            part.strip()
-            for item in to_items(value)
-            if not is_empty(item)
-            for part in str(item).split("; ")
-        } - {""}
-        return "; ".join(sorted(items)) or None
+        return "; ".join(DB2Flattener._distinct_parts(value)) or None
 
     @staticmethod
     def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
