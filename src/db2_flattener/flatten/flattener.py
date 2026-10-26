@@ -577,11 +577,10 @@ class DB2Flattener:
         col = "*library strategy"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_strategy)
-        geo_df = self._add_geo_title(
-            geo_df,
-            source_col=PROP_MAP_GEO[EXPERIMENTAL_CONDITION_SUMMARY_COL],
-            drop_source=False,
-        )
+        col = PROP_MAP_GEO[EXPERIMENTAL_CONDITION_SUMMARY_COL]
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._join_distinct_summaries)
+        geo_df = self._add_geo_title(geo_df, source_col=col, drop_source=False, fallback=True)
         col = "*single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
@@ -671,29 +670,94 @@ class DB2Flattener:
         title_col: str = "*title",
         source_col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL,
         drop_source: bool = True,
+        fallback: bool = False,
+        name_col: str = "*library name",
+        strategy_col: str = "*library strategy",
     ) -> pd.DataFrame:
         """
         Build title from the ExperimentalCondition summary.
 
         A library whose samples carry several distinct summaries (pooled, or a
         sample with several conditions) gets them sorted and joined with '; '.
+        Duplicates are removed by _join_distinct_summaries.
         drop_source=False keeps the source column, for a sheet that also
         reports it under its own name.
+        fallback=True titles a row with no summary from its library fields
+        instead (see _fallback_geo_title), read from name_col and strategy_col.
         """
         source = source_col
         geo_df = geo_df.copy()
-        if source not in geo_df.columns:
+        if source in geo_df.columns:
+            geo_df[title_col] = geo_df[source].map(DB2Flattener._join_distinct_summaries)
+        else:
             geo_df[title_col] = None
-            return geo_df
 
-        def _title(value):
-            items = sorted(
-                {str(item).strip() for item in to_items(value) if not is_empty(item)} - {""}
+        if fallback:
+            missing = geo_df[title_col].isna()
+            if missing.any():
+                geo_df.loc[missing, title_col] = geo_df.loc[missing].apply(
+                    DB2Flattener._fallback_geo_title,
+                    axis=1,
+                    name_col=name_col,
+                    strategy_col=strategy_col,
+                )
+
+        if drop_source and source in geo_df.columns:
+            geo_df = geo_df.drop(columns=[source])
+        return geo_df
+
+    @staticmethod
+    def _fallback_geo_title(
+        row: pd.Series,
+        name_col: str = "*library name",
+        strategy_col: str = "*library strategy",
+    ):
+        """
+        '<library name> <library strategy>; pooled; <genetic modification strategy>'.
+
+        'pooled' only when the row has more than one sample. Empty parts are
+        skipped.
+        """
+
+        def _cell_text(val) -> str:
+            return "" if is_empty(val) else str(val).strip()
+
+        samples = row.get("samples")
+        if isinstance(samples, (list, tuple)):
+            sample_count = len([item for item in samples if not is_empty(item)])
+        else:
+            sample_count = len([part for part in _cell_text(samples).split("; ") if part])
+
+        left = " ".join(
+            part
+            for part in (
+                _cell_text(row.get(name_col)),
+                _cell_text(row.get(strategy_col)),
             )
-            return "; ".join(items) or None
+            if part
+        )
+        groups = [
+            left,
+            "pooled" if sample_count > 1 else "",
+            _cell_text(row.get("genetic_modifications_strategy")),
+        ]
+        return "; ".join(group for group in groups if group) or None
 
-        geo_df[title_col] = geo_df[source].map(_title)
-        return geo_df.drop(columns=[source]) if drop_source else geo_df
+    @staticmethod
+    def _join_distinct_summaries(value):
+        """
+        Distinct summaries in a cell, sorted and joined with '; '.
+
+        Each item is split on '; ' first, because create_dataframe joins a
+        sample's several conditions that way: ['a; b', 'a'] becomes 'a; b'.
+        """
+        items = {
+            part.strip()
+            for item in to_items(value)
+            if not is_empty(item)
+            for part in str(item).split("; ")
+        } - {""}
+        return "; ".join(sorted(items)) or None
 
     @staticmethod
     def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
@@ -1400,7 +1464,13 @@ class DB2Flattener:
         if col in sra_df.columns:
             sra_df[col] = sra_df[col].map(self._map_geo_genetic_strategy)
 
-        sra_df = self._add_geo_title(sra_df, title_col="title")
+        sra_df = self._add_geo_title(
+            sra_df,
+            title_col="title",
+            fallback=True,
+            name_col="sample_name",
+            strategy_col="library_strategy",
+        )
 
         sra_df["design_description"] = ""
         if "_feature_types" in sra_df.columns:
@@ -2304,6 +2374,11 @@ class DB2Flattener:
         biohub_df.rename(columns=PROP_MAP_BIOHUB, inplace=True)
         biohub_df = strip_author_metadata_column_prefix(biohub_df)
         biohub_df = collapse_duplicate_columns(biohub_df)
+        # A file pooling samples joins their summaries with _join_unique, which
+        # leaves 'a; a; b' when one sample already carried 'a; b'
+        col = "experimental_condition_summary"
+        if col in biohub_df.columns:
+            biohub_df[col] = biohub_df[col].map(self._join_distinct_summaries)
 
         # Deduplicate rows, must join lists as they are not hashable
         list_cols = [

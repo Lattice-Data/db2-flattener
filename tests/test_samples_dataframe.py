@@ -324,6 +324,20 @@ def test_create_samples_dataframe_drops_treatment_and_built_condition_columns():
     assert not any(col.startswith(("treatments_", "experimental_conditions_")) for col in result)
 
 
+def test_create_samples_dataframe_joins_multiple_condition_terms():
+    flattener = make_flattener()
+    result = flattener.create_samples_dataframe(
+        pd.DataFrame(
+            {
+                "sample_alias": ["s1"],
+                "experimental_conditions_controlled_terms_term_name": [["LPS", "IL2"]],
+            }
+        )
+    )
+
+    assert list(result["experimental_condition_term"]) == ["LPS; IL2"]
+
+
 def test_create_samples_dataframe_donor_ethnicity_sra_pooling():
     flattener = make_flattener()
     result = flattener.create_samples_dataframe(

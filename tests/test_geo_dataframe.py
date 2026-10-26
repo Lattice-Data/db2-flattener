@@ -775,14 +775,41 @@ def test_create_geo_dataframe_title_is_experimental_condition_summary():
     assert "experimental_conditions_summary" not in geo_df.columns
 
 
-def test_create_geo_dataframe_title_empty_without_summary():
+def test_create_geo_dataframe_title_falls_back_without_summary():
     flattener = make_flattener()
-    main_df = pd.DataFrame([gex_row()])
+    main_df = pd.DataFrame([gex_row(tissues_suspension_type="cell")])
 
     geo_df = flattener.create_geo_dataframe(main_df)
 
-    assert "*title" in geo_df.columns
-    assert geo_df["*title"].isna().all()
+    assert list(geo_df["*title"]) == ["libA scRNA-seq"]
+
+
+def test_create_geo_dataframe_title_fallback_pooled_and_strategy():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                raw_file_samples=["sample1", "sample2"],
+                genetic_modifications_strategy="knockout screen",
+                tissues_suspension_type="cell",
+            )
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled; CRISPR knockout screen"]
+
+
+def test_create_geo_dataframe_title_fallback_pooled_from_joined_samples():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [gex_row(raw_file_samples="sample1; sample2", tissues_suspension_type="cell")]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled"]
 
 
 def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
@@ -800,6 +827,22 @@ def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
     assert list(geo_df["*title"]) == ["alpha; zeta"]
 
 
+def test_create_geo_dataframe_title_dedupes_within_joined_summaries():
+    """A sample with two conditions arrives joined as 'a; b'."""
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(experimental_conditions_summary="a; b"),
+            gex_row(raw_matrix_file_alias="libA-2.h5", experimental_conditions_summary="a"),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["a; b"]
+    assert list(geo_df["experimental_condition_summary"]) == ["a; b"]
+
+
 def test_create_geo_dataframe_title_per_library():
     flattener = make_flattener()
     main_df = pd.DataFrame(
@@ -809,6 +852,7 @@ def test_create_geo_dataframe_title_per_library():
                 droplet_based_libraries_CRO_group_identifier="libB",
                 raw_matrix_file_alias="libB.h5",
                 experimental_conditions_summary=None,
+                tissues_suspension_type="cell",
             ),
         ]
     )
@@ -816,4 +860,4 @@ def test_create_geo_dataframe_title_per_library():
     geo_df = flattener.create_geo_dataframe(main_df).set_index("*library name")
 
     assert geo_df.loc["libA", "*title"] == "stimulated"
-    assert pd.isna(geo_df.loc["libB", "*title"])
+    assert geo_df.loc["libB", "*title"] == "libB scRNA-seq"

@@ -197,7 +197,7 @@ def test_duplicate_rmf_rows_for_the_same_library_collapse_to_one():
     assert pd.isna(sra_df.loc[0, PLATFORM_COLUMN])
     assert pd.isna(sra_df.loc[0, INSTRUMENT_MODEL_COLUMN])
     assert pd.isna(sra_df.loc[0, FILETYPE_COLUMN])
-    assert pd.isna(sra_df.loc[0, TITLE_COLUMN])
+    assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
 def test_missing_library_group_column_returns_empty_frame(capsys):
@@ -382,7 +382,7 @@ def test_library_strategy_is_blank_when_feature_types_column_is_absent():
     assert pd.isna(sra_df.loc[0, PLATFORM_COLUMN])
     assert pd.isna(sra_df.loc[0, INSTRUMENT_MODEL_COLUMN])
     assert pd.isna(sra_df.loc[0, FILETYPE_COLUMN])
-    assert pd.isna(sra_df.loc[0, TITLE_COLUMN])
+    assert sra_df.loc[0, TITLE_COLUMN] == "LIB_A"
 
 
 def test_prop_map_sends_both_library_types_to_sample_name():
@@ -462,11 +462,22 @@ def test_title_is_experimental_condition_summary():
     _assert_no_title_source_cols(sra_df)
 
 
-def test_title_is_blank_without_summary():
+def test_title_falls_back_without_summary():
     sra_df = make_flattener().create_sra_files_dataframe(title_main_df())
 
-    assert TITLE_COLUMN in sra_df.columns
-    assert sra_df[TITLE_COLUMN].isna().all()
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq"]
+
+
+def test_title_fallback_pooled_and_strategy():
+    main_df = title_main_df(
+        raw_file_samples=["sample1; sample2"],
+        genetic_modifications_strategy=["knockout screen"],
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; pooled; CRISPR knockout screen"]
+    _assert_no_title_source_cols(sra_df)
 
 
 def test_title_joins_distinct_summaries_across_duplicate_rows():
@@ -482,6 +493,21 @@ def test_title_joins_distinct_summaries_across_duplicate_rows():
 
     assert list(sra_df[TITLE_COLUMN]) == ["alpha; zeta"]
     _assert_no_title_source_cols(sra_df)
+
+
+def test_title_dedupes_within_joined_summaries():
+    """A sample with two conditions arrives joined as 'a; b'."""
+    main_df = pd.concat(
+        [
+            title_main_df(experimental_conditions_summary=["a; b"]),
+            title_main_df(experimental_conditions_summary=["a"]),
+        ],
+        ignore_index=True,
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["a; b"]
 
 
 def test_design_description_is_blank_and_gex_only_omits_options():

@@ -1257,3 +1257,19 @@ def test_biohub_experimental_condition_summary_and_no_legacy_columns():
         "experimental_conditions_lower_bound_duration",
     ):
         assert col not in biohub_df.columns
+
+
+def test_biohub_experimental_condition_summary_dedupes_joined_summaries():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [["Tissue", "Biosample", "Item"]],
+            "tissues_sample_terms_term_id": ["UBERON:0002048"],
+            "human_donors_cxg_donor_id": ["donor1"],
+            "human_donors_sex": ["female"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+            "experimental_conditions_summary": ["a; a; b"],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["experimental_condition_summary"]) == ["a; b"]
