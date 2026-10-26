@@ -680,9 +680,9 @@ class DB2Flattener:
         Build title as '<CRO order>; <library name> <library strategy>; <summary>;
         pooled; <genetic modification strategy>'.
 
-        The library name leads every title, which keeps GEO titles unique
-        (GEO requires that) and the format the same whether or not a library
-        has an ExperimentalCondition. Empty parts are skipped; see _geo_title.
+        The library name is in every title, which keeps GEO titles unique
+        (GEO requires that), and the format is the same whether or not a
+        library has an ExperimentalCondition. Empty parts are skipped; see _geo_title.
         drop_source=False keeps the summary column, for a sheet that also
         reports it under its own name. The CRO order column is always dropped,
         since neither sheet reports it on its own.
