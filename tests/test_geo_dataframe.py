@@ -892,6 +892,30 @@ def test_create_geo_dataframe_title_per_library():
     assert geo_df.loc["libB", "*title"] == "libB scRNA-seq"
 
 
+def test_create_geo_dataframe_title_leads_with_sorted_cro_orders():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                sequence_file_sets_CRO_order="ORD-2; ORD-1",
+                experimental_conditions_summary="LPS for 4 hours",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                raw_matrix_file_alias="libA-2.h5",
+                sequence_file_sets_CRO_order="ORD-3",
+                experimental_conditions_summary="LPS for 4 hours",
+                tissues_suspension_type="cell",
+            ),
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["ORD-1; ORD-2; ORD-3; libA scRNA-seq; LPS for 4 hours"]
+    assert "sequence_file_sets_CRO_order" not in geo_df.columns
+
+
 def test_create_geo_dataframe_titles_stay_unique_for_a_shared_summary():
     """GEO requires unique sample titles; replicates often share a condition."""
     flattener = make_flattener()

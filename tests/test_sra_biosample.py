@@ -898,7 +898,7 @@ def test_condition_summary_pools_distinct_values():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours, control"
+    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours; control"
 
 
 def test_condition_summary_splits_a_sample_with_several_conditions():
@@ -906,7 +906,7 @@ def test_condition_summary_splits_a_sample_with_several_conditions():
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
-    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours, control"
+    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours; control"
 
 
 def test_condition_summary_sample_without_condition_adds_no_gap():

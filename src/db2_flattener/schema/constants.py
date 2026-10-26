@@ -264,8 +264,10 @@ GEO_INSTRUMENT_MODEL_MAP = {
     "Ultima Genomics UG 100": "UG 100",
 }
 
-# Sample titles on GEO and SRA_FILE are the ExperimentalCondition summary
+# Sample titles on GEO and SRA_FILE lead with the CRO order and carry the
+# ExperimentalCondition summary
 EXPERIMENTAL_CONDITION_SUMMARY_COL = "experimental_conditions_summary"
+CRO_ORDER_COL = "sequence_file_sets_CRO_order"
 
 GEO_LIBRARY_STRATEGY_FEATURE_COL = "droplet_based_libraries_feature_types"
 GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL = "plate_based_libraries_feature_types"
