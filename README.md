@@ -57,15 +57,15 @@ By default the run is **strict**: any ERROR or WARNING audit on gathered
 objects refuses flatten (exit 1) after printing category counts. Optional
 mutually exclusive overrides:
 
-- `--force_ONLY_WARNING` — continue when only WARNING audits are present;
+- `--force-only-warning` — continue when only WARNING audits are present;
   still stop on ERROR
-- `--force_ALL_AUDIT` — continue even when ERROR or WARNING audits are present
+- `--force-all-audit` — continue even when ERROR or WARNING audits are present
 
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo -b v1
 db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
 python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -b 2
-db2-flattener -u <matrix-file-set-uuid> -m db2_demo -b v1 --force_ONLY_WARNING
+db2-flattener -u <matrix-file-set-uuid> -m db2_demo -b v1 --force-only-warning
 ```
 
 Layout:

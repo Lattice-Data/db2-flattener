@@ -2776,13 +2776,13 @@ class DB2Flattener:
         if audit_mode == "warnings_ok":
             if has_error:
                 raise ValueError(
-                    "Refusing to flatten: ERROR audits present (use --force_ALL_AUDIT to override)"
+                    "Refusing to flatten: ERROR audits present (use --force-all-audit to override)"
                 )
             return
         if has_error or has_warning:
             raise ValueError(
                 "Refusing to flatten: audits present "
-                "(use --force_ONLY_WARNING or --force_ALL_AUDIT)"
+                "(use --force-only-warning or --force-all-audit)"
             )
 
     @staticmethod

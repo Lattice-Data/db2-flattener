@@ -97,7 +97,7 @@ def test_cli_rejects_both_version_flags(monkeypatch):
 def test_cli_force_all_audit_sets_mode(monkeypatch):
     _stub_cli(
         monkeypatch,
-        argv=["db2-flattener", "-u", "abc-uuid", "-b", "v1", "--force_ALL_AUDIT"],
+        argv=["db2-flattener", "-u", "abc-uuid", "-b", "v1", "--force-all-audit"],
     )
     cli.main()
     assert FakeFlattener.last_audit_mode == "all_ok"
@@ -106,7 +106,7 @@ def test_cli_force_all_audit_sets_mode(monkeypatch):
 def test_cli_force_only_warning_sets_mode(monkeypatch):
     _stub_cli(
         monkeypatch,
-        argv=["db2-flattener", "-u", "abc-uuid", "-b", "v1", "--force_ONLY_WARNING"],
+        argv=["db2-flattener", "-u", "abc-uuid", "-b", "v1", "--force-only-warning"],
     )
     cli.main()
     assert FakeFlattener.last_audit_mode == "warnings_ok"
@@ -121,8 +121,8 @@ def test_cli_rejects_both_audit_force_flags(monkeypatch):
             "abc-uuid",
             "-b",
             "v1",
-            "--force_ALL_AUDIT",
-            "--force_ONLY_WARNING",
+            "--force-all-audit",
+            "--force-only-warning",
         ],
     )
     with pytest.raises(SystemExit) as exc:

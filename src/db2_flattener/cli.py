@@ -48,12 +48,12 @@ def main() -> None:
     )
     audit_group = parser.add_mutually_exclusive_group()
     audit_group.add_argument(
-        "--force_ALL_AUDIT",
+        "--force-all-audit",
         action="store_true",
         help="Continue flattening even when ERROR or WARNING audits are present.",
     )
     audit_group.add_argument(
-        "--force_ONLY_WARNING",
+        "--force-only-warning",
         action="store_true",
         help="Continue flattening when only WARNING audits are present; "
         "still stop on ERROR audits.",
@@ -68,9 +68,9 @@ def main() -> None:
         )
         print(f"BIOHUB template version: {biohub_version}")
 
-        if args.force_ALL_AUDIT:
+        if args.force_all_audit:
             audit_mode = "all_ok"
-        elif args.force_ONLY_WARNING:
+        elif args.force_only_warning:
             audit_mode = "warnings_ok"
         else:
             audit_mode = "strict"
