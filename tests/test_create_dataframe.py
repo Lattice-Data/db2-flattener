@@ -6,7 +6,9 @@ from db2_flattener.schema.constants import Configs
 from db2_flattener.utils import split_controlled_term_columns
 
 MIN_CONFIGS = Configs(
-    FIELD_TYPES={},
+    FIELD_TYPES={
+        "donors": {"type": "array", "elements": "string"},
+    },
     OBJECT_CONFIG={
         "droplet_based_libraries": {
             "api_type": "DropletBasedLibrary",
@@ -15,7 +17,17 @@ MIN_CONFIGS = Configs(
         },
         "tissues": {
             "api_type": "Tissue",
-            "fields": ["@id", "aliases", "author_metadata", "sources", "audit"],
+            "fields": ["@id", "aliases", "author_metadata", "sources", "donors", "audit"],
+            "references": {"donors": "human_donors"},
+        },
+        "sequence_files": {
+            "api_type": "SequenceFile",
+            "fields": ["@id", "audit"],
+            "references": {},
+        },
+        "human_donors": {
+            "api_type": "HumanDonor",
+            "fields": ["@id", "audit"],
             "references": {},
         },
     },
@@ -30,13 +42,22 @@ def make_flattener():
     return f
 
 
-def _tissue(sample_id="/tissues/s1/", alias="lab:sample1", author_metadata=None, sources=None):
+def _tissue(
+    sample_id="/tissues/s1/",
+    alias="lab:sample1",
+    author_metadata=None,
+    sources=None,
+    donors=None,
+    audit=None,
+):
     return {
         "@id": sample_id,
         "@type": ["Tissue"],
         "aliases": [alias],
         "author_metadata": author_metadata,
         "sources": sources,
+        "donors": donors,
+        "audit": audit,
     }
 
 
@@ -58,6 +79,7 @@ def _rmf(rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1", sample_id="/tissues/s
         "file_size",
         "software",
         "software_version",
+        "sequence_files",
     }
     unknown = set(file_fields) - allowed
     if unknown:
@@ -168,6 +190,90 @@ def test_create_dataframe_skips_empty_library_audit(empty_audit):
     main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
 
     assert "droplet_based_libraries_audit" not in main_df.columns
+
+
+def test_create_dataframe_flattens_sample_audit():
+    f = make_flattener()
+    audit = {"ERROR": [{"category": "missing developmental stage"}]}
+    sample = _tissue(audit=audit)
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
+
+    assert list(main_df["tissues_audit"]) == [audit]
+
+
+@pytest.mark.parametrize("empty_audit", [None, {}, ""])
+def test_create_dataframe_skips_empty_sample_audit(empty_audit):
+    f = make_flattener()
+    sample = _tissue(audit=empty_audit)
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
+
+    assert "tissues_audit" not in main_df.columns
+
+
+def test_create_dataframe_flattens_sequence_file_audit():
+    f = make_flattener()
+    audit = {"WARNING": [{"category": "odd barcode"}]}
+    sample = _tissue()
+    rmf = _rmf(
+        sequence_files=[{"@id": "/sequence_files/sf1/", "audit": audit}],
+    )
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
+
+    assert "sequence_files_audit" in main_df.columns
+    assert str(audit) in str(main_df["sequence_files_audit"].iloc[0])
+
+
+@pytest.mark.parametrize("empty_audit", [None, {}, ""])
+def test_create_dataframe_skips_empty_sequence_file_audit(empty_audit):
+    f = make_flattener()
+    sample = _tissue()
+    rmf = _rmf(
+        sequence_files=[{"@id": "/sequence_files/sf1/", "audit": empty_audit}],
+    )
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
+
+    assert "sequence_files_audit" not in main_df.columns
+
+
+def test_create_dataframe_flattens_resolved_reference_audit():
+    f = make_flattener()
+    audit = {"ERROR": [{"category": "donor missing sex"}]}
+    donor = {"@id": "/human_donors/d1/", "audit": audit}
+    sample = _tissue(donors=["/human_donors/d1/"])
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+
+    data = _complete_data([(gex, [rmf], [sample])])
+    data["libraries"]["uuid-0"]["human_donors"] = [donor]
+    main_df, _ = f.create_dataframe(data)
+
+    assert "human_donors_audit" in main_df.columns
+    assert str(audit) in str(main_df["human_donors_audit"].iloc[0])
+
+
+@pytest.mark.parametrize("empty_audit", [None, {}, ""])
+def test_create_dataframe_skips_empty_resolved_reference_audit(empty_audit):
+    f = make_flattener()
+    donor = {"@id": "/human_donors/d1/", "audit": empty_audit}
+    sample = _tissue(donors=["/human_donors/d1/"])
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+
+    data = _complete_data([(gex, [rmf], [sample])])
+    data["libraries"]["uuid-0"]["human_donors"] = [donor]
+    main_df, _ = f.create_dataframe(data)
+
+    assert "human_donors_audit" not in main_df.columns
 
 
 def test_create_dataframe_dedupes_same_library_twice_on_rmf():
