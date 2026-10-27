@@ -1177,23 +1177,10 @@ def test_biohub_experimental_condition_ontology_term_id_defaults():
     biohub_absent = f.create_biohub_dataframe(pd.DataFrame(base))
     assert "experimental_condition_ontology_term_id" not in biohub_absent.columns
 
-    main_df = pd.DataFrame(
-        {
-            **base,
-            "treatments_ontological_term_term_id": ["EFO:0000001", None, ""],
-        }
-    )
-    biohub_df = f.create_biohub_dataframe(main_df)
-    assert list(biohub_df["experimental_condition_ontology_term_id"]) == [
-        "EFO:0000001",
-        "na",
-        "na",
-    ]
-
     controlled_only = pd.DataFrame(
         {
             **base,
-            "experimental_conditions_controlled_term_term_id": ["EFO:0000002", None, ""],
+            "experimental_conditions_controlled_terms_term_id": ["EFO:0000002", None, ""],
         }
     )
     biohub_controlled = f.create_biohub_dataframe(controlled_only)
@@ -1204,7 +1191,7 @@ def test_biohub_experimental_condition_ontology_term_id_defaults():
     ]
 
 
-def test_biohub_experimental_condition_ontology_term_id_merges_and_sorts_sources():
+def test_biohub_experimental_condition_ontology_term_id_sorts_multiple_terms():
     f = make_flattener()
     main_df = pd.DataFrame(
         {
@@ -1213,8 +1200,7 @@ def test_biohub_experimental_condition_ontology_term_id_merges_and_sorts_sources
             "human_donors_cxg_donor_id": ["donor1"],
             "human_donors_sex": ["female"],
             "human_donors_taxa_term_id": ["NCBITaxon:9606"],
-            "treatments_ontological_term_term_id": ["EFO:0000002"],
-            "experimental_conditions_controlled_term_term_id": ["EFO:0000001"],
+            "experimental_conditions_controlled_terms_term_id": [["EFO:0000002", "EFO:0000001"]],
         }
     )
     biohub_df = f.create_biohub_dataframe(main_df)
@@ -1244,3 +1230,46 @@ def test_biohub_organism_ontology_term_id_from_donor_taxa():
     biohub_df = f.create_biohub_dataframe(main_df)
     assert list(biohub_df["organism_ontology_term_id"]) == ["NCBITaxon:9606", "NCBITaxon:10090"]
     assert list(biohub_df["self_reported_ethnicity_ontology_term_id"]) == ["unknown", "na"]
+
+
+def test_biohub_experimental_condition_summary_and_no_legacy_columns():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [["Tissue", "Biosample", "Item"]],
+            "tissues_sample_terms_term_id": ["UBERON:0002048"],
+            "human_donors_cxg_donor_id": ["donor1"],
+            "human_donors_sex": ["female"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+            "experimental_conditions_summary": ["LPS for 4 hours"],
+            "experimental_conditions_text_value": ["LPS"],
+            "experimental_conditions_lower_bound_duration": [4],
+            "experimental_conditions_upper_bound_duration": [4],
+            "experimental_conditions_duration_units": ["hours"],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["experimental_condition_summary"]) == ["LPS for 4 hours"]
+    for col in (
+        "experimental_perturbation",
+        "experimental_perturbation_time_point",
+        "experimental_conditions_text_value",
+        "experimental_conditions_lower_bound_duration",
+    ):
+        assert col not in biohub_df.columns
+
+
+def test_biohub_experimental_condition_summary_dedupes_joined_summaries():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@type": [["Tissue", "Biosample", "Item"]],
+            "tissues_sample_terms_term_id": ["UBERON:0002048"],
+            "human_donors_cxg_donor_id": ["donor1"],
+            "human_donors_sex": ["female"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+            "experimental_conditions_summary": ["a; a; b"],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert list(biohub_df["experimental_condition_summary"]) == ["a; b"]

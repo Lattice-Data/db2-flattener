@@ -9,8 +9,8 @@ from db2_flattener.gather import lattice as DB2lattice
 from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
     BIOHUB_SORT_ONTOLOGY_IDS,
+    EXPERIMENTAL_CONDITION_SUMMARY_COL,
     GENETIC_PERTURBATION_MAP,
-    GEO_EXPERIMENTAL_CONDITION_COLS,
     GEO_FLEX_LIBRARY_PROTOCOLS,
     GEO_INSTRUMENT_MODEL_MAP,
     GEO_LIBRARY_STRATEGY_FEATURE_COL,
@@ -19,8 +19,7 @@ from db2_flattener.schema.constants import (
     GEO_LIBRARY_STRATEGY_SOURCE_COLS,
     GEO_RUN_CARDINALITY_MAP,
     GEO_SUSPENSION_TYPE_COLS,
-    GEO_TITLE_TREATMENT_COLS,
-    GEO_TREATMENT_COLS,
+    GEO_TITLE_MAX_LENGTH,
     GUIDE_METADATA_COLUMN_MAP,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
@@ -399,19 +398,12 @@ class DB2Flattener:
     def create_samples_dataframe(self, sample_df) -> pd.DataFrame:
         """
         Build the SAMPLES sheet from post-merge sample_df: keep mapped columns,
-        rename them, and fold duration into treatment_description.
+        and rename them.
         """
         sample_df = sample_df.copy()
         plate_experiment = self._frame_has_plate_library(sample_df)
 
-        duration_cols = (
-            "treatments_lower_bound_duration",
-            "treatments_upper_bound_duration",
-            "treatments_duration_units",
-        )
         columns_to_keep = [k for k in PROP_MAP_SAMPLES if k in sample_df.columns]
-        columns_to_keep.extend(c for c in duration_cols if c in sample_df.columns)
-        columns_to_keep.extend(c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in sample_df.columns)
         columns_to_keep.extend(
             c
             for c in ("human_donors_ethnicity_term_name", "tissues_@id")
@@ -427,19 +419,6 @@ class DB2Flattener:
             columns_to_keep = [c for c in columns_to_keep if c not in rt_sources]
         sample_df = sample_df[columns_to_keep].copy()
 
-        sample_df = self._summarize_geo_experimental_condition(sample_df)
-
-        sample_df = combine_bound_columns(
-            sample_df,
-            lower_col="treatments_lower_bound_duration",
-            upper_col="treatments_upper_bound_duration",
-            units_col="treatments_duration_units",
-            out_col="treatment_duration",
-        )
-        leftover_duration = [c for c in duration_cols if c in sample_df.columns]
-        if leftover_duration:
-            sample_df = sample_df.drop(columns=leftover_duration)
-
         sample_df.rename(columns=PROP_MAP_SAMPLES, inplace=True)
         sample_df = strip_author_metadata_column_prefix(sample_df)
         sample_df = collapse_duplicate_columns(sample_df)
@@ -448,32 +427,8 @@ class DB2Flattener:
         if col in sample_df.columns:
             sample_df[col] = sample_df[col].replace(GENETIC_PERTURBATION_MAP)
 
-        if "treatment" in sample_df.columns:
-            sample_df["treatment"] = sample_df["treatment"].map(
-                lambda v: "no treatment" if is_empty(v) else v
-            )
-
-        has_desc = "treatment_description" in sample_df.columns
-        has_dur = "treatment_duration" in sample_df.columns
-        if has_desc or has_dur:
-            empty = pd.Series("", index=sample_df.index)
-            desc = sample_df["treatment_description"] if has_desc else empty
-            duration = sample_df["treatment_duration"] if has_dur else empty
-
-            def _combine_description(description, duration_text):
-                parts = [
-                    str(part).strip()
-                    for part in (description, duration_text)
-                    if not is_empty(part) and str(part).strip()
-                ]
-                return "; ".join(parts) if parts else "na"
-
-            sample_df["treatment_description"] = [
-                _combine_description(description, duration_text)
-                for description, duration_text in zip(desc, duration, strict=True)
-            ]
-            if has_dur:
-                sample_df = sample_df.drop(columns=["treatment_duration"])
+        # An ExperimentalCondition can carry several controlled terms
+        sample_df = join_sequence_column(sample_df, "experimental_condition_term", sep="; ")
 
         sample_df = self._add_samples_donor_ethnicity(sample_df)
         sample_df = join_sequence_column(sample_df, "sample_probe_barcode")
@@ -584,12 +539,7 @@ class DB2Flattener:
         print(f"GEO: filtered to {len(geo_source)} GEX/ATAC rows out of {len(main_df)} MAIN rows")
 
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
-        subset_keys.extend(k for k in GEO_EXPERIMENTAL_CONDITION_COLS if k in geo_source.columns)
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
-        subset_keys.extend(k for k in GEO_TREATMENT_COLS if k in geo_source.columns)
-        subset_keys.extend(
-            k for k in GEO_TITLE_TREATMENT_COLS if k in geo_source.columns and k not in subset_keys
-        )
         subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
@@ -599,8 +549,6 @@ class DB2Flattener:
             geo_df["genetic_modification_alias"] = geo_df["genetic_modification_alias"].map(
                 self._map_geo_genetic_modification_alias
             )
-        geo_df = self._summarize_geo_experimental_condition(geo_df)
-        geo_df = self._summarize_geo_treatment(geo_df)
         geo_df = self._add_geo_molecule(geo_df)
         geo_df = self._add_geo_library_strategy(geo_df)
 
@@ -627,13 +575,15 @@ class DB2Flattener:
         col = "donor_sex"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_sex)
-        for col in ("treatment", "_title_treatment"):
-            if col in geo_df.columns:
-                geo_df[col] = geo_df[col].map(self._sort_geo_list)
         col = "*library strategy"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._pool_mixed_geo_strategy)
-        geo_df = self._add_geo_title(geo_df)
+        col = PROP_MAP_GEO[EXPERIMENTAL_CONDITION_SUMMARY_COL]
+        if col in geo_df.columns:
+            geo_df[col] = geo_df[col].map(self._join_distinct_summaries)
+        geo_df = self._add_geo_title(
+            geo_df, source_col=col, drop_source=False, max_length=GEO_TITLE_MAX_LENGTH
+        )
         col = "*single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
@@ -717,171 +667,118 @@ class DB2Flattener:
         return val
 
     @staticmethod
-    def _sort_geo_list(val):
-        """Sort a collapsed list cell; leave scalars unchanged."""
-        if isinstance(val, (list, tuple)):
-            return sorted(val, key=lambda item: str(item))
-        return val
-
-    @staticmethod
-    def _summarize_geo_experimental_condition(geo_df: pd.DataFrame) -> pd.DataFrame:
-        """Build experimental_condition from source cols, then drop those sources."""
-        source_cols = [c for c in GEO_EXPERIMENTAL_CONDITION_COLS if c in geo_df.columns]
-        if not source_cols:
-            return geo_df
-
-        geo_df = combine_bound_columns(
-            geo_df,
-            lower_col="experimental_conditions_lower_bound_duration",
-            upper_col="experimental_conditions_upper_bound_duration",
-            units_col="experimental_conditions_duration_units",
-            out_col="_exp_duration",
-        )
-
-        def _cell_text(val) -> str:
-            if val is pd.NA:
-                return ""
-            try:
-                if is_empty(val):
-                    return ""
-            except (TypeError, ValueError):
-                return ""
-            return str(val).strip()
-
-        def _summarize_row(row: pd.Series):
-            condition = _cell_text(row.get("experimental_conditions_condition"))
-            text_value = _cell_text(row.get("experimental_conditions_text_value"))
-            duration = _cell_text(row.get("_exp_duration"))
-            right = " ".join(part for part in (text_value, duration) if part)
-            if condition and right:
-                return f"{condition}; {right}"
-            return condition or right or pd.NA
-
-        geo_df["experimental_condition"] = geo_df.apply(_summarize_row, axis=1)
-        drop_cols = [
-            c
-            for c in (
-                *GEO_EXPERIMENTAL_CONDITION_COLS,
-                "_exp_duration",
-            )
-            if c in geo_df.columns
-        ]
-        return geo_df.drop(columns=drop_cols)
-
-    @staticmethod
-    def _summarize_geo_treatment(geo_df: pd.DataFrame) -> pd.DataFrame:
-        """Build treatment from source cols. Empty rows become 'no treatment' if any row has a value."""
-        source_cols = [c for c in GEO_TREATMENT_COLS if c in geo_df.columns]
-        if not source_cols:
-            return geo_df
-
-        def _cell_text(val) -> str:
-            if val is pd.NA:
-                return ""
-            try:
-                if is_empty(val):
-                    return ""
-            except (TypeError, ValueError):
-                return ""
-            return str(val).strip()
-
-        def _duration(row: pd.Series, *, include_upper: bool) -> str:
-            lower = _cell_text(row.get("treatments_lower_bound_duration"))
-            upper = _cell_text(row.get("treatments_upper_bound_duration")) if include_upper else ""
-            if include_upper and lower and upper:
-                bounds = lower if lower == upper else f"{lower}-{upper}"
-            else:
-                bounds = lower or (upper if include_upper else "")
-            units = _cell_text(row.get("treatments_duration_units"))
-            return " ".join(part for part in (bounds, units) if part)
-
-        def _summarize_row(row: pd.Series):
-            term = _cell_text(row.get("treatments_ontological_term_term_name"))
-            description = _cell_text(row.get("treatments_description"))
-            duration = _duration(row, include_upper=False)
-            right = " ".join(part for part in (description, duration) if part)
-            if term and right:
-                return f"{term}; {right}"
-            return term or right or None
-
-        def _title_summarize_row(row: pd.Series):
-            description = _cell_text(row.get("treatments_description"))
-            duration = _duration(row, include_upper=True)
-            return " ".join(part for part in (description, duration) if part) or None
-
-        geo_df = geo_df.copy()
-        geo_df["treatment"] = geo_df.apply(_summarize_row, axis=1)
-        geo_df["_title_treatment"] = geo_df.apply(_title_summarize_row, axis=1)
-        has_treatment = geo_df["treatment"].map(lambda v: bool(_cell_text(v)))
-        if has_treatment.any():
-            empty_treatment = ~has_treatment
-            geo_df.loc[empty_treatment, "treatment"] = "no treatment"
-            geo_df.loc[empty_treatment, "_title_treatment"] = "no treatment"
-        return geo_df
-
-    @staticmethod
     def _add_geo_title(
         geo_df: pd.DataFrame,
         *,
+        title_col: str = "*title",
+        source_col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL,
+        drop_source: bool = True,
         name_col: str = "*library name",
         strategy_col: str = "*library strategy",
-        title_col: str = "*title",
+        max_length: int | None = None,
     ) -> pd.DataFrame:
-        """Build title from library, strategy, treatment, and genetic modification fields."""
+        """
+        Build title as '<library name> <library strategy>; <summary>; pooled;
+        <genetic modification strategy>'.
 
-        def _cell_text(val) -> str:
-            if val is pd.NA:
-                return ""
-            try:
-                if is_empty(val):
-                    return ""
-            except (TypeError, ValueError):
-                return ""
-            return str(val).strip()
-
-        def _is_pooled(samples) -> bool:
-            if isinstance(samples, (list, tuple)):
-                return len([item for item in samples if not is_empty(item)]) > 1
-            text = _cell_text(samples)
-            if not text:
-                return False
-            return len([part for part in text.split("; ") if part]) > 1
-
-        def _treatment_segment(row: pd.Series) -> str:
-            summarized = row.get("_title_treatment")
-            if isinstance(summarized, (list, tuple)):
-                items = [item for item in summarized if not is_empty(item)]
-                return str(list(items)) if items else ""
-            return _cell_text(summarized)
-
-        def _summarize_row(row: pd.Series):
-            left = " ".join(
-                part
-                for part in (
-                    _cell_text(row.get(name_col)),
-                    _cell_text(row.get(strategy_col)),
-                )
-                if part
-            )
-            groups = [left]
-            if _is_pooled(row.get("samples")):
-                groups.append("pooled")
-            groups.extend(
-                [
-                    _treatment_segment(row),
-                    _cell_text(row.get("genetic_modifications_strategy")),
-                ]
-            )
-            return "; ".join(group for group in groups if group) or None
-
+        The library name is the library's CRO_group_identifier. It leads every
+        title, which keeps GEO titles unique (GEO requires that), and the format
+        is the same whether or not a library has an ExperimentalCondition.
+        Empty parts are skipped; see _geo_title.
+        drop_source=False keeps the summary column, for a sheet that also
+        reports it under its own name.
+        max_length warns about, but does not truncate, any title longer than
+        it, so a curator can shorten it by hand; GEO caps titles at 120.
+        """
         geo_df = geo_df.copy()
-        geo_df[title_col] = geo_df.apply(_summarize_row, axis=1)
-        drop_cols = [
-            c
-            for c in (*GEO_TREATMENT_COLS, *GEO_TITLE_TREATMENT_COLS, "_title_treatment")
-            if c in geo_df.columns
+        geo_df[title_col] = geo_df.apply(
+            DB2Flattener._geo_title,
+            axis=1,
+            summary_col=source_col,
+            name_col=name_col,
+            strategy_col=strategy_col,
+        )
+        if max_length is not None:
+            too_long = [
+                title
+                for title in geo_df[title_col]
+                if isinstance(title, str) and len(title) > max_length
+            ]
+            if too_long:
+                print(
+                    f"Warning: {len(too_long)} {title_col} value(s) exceed {max_length} "
+                    f"characters and will need shortening, e.g. {too_long[0]!r} "
+                    f"({len(too_long[0])} characters)"
+                )
+        if drop_source and source_col in geo_df.columns:
+            geo_df = geo_df.drop(columns=[source_col])
+        return geo_df
+
+    @staticmethod
+    def _geo_title(
+        row: pd.Series,
+        summary_col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL,
+        name_col: str = "*library name",
+        strategy_col: str = "*library strategy",
+    ):
+        """
+        One row's title; see _add_geo_title for the order.
+
+        'pooled' only when the row has more than one distinct sample. Any cell
+        may be a list after collapse_dataframe, or a '; '-joined string, so each
+        is read through _distinct_parts. A library whose samples carry several
+        distinct summaries gets them sorted and joined with '; '. Genetic
+        modification strategies are mapped through GENETIC_PERTURBATION_MAP,
+        since _map_geo_genetic_strategy leaves list cells unmapped.
+        """
+        parts = DB2Flattener._distinct_parts
+        strategies = [
+            GENETIC_PERTURBATION_MAP.get(part, part)
+            for part in parts(row.get("genetic_modifications_strategy"))
         ]
-        return geo_df.drop(columns=drop_cols) if drop_cols else geo_df
+
+        left = " ".join(
+            part
+            for part in (
+                "; ".join(parts(row.get(name_col))),
+                "; ".join(parts(row.get(strategy_col))),
+            )
+            if part
+        )
+        groups = [
+            left,
+            "; ".join(parts(row.get(summary_col))),
+            "pooled" if len(parts(row.get("samples"))) > 1 else "",
+            "; ".join(dict.fromkeys(strategies)),
+        ]
+        return "; ".join(group for group in groups if group) or None
+
+    @staticmethod
+    def _distinct_parts(value) -> list[str]:
+        """
+        Distinct non-empty items of a cell, sorted.
+
+        A cell may be a scalar, a list (after collapse_dataframe), or a
+        '; '-joined string (how create_dataframe joins several values), so
+        every item is split on '; ' first.
+        """
+        items = {
+            part.strip()
+            for item in to_items(value)
+            if not is_empty(item)
+            for part in str(item).split("; ")
+        } - {""}
+        return sorted(items)
+
+    @staticmethod
+    def _join_distinct_summaries(value):
+        """
+        Distinct summaries in a cell, sorted and joined with '; '.
+
+        Each item is split on '; ' first, because create_dataframe joins a
+        sample's several conditions that way: ['a; b', 'a'] becomes 'a; b'.
+        """
+        return "; ".join(DB2Flattener._distinct_parts(value)) or None
 
     @staticmethod
     def _add_geo_molecule(geo_df: pd.DataFrame) -> pd.DataFrame:
@@ -1105,8 +1002,19 @@ class DB2Flattener:
         suspension_type = self._sample_field_by_library(
             main_df, sra_df["sample_name"], "suspension_type", optional=True
         )
-        perturbation = self._perturbation_by_library(main_df, sra_df["sample_name"])
-        perturbation_factors = self._perturbation_factors_by_library(main_df, sra_df["sample_name"])
+        # Distinct ExperimentalCondition summaries across the library's samples.
+        # A sample with no condition contributes nothing. Pooled with '; '
+        # rather than ', ', since summaries themselves contain commas.
+        condition_summary = self._sample_field_by_library(
+            main_df,
+            sra_df["sample_name"],
+            "summary",
+            optional=True,
+            prefixes=("experimental_conditions",),
+            gap=None,
+            split_joined=True,
+            formatter=lambda values: self._format_pooled_values(values, sep="; "),
+        )
         # intended_cell_types is only on cell lines and organoids, so a tissue or
         # primary cell culture genuinely cannot have one, hence 'not applicable'
         intended_cell_type = self._sample_field_by_library(
@@ -1210,8 +1118,7 @@ class DB2Flattener:
         # but once one does, every group gets a cell
         optional = (
             ("suspension_type", suspension_type),
-            ("experimental_perturbation", perturbation),
-            ("experimental_perturbation_factors", perturbation_factors),
+            ("experimental_condition_summary", condition_summary),
             ("intended_cell_type", intended_cell_type),
             ("suspension_enriched_cell_types", enriched_cell_types),
             ("suspension_depleted_cell_types", depleted_cell_types),
@@ -1463,8 +1370,7 @@ class DB2Flattener:
         for col in (
             "raw_file_samples",
             "genetic_modifications_strategy",
-            *GEO_TREATMENT_COLS,
-            *GEO_TITLE_TREATMENT_COLS,
+            EXPERIMENTAL_CONDITION_SUMMARY_COL,
         ):
             if col in main_df.columns and col not in seen:
                 seen.add(col)
@@ -1569,7 +1475,6 @@ class DB2Flattener:
         if sra_df.empty:
             return sra_df.drop(columns=["_dedup"], errors="ignore").reset_index(drop=True)
 
-        sra_df = self._summarize_geo_treatment(sra_df)
         if "_dedup" in sra_df.columns:
             sra_df["_dedup"] = sra_df["_dedup"].fillna(sra_df["sample_name"])
             sra_df = collapse_dataframe(sra_df, group_col="_dedup", sort=False)
@@ -1580,17 +1485,13 @@ class DB2Flattener:
         col = "genetic_modifications_strategy"
         if col in sra_df.columns:
             sra_df[col] = sra_df[col].map(self._map_geo_genetic_strategy)
-        for col in ("treatment", "_title_treatment"):
-            if col in sra_df.columns:
-                sra_df[col] = sra_df[col].map(self._sort_geo_list)
 
         sra_df = self._add_geo_title(
             sra_df,
+            title_col="title",
             name_col="sample_name",
             strategy_col="library_strategy",
-            title_col="title",
         )
-        sra_df["title"] = sra_df.apply(self._append_sra_title_feature_types, axis=1)
 
         sra_df["design_description"] = ""
         if "_feature_types" in sra_df.columns:
@@ -1606,10 +1507,7 @@ class DB2Flattener:
             c
             for c in (
                 "samples",
-                "treatment",
                 "_feature_types",
-                *GEO_TREATMENT_COLS,
-                *GEO_TITLE_TREATMENT_COLS,
             )
             if c in sra_df.columns
         ]
@@ -1735,19 +1633,6 @@ class DB2Flattener:
                 if text.startswith(prefix):
                     return platform
         return None
-
-    @staticmethod
-    def _append_sra_title_feature_types(row: pd.Series):
-        """Append feature_types to the GEO-style title, joined with '; '."""
-        items = [
-            str(item).strip() for item in to_items(row.get("_feature_types")) if not is_empty(item)
-        ]
-        suffix = "; ".join(item for item in items if item)
-        title = row.get("title")
-        title_text = "" if is_empty(title) else str(title).strip()
-        if suffix and title_text:
-            return f"{title_text}; {suffix}"
-        return suffix or title_text or None
 
     @classmethod
     def _sra_filename_parts(cls, val, *, basename: bool) -> list[str]:
@@ -1917,144 +1802,14 @@ class DB2Flattener:
         return titles
 
     @staticmethod
-    def _duration_text(lower, upper, units) -> str:
-        """
-        '8 hour' from a duration and its units, '8-24 hour' when the bounds differ.
-
-        Units stay verbatim rather than pluralised - '8 hour stimulation' reads
-        adjectivally, unlike the '29 years' the age bound columns want.
-        """
-        bounds = []
-        for bound in (lower, upper):
-            if is_empty(bound):
-                continue
-            bounds.append(numeric_text(bound))
-        if not bounds:
-            return ""
-        span = bounds[0] if len(set(bounds)) == 1 else "-".join(bounds)
-        unit = "" if is_empty(units) else str(units).strip()
-        return f"{span} {unit}".strip()
-
-    @staticmethod
-    def _format_pooled_values(values) -> str | None:
+    def _format_pooled_values(values, sep: str = ", ") -> str | None:
         """'pooled: a, b' across several values, or the bare value for a lone one."""
         entries = [value for value in values if value]
         if not entries:
             return None
         if len(entries) == 1:
             return entries[0]
-        return "pooled: " + ", ".join(entries)
-
-    def _perturbation_by_library(self, main_df, library_key):
-        """
-        Build the 'experimental_perturbation' cell per library, keyed by CRO group.
-
-        Reads the treatment's duration and description straight off 'treatments_*',
-        which is already the object prefix and so needs no sample expansion. A
-        sample with no treatment contributes 'no treatment', which is why a library
-        that only partly perturbed reads 'pooled: 8 hour stimulation, no treatment'.
-        Optional, so nothing anywhere drops the column.
-
-        A sample carrying several treatments is the one shape this cannot render.
-        create_dataframe collapses each field with _join_unique, which sorts and
-        deduplicates independently, so '24; 8' and 'stimulation; washout' no longer
-        say which duration went with which description. That is warned about rather
-        than guessed at.
-        """
-        columns = [
-            main_df[name] if name in main_df.columns else None
-            for name in (
-                "treatments_lower_bound_duration",
-                "treatments_upper_bound_duration",
-                "treatments_duration_units",
-                "treatments_description",
-            )
-        ]
-        if all(column is None for column in columns):
-            return {}
-
-        empty = pd.Series(None, index=main_df.index, dtype=object)
-        lower, upper, units, descriptions = (empty if c is None else c for c in columns)
-
-        fused = sum(
-            1
-            for column in columns
-            if column is not None
-            for value in column
-            if isinstance(value, str) and "; " in value
-        )
-        if fused:
-            print(
-                f"Warning: {fused} treatment value(s) in MAIN hold several treatments "
-                "collapsed into one cell, so experimental_perturbation cannot tell which "
-                "duration belongs to which description"
-            )
-
-        found: dict[str, set[str]] = {}
-        missing: set[str] = set()
-        for library, low, high, unit, description in zip(
-            library_key, lower, upper, units, descriptions, strict=True
-        ):
-            if not isinstance(library, str):
-                continue
-            found.setdefault(library, set())
-            duration = self._duration_text(low, high, unit)
-            text = " ".join(
-                part
-                for part in (duration, "" if is_empty(description) else str(description).strip())
-            ).strip()
-            if text:
-                found[library].add(text)
-            else:
-                missing.add(library)
-
-        if not any(found.values()):
-            return {}
-
-        return {
-            library: self._format_pooled_values(
-                sorted(present) + (["no treatment"] if library in missing else [])
-            )
-            for library, present in found.items()
-        }
-
-    def _perturbation_factors_by_library(self, main_df, library_key):
-        """
-        Build the 'experimental_perturbation_factors' cell per library, keyed by CRO group.
-
-        Each sample contributes the set of ontological terms its treatments name,
-        bracketed when there is more than one so a reader can tell which factors
-        went together: '[anti-CD2_HUMAN, IL2_HUMAN]'. Distinct sets are pooled
-        across the library, and a sample with no treatment contributes 'na'.
-        Optional, so nothing anywhere drops the column.
-        """
-        terms = main_df.get("treatments_ontological_term_term_name")
-        if terms is None:
-            return {}
-
-        found: dict[str, set[str]] = {}
-        missing: set[str] = set()
-        for library, value in zip(library_key, terms, strict=True):
-            if not isinstance(library, str):
-                continue
-            found.setdefault(library, set())
-            names = sorted({str(name).strip() for name in to_items(value)})
-            if not names:
-                missing.add(library)
-            elif len(names) == 1:
-                found[library].add(names[0])
-            else:
-                found[library].add(f"[{', '.join(names)}]")
-
-        if not any(found.values()):
-            return {}
-
-        return {
-            library: self._format_pooled_values(
-                sorted(present) + (["na"] if library in missing else [])
-            )
-            for library, present in found.items()
-        }
+        return "pooled: " + sep.join(entries)
 
     def _library_ids_by_group(self, main_df, gex_mask):
         """
@@ -2640,6 +2395,11 @@ class DB2Flattener:
         biohub_df.rename(columns=PROP_MAP_BIOHUB, inplace=True)
         biohub_df = strip_author_metadata_column_prefix(biohub_df)
         biohub_df = collapse_duplicate_columns(biohub_df)
+        # A file pooling samples joins their summaries with _join_unique, which
+        # leaves 'a; a; b' when one sample already carried 'a; b'
+        col = "experimental_condition_summary"
+        if col in biohub_df.columns:
+            biohub_df[col] = biohub_df[col].map(self._join_distinct_summaries)
 
         # Deduplicate rows, must join lists as they are not hashable
         list_cols = [
@@ -2699,13 +2459,6 @@ class DB2Flattener:
                 biohub_df = sort_ontology_term_id_column(biohub_df, col)
 
         # Combine multiple columns into one
-        biohub_df = combine_bound_columns(
-            biohub_df,
-            lower_col="experimental_conditions_lower_bound_duration",
-            upper_col="experimental_conditions_upper_bound_duration",
-            units_col="experimental_conditions_duration_units",
-            out_col="experimental_perturbation_time_point",
-        )
         biohub_df = combine_bound_columns(
             biohub_df,
             lower_col="tissues_lower_bound_age",

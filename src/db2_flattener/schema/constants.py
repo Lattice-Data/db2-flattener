@@ -95,6 +95,7 @@ PROP_MAP_GEO = {
     "tissues_enriched_cell_types_term_name": "**cell type",
     "tissues_sample_terms_term_name": "**tissue",
     "tissues_sources_title": "source",
+    "experimental_conditions_summary": "experimental_condition_summary",
     "tissues_selection_kits": "selection_kits",
     "tissues_selection_markers": "selection_markers",
     "tissues_selection_methods": "selection_methods",
@@ -133,12 +134,8 @@ PROP_MAP_BIOHUB = {
     "cell_lines_suspension_type": "suspension_type",
     "tissues_preservation_method": "preservation_method",
     "cell_lines_preservation_method": "preservation_method",
-    "treatments_ontological_term_term_id": "experimental_condition_ontology_term_id",
-    "experimental_conditions_controlled_term_term_id": "experimental_condition_ontology_term_id",
-    "experimental_conditions_text_value": "experimental_perturbation",
-    "experimental_conditions_upper_bound_duration": "experimental_conditions_upper_bound_duration",
-    "experimental_conditions_lower_bound_duration": "experimental_conditions_lower_bound_duration",
-    "experimental_conditions_duration_units": "experimental_conditions_duration_units",
+    "experimental_conditions_controlled_terms_term_id": "experimental_condition_ontology_term_id",
+    "experimental_conditions_summary": "experimental_condition_summary",
     "genetic_modifications_strategy": "genetic_perturbation_strategy",
     "sequence_file_sets_is_pilot_order": "is_pilot_data",
 }
@@ -169,8 +166,8 @@ PROP_MAP_SAMPLES = {
     "tissues_developmental_stages_term_name": "donor_dev_stage",
     "tissues_sources_title": "source",
     "cell_lines_sources_title": "source",
-    "treatments_ontological_term_term_name": "treatment",
-    "treatments_description": "treatment_description",
+    "experimental_conditions_summary": "experimental_condition_summary",
+    "experimental_conditions_controlled_terms_term_name": "experimental_condition_term",
     "genetic_modifications_aliases": "genetic_modification_alias",
     "genetic_modifications_strategy": "genetic_modifications_strategy",
 }
@@ -267,13 +264,11 @@ GEO_INSTRUMENT_MODEL_MAP = {
     "Ultima Genomics UG 100": "UG 100",
 }
 
-GEO_EXPERIMENTAL_CONDITION_COLS = [
-    "experimental_conditions_condition",
-    "experimental_conditions_text_value",
-    "experimental_conditions_lower_bound_duration",
-    "experimental_conditions_upper_bound_duration",
-    "experimental_conditions_duration_units",
-]
+# Sample titles on GEO and SRA_FILE carry the ExperimentalCondition summary
+EXPERIMENTAL_CONDITION_SUMMARY_COL = "experimental_conditions_summary"
+# GEO SOFT !Sample_title: "string of length 1-120 characters"
+# https://www.ncbi.nlm.nih.gov/geo/info/soft.html
+GEO_TITLE_MAX_LENGTH = 120
 
 GEO_LIBRARY_STRATEGY_FEATURE_COL = "droplet_based_libraries_feature_types"
 GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL = "plate_based_libraries_feature_types"
@@ -303,19 +298,6 @@ GEO_FLEX_LIBRARY_PROTOCOLS = {
     "10x GEM-X Flex v1",
     "10x Next GEM Flex v1",
 }
-
-GEO_TREATMENT_COLS = [
-    "treatments_description",
-    "treatments_lower_bound_duration",
-    "treatments_duration_units",
-    "treatments_ontological_term_term_name",
-]
-GEO_TITLE_TREATMENT_COLS = [
-    "treatments_description",
-    "treatments_lower_bound_duration",
-    "treatments_upper_bound_duration",
-    "treatments_duration_units",
-]
 
 GENETIC_PERTURBATION_MAP = {
     "activation screen": "CRISPR activation screen",
