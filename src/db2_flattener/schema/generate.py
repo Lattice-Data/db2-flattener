@@ -27,6 +27,7 @@ from db2_flattener.schema.extract import (
 )
 
 YAML_PATH = Path(__file__).parent / "data" / "constants.yaml"
+AUDIT_FIELD_TYPE = {"type": "object"}
 DEFAULT_DEMO_MODE = "db2_demo"
 DEFAULT_PROD_MODE = "db2_prod"
 CONFIGS_TO_SAVE = {
@@ -132,6 +133,7 @@ def create_field_types(profiles: JSONProfile) -> FieldTypes:
 
             built_types[name] = values
 
+    built_types["audit"] = AUDIT_FIELD_TYPE
     built_types = {key: value for key, value in sorted(built_types.items())}
 
     print("Created FIELD_TYPES")
@@ -150,6 +152,8 @@ def create_object_config(profiles: JSONProfile) -> ObjectConfig:
         fields = [
             field["name"] for field in schema["properties"] if field["name"] not in EXCLUDED_FIELDS
         ]
+        if "audit" not in fields:
+            fields.append("audit")
 
         for field in schema["properties"]:
             field_name = field["name"]

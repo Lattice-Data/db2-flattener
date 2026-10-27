@@ -156,3 +156,13 @@ def test_returns_new_constants_not_stored_ones(yaml_path, monkeypatch):
     field_types, _ = run_against(monkeypatch, make_profiles(field_type="array"))
 
     assert field_types["sex"] == {"type": "array"}
+
+
+def test_create_field_types_always_includes_audit():
+    field_types = create_field_types(make_profiles())
+    assert field_types["audit"] == {"type": "object"}
+
+
+def test_create_object_config_always_includes_audit():
+    object_config = create_object_config(make_profiles())
+    assert "audit" in object_config["human_donors"]["fields"]
