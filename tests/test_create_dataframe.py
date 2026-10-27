@@ -10,12 +10,12 @@ MIN_CONFIGS = Configs(
     OBJECT_CONFIG={
         "droplet_based_libraries": {
             "api_type": "DropletBasedLibrary",
-            "fields": ["@id", "feature_types", "CRO_group_identifier", "aliases"],
+            "fields": ["@id", "feature_types", "CRO_group_identifier", "aliases", "audit"],
             "references": {},
         },
         "tissues": {
             "api_type": "Tissue",
-            "fields": ["@id", "aliases", "author_metadata", "sources"],
+            "fields": ["@id", "aliases", "author_metadata", "sources", "audit"],
             "references": {},
         },
     },
@@ -40,13 +40,14 @@ def _tissue(sample_id="/tissues/s1/", alias="lab:sample1", author_metadata=None,
     }
 
 
-def _lib(lib_id, feature_types, cro="RSJS_fast_1", alias=None):
+def _lib(lib_id, feature_types, cro="RSJS_fast_1", alias=None, audit=None):
     return {
         "@id": lib_id,
         "@type": ["DropletBasedLibrary"],
         "feature_types": feature_types,
         "CRO_group_identifier": cro,
         "aliases": [alias or f"lab:{feature_types[0].replace(' ', '_')}"],
+        "audit": audit,
     }
 
 
@@ -133,6 +134,40 @@ def test_create_dataframe_one_row_per_rmf_library():
         ftypes.update(ft if isinstance(ft, list) else [ft])
     assert "Gene Expression" in ftypes
     assert "CRISPR Guide Capture" in ftypes
+
+
+def test_create_dataframe_flattens_library_audit():
+    f = make_flattener()
+    sample = _tissue()
+    rmf = _rmf()
+    audit = {"ERROR": [{"category": "x"}], "WARNING": [{"category": "y"}]}
+    gex = _lib(
+        "/droplet_based_libraries/gex/",
+        ["Gene Expression"],
+        alias="lab:gex",
+        audit=audit,
+    )
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
+
+    assert list(main_df["droplet_based_libraries_audit"]) == [audit]
+
+
+@pytest.mark.parametrize("empty_audit", [None, {}, ""])
+def test_create_dataframe_skips_empty_library_audit(empty_audit):
+    f = make_flattener()
+    sample = _tissue()
+    rmf = _rmf()
+    gex = _lib(
+        "/droplet_based_libraries/gex/",
+        ["Gene Expression"],
+        alias="lab:gex",
+        audit=empty_audit,
+    )
+
+    main_df, _ = f.create_dataframe(_complete_data([(gex, [rmf], [sample])]))
+
+    assert "droplet_based_libraries_audit" not in main_df.columns
 
 
 def test_create_dataframe_dedupes_same_library_twice_on_rmf():

@@ -22,6 +22,8 @@ https://api.data.lattice-data.org/:
       type: array
     attachment:
       type: object
+    audit:
+      type: object
     author_metadata:
       type: object
     canonical_uri:
@@ -293,7 +295,7 @@ https://api.data.lattice-data.org/:
     viewing_groups:
       elements: string
       type: array
-  field_types_sha256: 78673aa3d5df1f299eb6a35677151748dcf544ff51adc0dc0669fb65d09579a8
+  field_types_sha256: d6a8381c57ddd9339682a86e65b4b9ac98b72cc46dc4ecf418f4aad637eb16de
   object_config:
     access_keys:
       api_type: AccessKey
@@ -311,6 +313,7 @@ https://api.data.lattice-data.org/:
       - summary
       - user
       - uuid
+      - audit
       references:
         user: users
     cell_lines:
@@ -352,6 +355,7 @@ https://api.data.lattice-data.org/:
       - summary
       - suspension_type
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -388,6 +392,7 @@ https://api.data.lattice-data.org/:
       - term_id
       - term_name
       - uuid
+      - audit
       references: {}
     documents:
       api_type: Document
@@ -406,6 +411,7 @@ https://api.data.lattice-data.org/:
       - summary
       - urls
       - uuid
+      - audit
       references:
         lab: labs
     droplet_based_libraries:
@@ -431,6 +437,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         lab: labs
         library_construction_technology: controlled_terms
@@ -458,6 +465,7 @@ https://api.data.lattice-data.org/:
       - time_point_units
       - upper_bound_time_point
       - uuid
+      - audit
       references:
         controlled_terms: controlled_terms
         lab: labs
@@ -477,6 +485,7 @@ https://api.data.lattice-data.org/:
       - summary
       - targeted_genes
       - uuid
+      - audit
       references:
         guide_rna_files: tabular_files
     human_donors:
@@ -498,6 +507,7 @@ https://api.data.lattice-data.org/:
       - summary
       - taxa
       - uuid
+      - audit
       references:
         ethnicity: controlled_terms
         lab: labs
@@ -518,6 +528,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references: {}
     labs:
       api_type: Lab
@@ -537,6 +548,7 @@ https://api.data.lattice-data.org/:
       - title
       - url
       - uuid
+      - audit
       references:
         pi: users
     matrix_file_sets:
@@ -556,6 +568,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         lab: labs
         processed_matrix_files: processed_matrix_files
@@ -578,6 +591,7 @@ https://api.data.lattice-data.org/:
       - summary
       - taxa
       - uuid
+      - audit
       references:
         lab: labs
         taxa: controlled_terms
@@ -619,6 +633,7 @@ https://api.data.lattice-data.org/:
       - summary
       - suspension_type
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -652,6 +667,7 @@ https://api.data.lattice-data.org/:
       - summary
       - title
       - uuid
+      - audit
       references:
         lab: labs
         parent: pages
@@ -678,6 +694,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         lab: labs
         library_construction_technology: controlled_terms
@@ -727,6 +744,7 @@ https://api.data.lattice-data.org/:
       - suspension_type
       - upper_bound_age
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -765,6 +783,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -806,6 +825,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -845,6 +865,7 @@ https://api.data.lattice-data.org/:
       - trimmed_cram
       - untrimmed_cram
       - uuid
+      - audit
       references:
         index1: sequence_files
         index2: sequence_files
@@ -880,6 +901,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -903,6 +925,7 @@ https://api.data.lattice-data.org/:
       - title
       - url
       - uuid
+      - audit
       references: {}
     tabular_files:
       api_type: TabularFile
@@ -926,6 +949,7 @@ https://api.data.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -976,6 +1000,7 @@ https://api.data.lattice-data.org/:
       - thickness_units
       - upper_bound_age
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -1010,12 +1035,13 @@ https://api.data.lattice-data.org/:
       - title
       - uuid
       - viewing_groups
+      - audit
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: bfcf8e2d35435cb514376381d240a87707f0eafa8cde3034fb9024876457f2f5
+  object_config_sha256: b71464167f1e17ca348aa5bda8a13ce74d70792f4b8d6e5190b1804ab950b7be
 https://lattice-api-dev.demo.lattice-data.org/:
-  date_parsed: '2026-10-20'
+  date_parsed: '2026-10-27'
   field_types:
     '@id':
       type: string
@@ -1036,11 +1062,9 @@ https://lattice-api-dev.demo.lattice-data.org/:
     aliases:
       elements: string
       type: array
-    amount:
-      type: number
-    amount_units:
-      type: string
     attachment:
+      type: object
+    audit:
       type: object
     author_metadata:
       type: object
@@ -1089,8 +1113,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       type: array
     download_url:
       type: string
-    duration_units:
-      type: string
     email:
       type: string
     enriched_cell_types:
@@ -1098,9 +1120,8 @@ https://lattice-api-dev.demo.lattice-data.org/:
       type: array
     ethnicity:
       type: string
-    experimental_conditions:
-      elements: string
-      type: array
+    experimental_condition:
+      type: string
     feature_counts:
       elements: object
       type: array
@@ -1167,8 +1188,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       type: array
     lower_bound_age:
       type: number
-    lower_bound_duration:
-      type: number
     lower_bound_time_point:
       type: number
     matrix_file_sets:
@@ -1177,7 +1196,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
     multiplexing_barcodes:
       elements: string
       type: array
-    multiplexing_method:
+    multiplexing_methods:
       elements: string
       type: array
     name:
@@ -1188,8 +1207,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
       type: string
     observation_count:
       type: integer
-    ontological_term:
-      type: string
     ontology_source:
       type: string
     orientation:
@@ -1300,16 +1317,11 @@ https://lattice-api-dev.demo.lattice-data.org/:
       type: string
     title:
       type: string
-    treatments:
-      elements: string
-      type: array
     trimmed_cram:
       type: string
     untrimmed_cram:
       type: string
     upper_bound_age:
-      type: number
-    upper_bound_duration:
       type: number
     upper_bound_time_point:
       type: number
@@ -1325,7 +1337,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
     viewing_groups:
       elements: string
       type: array
-  field_types_sha256: 529770f412627963a33e2e6874b8e7fe4a9dc5661cecd3ae5fd6915e50ccb5ed
+  field_types_sha256: d6a8381c57ddd9339682a86e65b4b9ac98b72cc46dc4ecf418f4aad637eb16de
   object_config:
     access_keys:
       api_type: AccessKey
@@ -1343,6 +1355,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - summary
       - user
       - uuid
+      - audit
       references:
         user: users
     cell_lines:
@@ -1361,7 +1374,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - diseases
       - donors
       - enriched_cell_types
-      - experimental_conditions
+      - experimental_condition
       - genetic_modification
       - host
       - host_tissue
@@ -1383,8 +1396,8 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - suspension_type
-      - treatments
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -1393,7 +1406,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
         - human_donors
         - non_human_donors
         enriched_cell_types: controlled_terms
-        experimental_conditions: experimental_conditions
+        experimental_condition: experimental_conditions
         genetic_modification: genetic_modifications
         host:
         - human_donors
@@ -1402,7 +1415,6 @@ https://lattice-api-dev.demo.lattice-data.org/:
         intended_cell_types: controlled_terms
         lab: labs
         sample_terms: controlled_terms
-        treatments: treatments
     controlled_terms:
       api_type: ControlledTerm
       fields:
@@ -1422,6 +1434,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - term_id
       - term_name
       - uuid
+      - audit
       references: {}
     documents:
       api_type: Document
@@ -1440,6 +1453,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - summary
       - urls
       - uuid
+      - audit
       references:
         lab: labs
     droplet_based_libraries:
@@ -1457,7 +1471,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - library_cardinality
       - library_construction_technology
       - linked_libraries
-      - multiplexing_method
+      - multiplexing_methods
       - notes
       - samples
       - schema_version
@@ -1465,6 +1479,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         lab: labs
         library_construction_technology: controlled_terms
@@ -1492,6 +1507,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - time_point_units
       - upper_bound_time_point
       - uuid
+      - audit
       references:
         controlled_terms: controlled_terms
         lab: labs
@@ -1511,6 +1527,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - summary
       - targeted_genes
       - uuid
+      - audit
       references:
         guide_rna_files: tabular_files
     human_donors:
@@ -1532,6 +1549,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - summary
       - taxa
       - uuid
+      - audit
       references:
         ethnicity: controlled_terms
         lab: labs
@@ -1552,6 +1570,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references: {}
     labs:
       api_type: Lab
@@ -1571,6 +1590,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - title
       - url
       - uuid
+      - audit
       references:
         pi: users
     matrix_file_sets:
@@ -1590,6 +1610,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         lab: labs
         processed_matrix_files: processed_matrix_files
@@ -1612,6 +1633,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - summary
       - taxa
       - uuid
+      - audit
       references:
         lab: labs
         taxa: controlled_terms
@@ -1631,7 +1653,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - diseases
       - donors
       - enriched_cell_types
-      - experimental_conditions
+      - experimental_condition
       - genetic_modification
       - intended_cell_types
       - lab
@@ -1652,8 +1674,8 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - suspension_type
-      - treatments
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -1662,13 +1684,12 @@ https://lattice-api-dev.demo.lattice-data.org/:
         - human_donors
         - non_human_donors
         enriched_cell_types: controlled_terms
-        experimental_conditions: experimental_conditions
+        experimental_condition: experimental_conditions
         genetic_modification: genetic_modifications
         intended_cell_types: controlled_terms
         lab: labs
         origin_cell_types: controlled_terms
         sample_terms: controlled_terms
-        treatments: treatments
     pages:
       api_type: Page
       fields:
@@ -1688,6 +1709,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - summary
       - title
       - uuid
+      - audit
       references:
         lab: labs
         parent: pages
@@ -1706,7 +1728,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - library_cardinality
       - library_construction_technology
       - linked_libraries
-      - multiplexing_method
+      - multiplexing_methods
       - notes
       - samples
       - schema_version
@@ -1714,6 +1736,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         lab: labs
         library_construction_technology: controlled_terms
@@ -1740,7 +1763,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - diseases
       - donors
       - enriched_cell_types
-      - experimental_conditions
+      - experimental_condition
       - genetic_modification
       - lab
       - libraries
@@ -1761,9 +1784,9 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - suspension_type
-      - treatments
       - upper_bound_age
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -1772,11 +1795,10 @@ https://lattice-api-dev.demo.lattice-data.org/:
         - human_donors
         - non_human_donors
         enriched_cell_types: controlled_terms
-        experimental_conditions: experimental_conditions
+        experimental_condition: experimental_conditions
         genetic_modification: genetic_modifications
         lab: labs
         sample_terms: controlled_terms
-        treatments: treatments
     processed_matrix_files:
       api_type: ProcessedMatrixFile
       fields:
@@ -1803,6 +1825,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -1844,6 +1867,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -1883,6 +1907,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - trimmed_cram
       - untrimmed_cram
       - uuid
+      - audit
       references:
         index1: sequence_files
         index2: sequence_files
@@ -1918,6 +1943,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -1941,6 +1967,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - title
       - url
       - uuid
+      - audit
       references: {}
     tabular_files:
       api_type: TabularFile
@@ -1964,6 +1991,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - submitter_comment
       - summary
       - uuid
+      - audit
       references:
         derived_from:
         - processed_matrix_files
@@ -1988,7 +2016,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - diseases
       - donors
       - enriched_cell_types
-      - experimental_conditions
+      - experimental_condition
       - genetic_modification
       - lab
       - libraries
@@ -2012,9 +2040,9 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - suspension_type
       - thickness
       - thickness_units
-      - treatments
       - upper_bound_age
       - uuid
+      - audit
       references:
         depleted_cell_types: controlled_terms
         developmental_stages: controlled_terms
@@ -2023,34 +2051,10 @@ https://lattice-api-dev.demo.lattice-data.org/:
         - human_donors
         - non_human_donors
         enriched_cell_types: controlled_terms
-        experimental_conditions: experimental_conditions
+        experimental_condition: experimental_conditions
         genetic_modification: genetic_modifications
         lab: labs
         sample_terms: controlled_terms
-        treatments: treatments
-    treatments:
-      api_type: Treatment
-      fields:
-      - '@id'
-      - '@type'
-      - aliases
-      - amount
-      - amount_units
-      - description
-      - duration_units
-      - lab
-      - lower_bound_duration
-      - notes
-      - ontological_term
-      - schema_version
-      - status
-      - submitter_comment
-      - summary
-      - upper_bound_duration
-      - uuid
-      references:
-        lab: labs
-        ontological_term: controlled_terms
     users:
       api_type: User
       fields:
@@ -2073,7 +2077,8 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - title
       - uuid
       - viewing_groups
+      - audit
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: 97ff5be0e11c9a25f6c020246b85e7c03f5efc013f707f1ea0dcad76ec252812
+  object_config_sha256: b71464167f1e17ca348aa5bda8a13ce74d70792f4b8d6e5190b1804ab950b7be

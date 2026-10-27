@@ -46,6 +46,18 @@ def main() -> None:
         help="Explicit BIOHUB template version for this run (e.g. 1 or v1). "
         "Mutually exclusive with --s3-order-dir.",
     )
+    audit_group = parser.add_mutually_exclusive_group()
+    audit_group.add_argument(
+        "--force_ALL_AUDIT",
+        action="store_true",
+        help="Continue flattening even when ERROR or WARNING audits are present.",
+    )
+    audit_group.add_argument(
+        "--force_ONLY_WARNING",
+        action="store_true",
+        help="Continue flattening when only WARNING audits are present; "
+        "still stop on ERROR audits.",
+    )
     args = parser.parse_args()
     print(f"{parser.prog} {__version__}")
 
@@ -55,6 +67,13 @@ def main() -> None:
             biohub_version=args.biohub_version,
         )
         print(f"BIOHUB template version: {biohub_version}")
+
+        if args.force_ALL_AUDIT:
+            audit_mode = "all_ok"
+        elif args.force_ONLY_WARNING:
+            audit_mode = "warnings_ok"
+        else:
+            audit_mode = "strict"
 
         connection = Connection(args.mode)
         field_types, object_config = load_and_return_constant_dicts(args.mode)
@@ -66,6 +85,7 @@ def main() -> None:
         output_dir = flattener.flatten_matrix_file_set(
             args.uuid,
             biohub_version=biohub_version,
+            audit_mode=audit_mode,
         )
 
         if output_dir:

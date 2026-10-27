@@ -104,7 +104,9 @@ class DB2Flattener:
         # Initialize gatherer
         self.gatherer = DB2Gatherer(self.connection, configs)
 
-    def flatten_matrix_file_set(self, matrix_file_set_uuid, *, biohub_version: str):
+    def flatten_matrix_file_set(
+        self, matrix_file_set_uuid, *, biohub_version: str, audit_mode: str = "strict"
+    ):
         """
         Flatten a MatrixFileSet into library-indexed data and save CSVs under
         `{CRO_orders}_{timestamp}/` (or `MatrixFileSet_{uuid8}_{timestamp}/`
@@ -112,6 +114,9 @@ class DB2Flattener:
 
         biohub_version is the resolved template suffix (e.g. ``v1``) used for
         BIOHUB samples_template / guide_template filenames.
+
+        audit_mode controls whether ERROR/WARNING audits stop the run:
+        ``strict`` (default), ``warnings_ok``, or ``all_ok``.
         """
         print(f"Processing MatrixFileSet {matrix_file_set_uuid}")
 
@@ -126,6 +131,10 @@ class DB2Flattener:
 
         # Fail before creating output dirs when any GM lacks exactly one alias.
         self._validate_genetic_modification_aliases(complete_data)
+
+        audit_counts = self._collect_audit_category_counts(complete_data)
+        self._print_audit_category_counts(audit_counts)
+        self._enforce_audit_policy(audit_counts, audit_mode)
 
         # Create main DataFrame and sample DataFrame
         main_df, sample_df = self.create_dataframe(complete_data)
@@ -276,6 +285,8 @@ class DB2Flattener:
                         sample_refs = sample_config.get("references", {})
                         for field in sample_config.get("fields", []):
                             value = sample_obj.get(field)
+                            if field == "audit" and self._is_empty_audit(value):
+                                continue
                             # Special handling for author_metadata dictionary
                             if field == "author_metadata" and isinstance(value, dict):
                                 for key, val in value.items():
@@ -348,16 +359,25 @@ class DB2Flattener:
                 row = dict(shared)
                 lib_type = get_config_obj_type(lib, self.configs)
                 for field in self.configs.OBJECT_CONFIG[lib_type].get("fields", []):
-                    row[f"{lib_type}_{field}"] = lib.get(field)
+                    value = lib.get(field)
+                    if field == "audit" and self._is_empty_audit(value):
+                        continue
+                    row[f"{lib_type}_{field}"] = value
 
                 for obj_type in ("sequence_files", "sequence_file_sets", "tabular_files"):
                     obj_config = self.configs.OBJECT_CONFIG.get(obj_type, {})
                     for obj_field in obj_config.get("fields", []):
-                        values = [
-                            obj.get(obj_field)
-                            for obj in raw_file.get(obj_type, [])
-                            if obj.get(obj_field) not in (None, "")
-                        ]
+                        values = []
+                        for obj in raw_file.get(obj_type, []):
+                            value = obj.get(obj_field)
+                            if obj_field == "audit":
+                                if self._is_empty_audit(value):
+                                    continue
+                            elif value in (None, ""):
+                                continue
+                            values.append(value)
+                        if obj_field == "audit" and not values:
+                            continue
                         row[f"{obj_type}_{obj_field}"] = (
                             self._join_unique(values) if values else None
                         )
@@ -2562,6 +2582,8 @@ class DB2Flattener:
                 values = []
                 for obj in resolved_objs:
                     value = obj.get(obj_field)
+                    if obj_field == "audit" and self._is_empty_audit(value):
+                        continue
                     if value is None:
                         continue
                     if is_controlled_term:
@@ -2586,6 +2608,9 @@ class DB2Flattener:
                 elif is_controlled_term:
                     # _join_unique() would str() these dicts into the cell
                     sample_metadata[sample_alias][col] = self._dedupe_terms(values)
+
+                elif obj_field == "audit" and not values:
+                    continue
 
                 else:
                     sample_metadata[sample_alias][col] = (
@@ -2628,6 +2653,137 @@ class DB2Flattener:
                 if title not in (None, ""):
                     titles.append(title)
         return titles
+
+    @staticmethod
+    def _is_empty_audit(val) -> bool:
+        """True when audit is missing, blank, or an empty object."""
+        if is_empty(val):
+            return True
+        return isinstance(val, dict) and not val
+
+    def _api_type_for_object(self, obj) -> str:
+        """Resolve a Lattice object's API type name for audit reporting."""
+        prefix = get_config_obj_type(obj, self.configs)
+        if prefix:
+            api_type = (self.configs.OBJECT_CONFIG.get(prefix) or {}).get("api_type")
+            if api_type:
+                return api_type
+            return prefix
+        atype = obj.get("@type")
+        if isinstance(atype, list) and atype:
+            return str(atype[0])
+        if isinstance(atype, str) and atype:
+            return atype
+        return "Unknown"
+
+    def _iter_audited_objects(self, complete_data):
+        """Yield (object_type, obj) for every Lattice object in complete_data.
+
+        Walks ``resolved_objects`` and all nested structures under ``libraries`` /
+        ``matrix_file_set`` (samples, raw matrix files, sequence files, GMs, …).
+        Each ``@id`` is yielded once. When the same ``@id`` appears as an
+        embedded link stub (no audit) and later as a full object with audit,
+        the audited copy wins so policy does not miss sample ERROR/WARNING.
+        """
+        best = {}  # @id -> (object_type, obj)
+
+        def consider(node, known_api_type=None):
+            obj_id = node.get("@id")
+            if not isinstance(obj_id, str) or not obj_id:
+                return
+            object_type = known_api_type or self._api_type_for_object(node)
+            prev = best.get(obj_id)
+            if prev is None:
+                best[obj_id] = (object_type, node)
+                return
+            _, prev_obj = prev
+            if self._is_empty_audit(prev_obj.get("audit")) and not self._is_empty_audit(
+                node.get("audit")
+            ):
+                best[obj_id] = (object_type, node)
+
+        def visit(node, known_api_type=None):
+            if isinstance(node, dict):
+                consider(node, known_api_type)
+                for value in node.values():
+                    visit(value, None)
+            elif isinstance(node, (list, tuple)):
+                for item in node:
+                    visit(item, None)
+
+        data = complete_data or {}
+        resolved = data.get("resolved_objects") or {}
+        if isinstance(resolved, dict):
+            for api_type, by_id in resolved.items():
+                if isinstance(by_id, dict):
+                    for obj in by_id.values():
+                        visit(obj, api_type)
+                else:
+                    visit(by_id, api_type)
+
+        for key, value in data.items():
+            if key == "resolved_objects":
+                continue
+            visit(value, None)
+
+        yield from best.values()
+
+    def _collect_audit_category_counts(self, complete_data):
+        """Count ERROR/WARNING audit categories by object type."""
+        counts = {"ERROR": {}, "WARNING": {}}
+        for object_type, obj in self._iter_audited_objects(complete_data):
+            audit = obj.get("audit")
+            if self._is_empty_audit(audit) or not isinstance(audit, dict):
+                continue
+            for level in ("ERROR", "WARNING"):
+                items = audit.get(level)
+                if is_empty(items):
+                    continue
+                for item in to_items(items):
+                    if not isinstance(item, dict):
+                        continue
+                    category = item.get("category")
+                    if is_empty(category):
+                        continue
+                    key = (object_type, str(category))
+                    level_counts = counts[level]
+                    level_counts[key] = level_counts.get(key, 0) + 1
+        return counts
+
+    @staticmethod
+    def _print_audit_category_counts(counts) -> None:
+        """Print ERROR/WARNING blocks only when that level has counts."""
+        printed = False
+        for level in ("ERROR", "WARNING"):
+            level_counts = counts.get(level) or {}
+            if not level_counts:
+                continue
+            print("======")
+            print(f"{level} audits:")
+            for (object_type, category), n in sorted(level_counts.items()):
+                print(f"  {object_type} | {category}: {n}")
+            printed = True
+        if printed:
+            print("======")
+
+    @staticmethod
+    def _enforce_audit_policy(counts, audit_mode: str) -> None:
+        """Raise when audits violate the selected CLI policy."""
+        has_error = bool(counts.get("ERROR"))
+        has_warning = bool(counts.get("WARNING"))
+        if audit_mode == "all_ok":
+            return
+        if audit_mode == "warnings_ok":
+            if has_error:
+                raise ValueError(
+                    "Refusing to flatten: ERROR audits present (use --force_ALL_AUDIT to override)"
+                )
+            return
+        if has_error or has_warning:
+            raise ValueError(
+                "Refusing to flatten: audits present "
+                "(use --force_ONLY_WARNING or --force_ALL_AUDIT)"
+            )
 
     @staticmethod
     def _is_controlled_term_field(field_name, references):
