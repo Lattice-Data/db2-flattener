@@ -892,6 +892,29 @@ def test_create_geo_dataframe_title_per_library():
     assert geo_df.loc["libB", "*title"] == "libB scRNA-seq"
 
 
+def test_create_geo_dataframe_warns_on_title_over_120_characters(capsys):
+    flattener = make_flattener()
+    summary = "x" * 120
+    main_df = pd.DataFrame([gex_row(experimental_conditions_summary=summary)])
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == [f"libA; {summary}"]
+    out = capsys.readouterr().out
+    assert "1 *title value(s) exceed 120 characters" in out
+
+
+def test_create_geo_dataframe_no_warning_at_120_characters(capsys):
+    flattener = make_flattener()
+    summary = "x" * (120 - len("libA; "))
+    main_df = pd.DataFrame([gex_row(experimental_conditions_summary=summary)])
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df["*title"].iloc[0]) == 120
+    assert "exceed 120 characters" not in capsys.readouterr().out
+
+
 def test_create_geo_dataframe_titles_stay_unique_for_a_shared_summary():
     """GEO requires unique sample titles; replicates often share a condition."""
     flattener = make_flattener()

@@ -266,6 +266,9 @@ GEO_INSTRUMENT_MODEL_MAP = {
 
 # Sample titles on GEO and SRA_FILE carry the ExperimentalCondition summary
 EXPERIMENTAL_CONDITION_SUMMARY_COL = "experimental_conditions_summary"
+# GEO SOFT !Sample_title: "string of length 1-120 characters"
+# https://www.ncbi.nlm.nih.gov/geo/info/soft.html
+GEO_TITLE_MAX_LENGTH = 120
 
 GEO_LIBRARY_STRATEGY_FEATURE_COL = "droplet_based_libraries_feature_types"
 GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL = "plate_based_libraries_feature_types"

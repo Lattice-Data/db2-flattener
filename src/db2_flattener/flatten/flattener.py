@@ -19,6 +19,7 @@ from db2_flattener.schema.constants import (
     GEO_LIBRARY_STRATEGY_SOURCE_COLS,
     GEO_RUN_CARDINALITY_MAP,
     GEO_SUSPENSION_TYPE_COLS,
+    GEO_TITLE_MAX_LENGTH,
     GUIDE_METADATA_COLUMN_MAP,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
@@ -580,7 +581,9 @@ class DB2Flattener:
         col = PROP_MAP_GEO[EXPERIMENTAL_CONDITION_SUMMARY_COL]
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].map(self._join_distinct_summaries)
-        geo_df = self._add_geo_title(geo_df, source_col=col, drop_source=False)
+        geo_df = self._add_geo_title(
+            geo_df, source_col=col, drop_source=False, max_length=GEO_TITLE_MAX_LENGTH
+        )
         col = "*single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
@@ -672,6 +675,7 @@ class DB2Flattener:
         drop_source: bool = True,
         name_col: str = "*library name",
         strategy_col: str = "*library strategy",
+        max_length: int | None = None,
     ) -> pd.DataFrame:
         """
         Build title as '<library name> <library strategy>; <summary>; pooled;
@@ -683,6 +687,8 @@ class DB2Flattener:
         Empty parts are skipped; see _geo_title.
         drop_source=False keeps the summary column, for a sheet that also
         reports it under its own name.
+        max_length warns about, but does not truncate, any title longer than
+        it, so a curator can shorten it by hand; GEO caps titles at 120.
         """
         geo_df = geo_df.copy()
         geo_df[title_col] = geo_df.apply(
@@ -692,6 +698,18 @@ class DB2Flattener:
             name_col=name_col,
             strategy_col=strategy_col,
         )
+        if max_length is not None:
+            too_long = [
+                title
+                for title in geo_df[title_col]
+                if isinstance(title, str) and len(title) > max_length
+            ]
+            if too_long:
+                print(
+                    f"Warning: {len(too_long)} {title_col} value(s) exceed {max_length} "
+                    f"characters and will need shortening, e.g. {too_long[0]!r} "
+                    f"({len(too_long[0])} characters)"
+                )
         if drop_source and source_col in geo_df.columns:
             geo_df = geo_df.drop(columns=[source_col])
         return geo_df
