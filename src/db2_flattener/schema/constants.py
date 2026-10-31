@@ -70,6 +70,14 @@ GUIDE_METADATA_COLUMN_MAP = {
 # Control guides must not carry intended feature targets; these placeholders are
 # cleared without warning when present in intended_features_* columns.
 GUIDE_CONTROL_ROLE = "Control"
+GUIDE_CONTROL_ROLE_ALIASES = frozenset({"control", "CONTROL"})
+GUIDE_ALLOWED_ROLES = frozenset(
+    {
+        "Targeting a Gene",
+        "Targeting a Region",
+        GUIDE_CONTROL_ROLE,
+    }
+)
 GUIDE_INTENDED_FEATURE_COLS = (
     "intended_features_feature_id",
     "intended_features_gene_name",

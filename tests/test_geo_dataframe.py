@@ -901,6 +901,7 @@ def test_create_geo_dataframe_warns_on_title_over_120_characters(capsys):
 
     assert list(geo_df["*title"]) == [f"libA; {summary}"]
     out = capsys.readouterr().out
+    assert "====WARNING====" in out
     assert "1 *title value(s) exceed 120 characters" in out
 
 
