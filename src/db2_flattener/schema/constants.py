@@ -67,6 +67,23 @@ GUIDE_METADATA_COLUMN_MAP = {
     "guide_target_gene_name": "intended_features_gene_name",
 }
 
+# Control guides must not carry intended feature targets; these placeholders are
+# cleared without warning when present in intended_features_* columns.
+GUIDE_CONTROL_ROLE = "Control"
+GUIDE_CONTROL_ROLE_ALIASES = frozenset({"control", "CONTROL"})
+GUIDE_ALLOWED_ROLES = frozenset(
+    {
+        "Targeting a Gene",
+        "Targeting a Region",
+        GUIDE_CONTROL_ROLE,
+    }
+)
+GUIDE_INTENDED_FEATURE_COLS = (
+    "intended_features_feature_id",
+    "intended_features_gene_name",
+)
+GUIDE_NA_PLACEHOLDERS = frozenset({"NA", "na", "N/A", "n/a"})
+
 # Keys use _term_name suffix for columns produced by DB2_utils.split_controlled_term_columns
 PROP_MAP_GEO = {
     "cell_lines_intended_cell_types_term_name": "**cell type",
