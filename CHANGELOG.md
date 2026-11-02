@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Blank Control guide `intended_features_*` fields; warn when unexpected
+  non-empty values are cleared.
+- Normalize `control`/`CONTROL` to `Control`; warn on unexpected guide roles.
+- Use `====WARNING====` for Control intended-feature and GEO title-length alerts.
+
 ## 1.0.0
 
 - Refuse flatten when ERROR/WARNING object audits are present (strict by
