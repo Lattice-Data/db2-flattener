@@ -1,5 +1,5 @@
 https://api.data.lattice-data.org/:
-  date_parsed: '2026-10-22'
+  date_parsed: '2026-11-02'
   field_types:
     '@id':
       type: string
@@ -198,6 +198,8 @@ https://api.data.lattice-data.org/:
       type: string
     s3_uri:
       type: string
+    sample_name:
+      type: string
     sample_procurement_interval:
       type: integer
     sample_procurement_interval_units:
@@ -295,7 +297,7 @@ https://api.data.lattice-data.org/:
     viewing_groups:
       elements: string
       type: array
-  field_types_sha256: d6a8381c57ddd9339682a86e65b4b9ac98b72cc46dc4ecf418f4aad637eb16de
+  field_types_sha256: 3bd6bf4e134b54e9643567e069e4f3b51e4d81d55e48c0906a5d8824309c3b83
   object_config:
     access_keys:
       api_type: AccessKey
@@ -342,6 +344,7 @@ https://api.data.lattice-data.org/:
       - multiplexing_barcodes
       - notes
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -620,6 +623,7 @@ https://api.data.lattice-data.org/:
       - notes
       - origin_cell_types
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -730,6 +734,7 @@ https://api.data.lattice-data.org/:
       - notes
       - passage_number
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -983,6 +988,7 @@ https://api.data.lattice-data.org/:
       - notes
       - orientation
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1039,7 +1045,7 @@ https://api.data.lattice-data.org/:
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: b71464167f1e17ca348aa5bda8a13ce74d70792f4b8d6e5190b1804ab950b7be
+  object_config_sha256: be398fe27daed73003fe5524c1e732ab56bd90829b9b5adca99da4f0206d4fb3
 https://lattice-api-dev.demo.lattice-data.org/:
   date_parsed: '2026-10-27'
   field_types:
