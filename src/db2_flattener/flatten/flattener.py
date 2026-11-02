@@ -20,7 +20,12 @@ from db2_flattener.schema.constants import (
     GEO_RUN_CARDINALITY_MAP,
     GEO_SUSPENSION_TYPE_COLS,
     GEO_TITLE_MAX_LENGTH,
+    GUIDE_ALLOWED_ROLES,
+    GUIDE_CONTROL_ROLE,
+    GUIDE_CONTROL_ROLE_ALIASES,
+    GUIDE_INTENDED_FEATURE_COLS,
     GUIDE_METADATA_COLUMN_MAP,
+    GUIDE_NA_PLACEHOLDERS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
     PROP_MAP_SAMPLES,
@@ -726,7 +731,7 @@ class DB2Flattener:
             ]
             if too_long:
                 print(
-                    f"Warning: {len(too_long)} {title_col} value(s) exceed {max_length} "
+                    f"====WARNING==== {len(too_long)} {title_col} value(s) exceed {max_length} "
                     f"characters and will need shortening, e.g. {too_long[0]!r} "
                     f"({len(too_long[0])} characters)"
                 )
@@ -2086,7 +2091,7 @@ class DB2Flattener:
         Build a guide-metadata DataFrame from one guide RNA TabularFile.
 
         file_info is the TabularFile object (or embed) for a single BIOHUB set.
-        None returns None.
+        None returns None. Control rows have intended_features_* cleared.
         """
         if not file_info:
             return None
@@ -2096,7 +2101,73 @@ class DB2Flattener:
         if not present:
             print("Warning: guide RNA file has none of the expected GUIDE_METADATA columns")
             return None
-        return guide_df[present].rename(columns=GUIDE_METADATA_COLUMN_MAP).copy()
+        result = guide_df[present].rename(columns=GUIDE_METADATA_COLUMN_MAP).copy()
+        result = self._normalize_and_validate_guide_roles(result)
+        return self._blank_control_guide_intended_features(result)
+
+    @staticmethod
+    def _normalize_and_validate_guide_roles(guide_df):
+        """Normalize Control aliases; warn on roles outside the allowed set."""
+        if "role" not in guide_df.columns:
+            return guide_df
+
+        alias_mask = guide_df["role"].isin(GUIDE_CONTROL_ROLE_ALIASES)
+        if alias_mask.any():
+            guide_df.loc[alias_mask, "role"] = GUIDE_CONTROL_ROLE
+
+        unexpected = []
+        for idx, value in guide_df["role"].items():
+            if value in GUIDE_ALLOWED_ROLES:
+                continue
+            guide_id = guide_df.at[idx, "id"] if "id" in guide_df.columns else idx
+            unexpected.append(f"id={guide_id} role={value!r}")
+        if unexpected:
+            allowed = ", ".join(sorted(GUIDE_ALLOWED_ROLES))
+            examples = "; ".join(unexpected[:5])
+            more = f" (+{len(unexpected) - 5} more)" if len(unexpected) > 5 else ""
+            print(
+                f"====WARNING==== {len(unexpected)} guide row(s) have unexpected role; "
+                f"expected one of [{allowed}]. Examples: {examples}{more}"
+            )
+        return guide_df
+
+    @staticmethod
+    def _blank_control_guide_intended_features(guide_df):
+        """Clear intended_features_* on Control rows; warn on unexpected values."""
+        if "role" not in guide_df.columns:
+            return guide_df
+
+        control_mask = guide_df["role"] == GUIDE_CONTROL_ROLE
+        if not control_mask.any():
+            return guide_df
+
+        def _is_allowed_empty(value):
+            if is_empty(value):
+                return True
+            text = value.strip() if isinstance(value, str) else str(value).strip()
+            return text == "" or text in GUIDE_NA_PLACEHOLDERS
+
+        for col in GUIDE_INTENDED_FEATURE_COLS:
+            if col not in guide_df.columns:
+                continue
+            unexpected = []
+            for idx in guide_df.index[control_mask]:
+                value = guide_df.at[idx, col]
+                if _is_allowed_empty(value):
+                    continue
+                guide_id = guide_df.at[idx, "id"] if "id" in guide_df.columns else idx
+                unexpected.append(f"id={guide_id} {col}={value!r}")
+            if unexpected:
+                examples = "; ".join(unexpected[:5])
+                more = f" (+{len(unexpected) - 5} more)" if len(unexpected) > 5 else ""
+                print(
+                    f"====WARNING==== {len(unexpected)} Control guide(s) had non-empty {col}; "
+                    f"clearing. Examples: {examples}{more}"
+                )
+            # mask() rebuilds the series so float64 all-NaN columns (read_csv)
+            # accept "" without an incompatible-dtype FutureWarning / future raise.
+            guide_df[col] = guide_df[col].mask(control_mask, "")
+        return guide_df
 
     def _write_biohub_outputs(
         self,

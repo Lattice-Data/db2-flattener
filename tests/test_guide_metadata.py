@@ -1,3 +1,4 @@
+import warnings
 from types import SimpleNamespace
 from urllib.parse import urljoin
 
@@ -199,6 +200,241 @@ def test_keeps_only_present_guide_columns(monkeypatch):
     data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
     result = guide_df_from_first_set(flattener, data)
     assert list(result.columns) == ["id", "role"]
+
+
+def test_control_guide_with_gene_values_blanks_and_warns(monkeypatch, capsys):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["c1"],
+                "guide_role": ["Control"],
+                "guide_target_gene_id": ["ENSG1"],
+                "guide_target_gene_name": ["GENE1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["intended_features_feature_id"]) == [""]
+    assert list(result["intended_features_gene_name"]) == [""]
+    out = capsys.readouterr().out
+    assert "====WARNING====" in out
+    assert "intended_features_feature_id" in out
+    assert "ENSG1" in out
+    assert "intended_features_gene_name" in out
+    assert "GENE1" in out
+    assert "id=c1" in out
+
+
+@pytest.mark.parametrize("placeholder", ["NA", "na", "N/A", "n/a", "", None])
+def test_control_guide_na_placeholders_blank_without_warning(monkeypatch, capsys, placeholder):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["c1"],
+                "guide_role": ["Control"],
+                "guide_target_gene_id": [placeholder],
+                "guide_target_gene_name": [placeholder],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["intended_features_feature_id"]) == [""]
+    assert list(result["intended_features_gene_name"]) == [""]
+    assert "====WARNING====" not in capsys.readouterr().out
+
+
+def test_control_guide_float_nan_columns_blank_without_futurewarning(monkeypatch, capsys):
+    """read_csv all-NaN intended-feature columns are float64; blanking must not warn."""
+    read_df = pd.DataFrame(
+        {
+            "guide_id": ["c1"],
+            "guide_role": ["Control"],
+            "guide_target_gene_id": [float("nan")],
+            "guide_target_gene_name": [float("nan")],
+        }
+    )
+    assert read_df["guide_target_gene_id"].dtype == float
+    flattener, _calls = make_flattener(monkeypatch, read_df=read_df)
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        result = guide_df_from_first_set(flattener, data)
+    assert list(result["intended_features_feature_id"]) == [""]
+    assert list(result["intended_features_gene_name"]) == [""]
+    assert "====WARNING====" not in capsys.readouterr().out
+
+
+def test_targeting_guide_intended_features_unchanged(monkeypatch, capsys):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["t1"],
+                "guide_role": ["Targeting a Gene"],
+                "guide_target_gene_id": ["ENSG1"],
+                "guide_target_gene_name": ["GENE1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["intended_features_feature_id"]) == ["ENSG1"]
+    assert list(result["intended_features_gene_name"]) == ["GENE1"]
+    assert "====WARNING====" not in capsys.readouterr().out
+
+
+def test_mixed_roles_only_control_intended_features_cleared(monkeypatch, capsys):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["t1", "c1"],
+                "guide_role": ["Targeting a Gene", "Control"],
+                "guide_target_gene_id": ["ENSG1", "ENSG2"],
+                "guide_target_gene_name": ["GENE1", "GENE2"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["intended_features_feature_id"]) == ["ENSG1", ""]
+    assert list(result["intended_features_gene_name"]) == ["GENE1", ""]
+    out = capsys.readouterr().out
+    assert "====WARNING====" in out
+    assert "id=c1" in out
+    assert "ENSG2" in out
+
+
+def test_control_blanking_handles_missing_intended_feature_column(monkeypatch, capsys):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["c1"],
+                "guide_role": ["Control"],
+                "guide_target_gene_id": ["ENSG1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result.columns) == ["id", "role", "intended_features_feature_id"]
+    assert list(result["intended_features_feature_id"]) == [""]
+    out = capsys.readouterr().out
+    assert "intended_features_feature_id" in out
+    assert "intended_features_gene_name" not in out
+
+
+def test_missing_role_skips_control_blanking(monkeypatch, capsys):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["g1"],
+                "guide_target_gene_id": ["ENSG1"],
+                "guide_target_gene_name": ["GENE1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["intended_features_feature_id"]) == ["ENSG1"]
+    assert list(result["intended_features_gene_name"]) == ["GENE1"]
+    assert "====WARNING====" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("alias", ["control", "CONTROL"])
+def test_control_role_aliases_normalized_and_blanked(monkeypatch, capsys, alias):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["c1"],
+                "guide_role": [alias],
+                "guide_target_gene_id": ["ENSG1"],
+                "guide_target_gene_name": ["GENE1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["role"]) == ["Control"]
+    assert list(result["intended_features_feature_id"]) == [""]
+    assert list(result["intended_features_gene_name"]) == [""]
+    out = capsys.readouterr().out
+    assert "====WARNING====" in out
+    assert "Control guide(s) had non-empty" in out
+
+
+@pytest.mark.parametrize(
+    "role",
+    ["Targeting a Gene", "Targeting a Region", "Control"],
+)
+def test_allowed_guide_roles_unchanged_without_role_warning(monkeypatch, capsys, role):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["g1"],
+                "guide_role": [role],
+                "guide_target_gene_id": [""],
+                "guide_target_gene_name": [""],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["role"]) == [role]
+    assert "====WARNING====" not in capsys.readouterr().out
+
+
+def test_invalid_guide_role_warns_and_leaves_value(monkeypatch, capsys):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["g1"],
+                "guide_role": ["non-targeting"],
+                "guide_target_gene_id": ["ENSG1"],
+                "guide_target_gene_name": ["GENE1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    assert list(result["role"]) == ["non-targeting"]
+    assert list(result["intended_features_feature_id"]) == ["ENSG1"]
+    out = capsys.readouterr().out
+    assert "====WARNING====" in out
+    assert "id=g1" in out
+    assert "non-targeting" in out
+
+
+@pytest.mark.parametrize("empty_role", ["", None])
+def test_empty_guide_role_warns_and_leaves_value(monkeypatch, capsys, empty_role):
+    flattener, _calls = make_flattener(
+        monkeypatch,
+        read_df=pd.DataFrame(
+            {
+                "guide_id": ["g1"],
+                "guide_role": [empty_role],
+                "guide_target_gene_id": ["ENSG1"],
+                "guide_target_gene_name": ["GENE1"],
+            }
+        ),
+    )
+    data = complete_data_with_gms({"@id": GM_AAA, "guide_rna_files": GUIDE_FILE})
+    result = guide_df_from_first_set(flattener, data)
+    # None becomes NaN in the DataFrame; leave whatever is there after read
+    left = result["role"].iloc[0]
+    assert left == empty_role or (empty_role is None and pd.isna(left))
+    out = capsys.readouterr().out
+    assert "====WARNING====" in out
+    assert "id=g1" in out
 
 
 def test_biohub_sets_map_libraries_to_gms(monkeypatch):
