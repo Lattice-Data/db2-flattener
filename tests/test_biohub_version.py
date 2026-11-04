@@ -147,3 +147,32 @@ def test_s3_order_dir_access_error_raises():
 def test_s3_rejects_non_s3_uri():
     with pytest.raises(ValueError, match="s3://"):
         resolve_biohub_version_from_s3("/local/path", fs=FakeFS())
+
+
+def test_s3_order_dir_unexpected_error_raises():
+    fs = FakeFS(exists_errors={ORDER: ConnectionError("network down")})
+    with pytest.raises(RuntimeError, match="Failed to access S3 order directory"):
+        resolve_biohub_version_from_s3(ORDER, fs=fs)
+
+
+def test_s3_metadata_exists_error_raises():
+    fs = FakeFS(exists_paths={ORDER}, exists_errors={METADATA: OSError("boom")})
+    with pytest.raises(RuntimeError, match=f"Failed to access {METADATA}"):
+        resolve_biohub_version_from_s3(ORDER, fs=fs)
+
+
+def test_s3_metadata_ls_file_not_found_returns_v1():
+    fs = FakeFS(
+        exists_paths={ORDER, METADATA},
+        ls_errors={METADATA: FileNotFoundError(METADATA)},
+    )
+    assert resolve_biohub_version_from_s3(ORDER, fs=fs) == "v1"
+
+
+def test_s3_metadata_ls_other_error_raises():
+    fs = FakeFS(
+        exists_paths={ORDER, METADATA},
+        ls_errors={METADATA: PermissionError("denied")},
+    )
+    with pytest.raises(RuntimeError, match=f"Failed to list {METADATA}"):
+        resolve_biohub_version_from_s3(ORDER, fs=fs)
