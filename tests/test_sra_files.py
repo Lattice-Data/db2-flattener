@@ -306,7 +306,7 @@ def test_libraries_sharing_a_library_id_warn(capsys):
     make_flattener().create_sra_files_dataframe(main_df)
 
     assert (
-        'Warning: library_ID "G1_GEX" is shared by 2 libraries in group G1 (Gene Expression):\n'
+        '====WARNING==== library_ID "G1_GEX" is shared by 2 libraries in group G1 (Gene Expression):\n'
         "  /droplet_based_libraries/111/ (CRO order ORD-1)\n"
         "  /droplet_based_libraries/222/ (CRO order ORD-1)"
     ) in capsys.readouterr().out

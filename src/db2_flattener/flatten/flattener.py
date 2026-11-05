@@ -252,7 +252,7 @@ class DB2Flattener:
 
         Used where several objects share a value that should identify one of them.
         """
-        lines = [f"Warning: {header}:"]
+        lines = [f"====WARNING==== {header}:"]
         for atid, orders in sorted(members, key=lambda member: member[0]):
             orders = sorted(orders)
             if not orders:
@@ -473,13 +473,13 @@ class DB2Flattener:
 
         if unnamed_samples:
             print(
-                f"Warning: {len(unnamed_samples)} sample(s) have no sample_name and are "
+                f"====WARNING==== {len(unnamed_samples)} sample(s) have no sample_name and are "
                 f"left out of raw_file_samples: {sorted(unnamed_samples)}"
             )
         unmapped_samples.discard(None)
         if unmapped_samples:
             print(
-                f"Warning: {len(unmapped_samples)} library sample(s) have no sample_name and "
+                f"====WARNING==== {len(unmapped_samples)} library sample(s) have no sample_name and "
                 f"are left out of the sample_name : barcode map: {sorted(unmapped_samples)}"
             )
         self._warn_shared_sample_names(sample_info)
@@ -1774,7 +1774,7 @@ class DB2Flattener:
         unmapped = types - set(SRA_LIBRARY_ID_SUFFIX_MAP) - {"Multiplexing Capture"}
         if unmapped:
             print(
-                f"Warning: library {group} has feature type(s) {sorted(unmapped)} "
+                f"====WARNING==== library {group} has feature type(s) {sorted(unmapped)} "
                 "with no library ID suffix"
             )
 
@@ -1788,7 +1788,7 @@ class DB2Flattener:
                 suffixes.extend(methods)
             else:
                 print(
-                    f"Warning: Multiplexing Capture library {group} needs exactly one of "
+                    f"====WARNING==== Multiplexing Capture library {group} needs exactly one of "
                     f"{sorted(SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP)} in multiplexing_methods; "
                     f"found {to_items(multiplexing_methods)}. Its library ID has no "
                     "multiplexing suffix"

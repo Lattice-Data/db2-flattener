@@ -1285,7 +1285,7 @@ def test_samples_sharing_a_name_warn_once(capsys):
     out = capsys.readouterr().out
     assert out.count('sample_name "Heart"') == 1
     assert (
-        'Warning: sample_name "Heart" is shared by 2 samples:\n'
+        '====WARNING==== sample_name "Heart" is shared by 2 samples:\n'
         "  /tissues/s1/ (CRO order ORD-1)\n"
         "  /tissues/s2/ (CRO order ORD-1)"
     ) in out
