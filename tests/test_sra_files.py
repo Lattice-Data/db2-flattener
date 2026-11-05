@@ -287,6 +287,83 @@ def test_library_id_takes_the_multiplexing_suffix_from_its_method():
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["PLATE_1_GEX", "PLATE_1_hash_oligo"]
 
 
+# duplicate library_ID warning
+
+
+def test_libraries_sharing_a_library_id_warn(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/111/",
+                "/droplet_based_libraries/222/",
+            ],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
+            "sequence_file_sets_CRO_order": ["ORD-1", "ORD-1"],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert (
+        'Warning: library_ID "G1_GEX" is shared by 2 libraries in group G1 (Gene Expression):\n'
+        "  /droplet_based_libraries/111/ (CRO order ORD-1)\n"
+        "  /droplet_based_libraries/222/ (CRO order ORD-1)"
+    ) in capsys.readouterr().out
+
+
+def test_shared_library_id_without_cro_order(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/111/",
+                "/droplet_based_libraries/222/",
+            ],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert "  /droplet_based_libraries/111/ (no CRO order)" in capsys.readouterr().out
+
+
+def test_one_library_on_two_files_does_not_warn(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/111/"] * 2,
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
+            "sequence_file_sets_CRO_order": ["ORD-1", "ORD-2"],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert "is shared by" not in capsys.readouterr().out
+
+
+def test_gex_and_crispr_libraries_in_one_group_do_not_warn(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/gex/",
+                "/droplet_based_libraries/cri/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert "is shared by" not in capsys.readouterr().out
+
+
 # _library_id_from_group
 
 

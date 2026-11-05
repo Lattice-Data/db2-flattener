@@ -229,15 +229,57 @@ class DB2Flattener:
         col = "sequence_file_sets_CRO_order"
         if col not in main_df.columns:
             return []
-        orders = []
+        orders = set()
         for val in main_df[col]:
-            if is_empty(val):
-                continue
-            for part in str(val).split("; "):
+            orders.update(DB2Flattener._cro_order_parts(val))
+        return sorted(orders)
+
+    @staticmethod
+    def _cro_order_parts(value) -> list[str]:
+        """Non-empty CRO orders in one '; '-joined sequence_file_sets_CRO_order cell."""
+        parts = []
+        for item in to_items(value):
+            for part in str(item).split("; "):
                 part = part.strip()
                 if part:
-                    orders.append(part)
-        return sorted(set(orders))
+                    parts.append(part)
+        return parts
+
+    @staticmethod
+    def _print_shared_warning(header, members):
+        """
+        Print header, then one line per (@id, CRO orders) member, sorted by @id.
+
+        Used where several objects share a value that should identify one of them.
+        """
+        lines = [f"Warning: {header}:"]
+        for atid, orders in sorted(members, key=lambda member: member[0]):
+            orders = sorted(orders)
+            if not orders:
+                label = "no CRO order"
+            elif len(orders) == 1:
+                label = f"CRO order {orders[0]}"
+            else:
+                label = f"CRO orders {', '.join(orders)}"
+            lines.append(f"  {atid} ({label})")
+        print("\n".join(lines))
+
+    @classmethod
+    def _warn_shared_sample_names(cls, sample_info):
+        """Warn about each sample_name carried by more than one sample uuid."""
+        by_name: dict[str, list[dict]] = {}
+        for info in sample_info.values():
+            name = info["sample_name"]
+            if not is_empty(name):
+                by_name.setdefault(str(name), []).append(info)
+
+        for name in sorted(by_name):
+            shared = by_name[name]
+            if len(shared) > 1:
+                cls._print_shared_warning(
+                    f'sample_name "{name}" is shared by {len(shared)} samples',
+                    [(info["@id"], info["cro_orders"]) for info in shared],
+                )
 
     def create_dataframe(self, complete_data):
         """Create main library/raw-file DataFrame and sample DataFrame keyed by raw matrix file"""
@@ -322,6 +364,11 @@ class DB2Flattener:
                         )
 
         unnamed_samples = set()
+        # Library-embedded samples left without a sample_name, which
+        # _sample_probe_barcode_map skips
+        unmapped_samples = set()
+        # {sample uuid: {"@id", "sample_name", "cro_orders"}}
+        sample_info = {}
 
         # Create one row per (raw matrix file, library)
         for file_data in raw_file_to_libraries.values():
@@ -337,6 +384,14 @@ class DB2Flattener:
                 sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
                 if sample_obj:
                     sample_uuids.append(self._object_uuid(sample_obj))
+                    sample_info.setdefault(
+                        sample_uuids[-1],
+                        {
+                            "@id": sample_obj.get("@id"),
+                            "sample_name": sample_obj.get("sample_name"),
+                            "cro_orders": set(),
+                        },
+                    )
                     sample_aliases.append(sample_obj.get("aliases"))
                     sample_names.append(sample_obj.get("sample_name"))
                     if is_empty(sample_obj.get("sample_name")):
@@ -385,6 +440,11 @@ class DB2Flattener:
                         continue
                     if field == "samples":
                         value = self._with_sample_names(value, samples)
+                        unmapped_samples.update(
+                            item.get("@id")
+                            for item in to_items(value)
+                            if isinstance(item, dict) and is_empty(item.get("sample_name"))
+                        )
                     row[f"{lib_type}_{field}"] = value
 
                 for obj_type in ("sequence_files", "sequence_file_sets", "tabular_files"):
@@ -406,11 +466,23 @@ class DB2Flattener:
                         )
                 rows.append(row)
 
+                # A sample's CRO orders are those of the file sets on its files
+                orders = self._cro_order_parts(row.get("sequence_file_sets_CRO_order"))
+                for uuid in sample_uuids:
+                    sample_info[uuid]["cro_orders"].update(orders)
+
         if unnamed_samples:
             print(
                 f"Warning: {len(unnamed_samples)} sample(s) have no sample_name and are "
                 f"left out of raw_file_samples: {sorted(unnamed_samples)}"
             )
+        unmapped_samples.discard(None)
+        if unmapped_samples:
+            print(
+                f"Warning: {len(unmapped_samples)} library sample(s) have no sample_name and "
+                f"are left out of the sample_name : barcode map: {sorted(unmapped_samples)}"
+            )
+        self._warn_shared_sample_names(sample_info)
 
         main_df = pd.DataFrame(rows)
 
@@ -1484,6 +1556,7 @@ class DB2Flattener:
         sra_df = collapse_duplicate_columns(sra_df)
 
         sra_df["library_ID"] = self._library_ids(main_df)
+        self._warn_duplicate_library_ids(main_df, sra_df["library_ID"])
         library_atid = self._coalesce_columns(
             main_df, [f"{kind}_based_libraries_@id" for kind in ("droplet", "plate")]
         )
@@ -1969,6 +2042,59 @@ class DB2Flattener:
             group: ", ".join(sorted(gex) + sorted(other))
             for group, (gex, other) in by_group.items()
         }
+
+    def _warn_duplicate_library_ids(self, main_df, library_ids):
+        """
+        Warn about each library_ID that more than one library @id ends up with.
+
+        Takes the ids before _suffix_crispr_library_ids: its .1, .2 separate one
+        library's SequenceFileSets, not different libraries.
+        """
+
+        def coalesce(field):
+            values = self._coalesce_columns(
+                main_df, [f"{kind}_based_libraries_{field}" for kind in ("droplet", "plate")]
+            )
+            return [None] * len(main_df) if values is None else list(values)
+
+        cro_orders = (
+            list(main_df["sequence_file_sets_CRO_order"])
+            if "sequence_file_sets_CRO_order" in main_df.columns
+            else [None] * len(main_df)
+        )
+
+        # {library_ID: {library @id: {"group", "feature_types", "cro_orders"}}}
+        by_id: dict[str, dict[str, dict]] = {}
+        for library_id, atid, group, feature_types, orders in zip(
+            library_ids,
+            coalesce("@id"),
+            coalesce("CRO_group_identifier"),
+            coalesce("feature_types"),
+            cro_orders,
+            strict=True,
+        ):
+            if is_empty(library_id) or is_empty(atid):
+                continue
+            library = by_id.setdefault(library_id, {}).setdefault(
+                atid, {"group": group, "feature_types": set(), "cro_orders": set()}
+            )
+            library["feature_types"].update(str(ft) for ft in to_items(feature_types))
+            library["cro_orders"].update(self._cro_order_parts(orders))
+
+        for library_id in sorted(by_id):
+            libraries = by_id[library_id]
+            if len(libraries) < 2:
+                continue
+            group = next(iter(libraries.values()))["group"]
+            feature_types = sorted(
+                {ft for library in libraries.values() for ft in library["feature_types"]}
+            )
+            detail = f" ({', '.join(feature_types)})" if feature_types else ""
+            self._print_shared_warning(
+                f'library_ID "{library_id}" is shared by {len(libraries)} libraries '
+                f"in group {group}{detail}",
+                [(atid, library["cro_orders"]) for atid, library in libraries.items()],
+            )
 
     def _library_ids(self, main_df):
         """Each MAIN row's library id from _library_id_from_group, or None with no group column."""

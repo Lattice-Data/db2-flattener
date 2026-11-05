@@ -1155,6 +1155,57 @@ def test_library_embedded_samples_get_sample_name():
     assert f._sample_probe_barcode_map(samples) == "Heart 1 : BC001, Heart 2 : BC002"
 
 
+def test_unnamed_library_sample_left_out_of_barcode_map_warns_once(capsys):
+    """Two libraries embed the unnamed sample; it is reported once."""
+    tissues = [MX_TWO[0], _mx_tissue("/tissues/s2/", "lab:H2", "nucleus")]
+    rmf = {
+        "@id": "/raw_matrix_files/r1/",
+        "uuid": "uuid-r1",
+        "aliases": ["lab:rmf1"],
+        "samples": [t["@id"] for t in tissues],
+    }
+    embedded = [
+        {"@id": "/tissues/s1/", "multiplexing_barcodes": ["BC001"]},
+        {"@id": "/tissues/s2/", "multiplexing_barcodes": ["BC002"]},
+    ]
+    libs = []
+    for lib_id, feature_type in (("d1", "Gene Expression"), ("d2", "CRISPR Guide Capture")):
+        lib = _lib(f"/droplet_based_libraries/{lib_id}/", [feature_type])
+        lib["samples"] = embedded
+        libs.append((lib, [rmf], tissues))
+    f = _multiplex_flattener()
+    f.configs = Configs(
+        FIELD_TYPES={},
+        OBJECT_CONFIG={
+            **MULTIPLEX_CONFIGS.OBJECT_CONFIG,
+            "droplet_based_libraries": {
+                **MULTIPLEX_CONFIGS.OBJECT_CONFIG["droplet_based_libraries"],
+                "fields": [
+                    *MULTIPLEX_CONFIGS.OBJECT_CONFIG["droplet_based_libraries"]["fields"],
+                    "samples",
+                ],
+            },
+        },
+    )
+
+    main_df, _ = f.create_dataframe(_complete_data(libs))
+
+    samples = main_df.loc[0, "droplet_based_libraries_samples"]
+    assert f._sample_probe_barcode_map(samples) == "Heart 1 : BC001"
+    out = capsys.readouterr().out
+    assert out.count("left out of the sample_name : barcode map") == 1
+    assert (
+        "1 library sample(s) have no sample_name and are left out of the "
+        "sample_name : barcode map: ['/tissues/s2/']"
+    ) in out
+
+
+def test_named_library_samples_do_not_warn_about_the_barcode_map(capsys):
+    _mx_run(MX_TWO)
+
+    assert "barcode map" not in capsys.readouterr().out
+
+
 def test_multiplexed_file_joins_differing_sample_values_in_main():
     main_df, _ = _mx_run(MX_TWO)
 
@@ -1192,6 +1243,85 @@ def test_unnamed_sample_warns_and_still_titles_as_pooled(capsys):
     out = capsys.readouterr().out
     assert "1 sample(s) have no sample_name" in out
     assert "/tissues/s2/" in out
+
+
+def _ordered_run(files):
+    """files: (raw matrix file id, CRO order, [tissues]) per file, all on one library."""
+    f = _multiplex_flattener()
+    f.configs = Configs(
+        FIELD_TYPES={},
+        OBJECT_CONFIG={
+            **MULTIPLEX_CONFIGS.OBJECT_CONFIG,
+            "sequence_file_sets": {
+                "api_type": "SequenceFileSet",
+                "fields": ["CRO_order"],
+                "references": {},
+            },
+        },
+    )
+    rmfs, tissues = [], []
+    for rmf_id, order, file_tissues in files:
+        rmfs.append(
+            {
+                "@id": rmf_id,
+                "uuid": f"uuid-{rmf_id.strip('/').split('/')[-1]}",
+                "aliases": ["lab:rmf"],
+                "samples": [t["@id"] for t in file_tissues],
+                "sequence_file_sets": [{"CRO_order": order}],
+            }
+        )
+        tissues.extend(t for t in file_tissues if t not in tissues)
+    lib = _lib("/droplet_based_libraries/d1/", ["Gene Expression"])
+    return f.create_dataframe(_complete_data([(lib, rmfs, tissues)]))
+
+
+def test_samples_sharing_a_name_warn_once(capsys):
+    twins = [
+        _mx_tissue("/tissues/s1/", "lab:H1", sample_name="Heart"),
+        _mx_tissue("/tissues/s2/", "lab:H2", sample_name="Heart"),
+    ]
+    _ordered_run([("/raw_matrix_files/r1/", "ORD-1", twins)])
+
+    out = capsys.readouterr().out
+    assert out.count('sample_name "Heart"') == 1
+    assert (
+        'Warning: sample_name "Heart" is shared by 2 samples:\n'
+        "  /tissues/s1/ (CRO order ORD-1)\n"
+        "  /tissues/s2/ (CRO order ORD-1)"
+    ) in out
+
+
+def test_shared_name_across_files_lists_each_samples_own_order(capsys):
+    t1 = _mx_tissue("/tissues/s1/", "lab:H1", sample_name="Heart")
+    t2 = _mx_tissue("/tissues/s2/", "lab:H2", sample_name="Heart")
+    _ordered_run(
+        [
+            ("/raw_matrix_files/r1/", "ORD-1", [t1]),
+            ("/raw_matrix_files/r2/", "ORD-2", [t2]),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "  /tissues/s1/ (CRO order ORD-1)\n  /tissues/s2/ (CRO order ORD-2)" in out
+
+
+def test_distinct_sample_names_do_not_warn(capsys):
+    _ordered_run([("/raw_matrix_files/r1/", "ORD-1", MX_TWO)])
+
+    assert "is shared by" not in capsys.readouterr().out
+
+
+def test_one_sample_on_two_files_does_not_warn(capsys):
+    """The same uuid on two files is one sample; its orders are both files'."""
+    t1 = _mx_tissue("/tissues/s1/", "lab:H1", sample_name="Heart")
+    _ordered_run(
+        [
+            ("/raw_matrix_files/r1/", "ORD-1", [t1]),
+            ("/raw_matrix_files/r2/", "ORD-2", [t1]),
+        ]
+    )
+
+    assert "is shared by" not in capsys.readouterr().out
 
 
 def test_single_sample_file_is_not_pooled():
