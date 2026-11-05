@@ -76,6 +76,7 @@ def _complete_data_for_write(*, tissue_audit, sequence_audit):
                 "raw_matrix_files": [
                     {
                         "@id": "/raw_matrix_files/r1/",
+                        "uuid": "uuid-r1",
                         "aliases": ["lab:rmf1"],
                         "samples": [tissue_id],
                         "sequence_files": [

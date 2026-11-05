@@ -187,6 +187,7 @@ def test_attach_plate_library_id_does_not_duplicate_sample_rows():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         {
+            "raw_matrix_file_uuid": ["uuid-rmf1", "uuid-rmf1"],
             "raw_matrix_file_alias": ["rmf1", "rmf1"],
             "plate_based_libraries_@id": [
                 "/plate_based_libraries/p1/",
@@ -196,6 +197,7 @@ def test_attach_plate_library_id_does_not_duplicate_sample_rows():
     )
     sample_df = pd.DataFrame(
         {
+            "raw_matrix_file_uuid": ["uuid-rmf1"],
             "raw_matrix_file_alias": ["rmf1"],
             "sample_alias": ["s1"],
             "tissues_multiplexing_barcodes": [["BC001"]],

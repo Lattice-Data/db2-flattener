@@ -214,6 +214,7 @@ def _lib():
 def _rmf(sample_id="/tissues/t1/", rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1"):
     return {
         "@id": rmf_id,
+        "uuid": f"uuid-{rmf_id.strip('/').split('/')[-1]}",
         "aliases": [alias],
         "samples": [sample_id],
     }
@@ -403,6 +404,7 @@ def test_multiplexed_file_keeps_every_sample_term_as_a_dict():
     t2 = _tissue("/tissues/t2/", "lab:s2", sample_terms=[DIABETES["@id"]])
     rmf = {
         "@id": "/raw_matrix_files/r1/",
+        "uuid": "uuid-r1",
         "aliases": ["lab:rmf1"],
         "samples": [t1["@id"], t2["@id"]],
     }

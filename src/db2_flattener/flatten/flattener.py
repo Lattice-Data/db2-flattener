@@ -279,7 +279,7 @@ class DB2Flattener:
                 for sample_ref in raw_file.get("samples", []):
                     sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
                     if sample_obj:
-                        sample_key = self._sample_uuid(sample_obj)
+                        sample_key = self._object_uuid(sample_obj)
                         if sample_key in sample_metadata:
                             continue
 
@@ -332,11 +332,12 @@ class DB2Flattener:
             for sample_ref in representative_raw_file.get("samples", []):
                 sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
                 if sample_obj:
-                    sample_uuids.append(self._sample_uuid(sample_obj))
+                    sample_uuids.append(self._object_uuid(sample_obj))
                     sample_aliases.append(self._get_clean_alias(sample_obj))
                     sample_names.append(sample_obj.get("sample_name"))
 
             shared = {
+                "raw_matrix_file_uuid": self._object_uuid(representative_raw_file),
                 "raw_matrix_file_alias": self._get_clean_alias(representative_raw_file),
                 "raw_file_samples": self._join_unique(sample_names),
             }
@@ -354,6 +355,7 @@ class DB2Flattener:
             # than by splitting raw_file_samples back apart on '; ' afterwards
             file_sample_pairs.extend(
                 {
+                    "raw_matrix_file_uuid": shared["raw_matrix_file_uuid"],
                     "raw_matrix_file_alias": shared["raw_matrix_file_alias"],
                     "sample_uuid": uuid,
                     "sample_alias": alias,
@@ -411,19 +413,21 @@ class DB2Flattener:
             pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates()
             sample_df = pairs_df.merge(per_sample_df, on="sample_uuid", how="left")
 
-            # sample_uuid stays off MAIN, which already carries each type's _uuid column
-            rolled_up = sample_df.groupby("raw_matrix_file_alias", as_index=False).agg(
+            # MAIN already has the file alias from shared, and carries each sample
+            # type's _uuid column, so neither is rolled up again
+            rolled_up = sample_df.groupby("raw_matrix_file_uuid", as_index=False).agg(
                 {
                     column: self._combine_sample_values
                     for column in sample_df.columns
-                    if column not in ("raw_matrix_file_alias", "sample_uuid")
+                    if column
+                    not in ("raw_matrix_file_uuid", "raw_matrix_file_alias", "sample_uuid")
                 }
             )
-            main_df = main_df.merge(rolled_up, on="raw_matrix_file_alias", how="left")
+            main_df = main_df.merge(rolled_up, on="raw_matrix_file_uuid", how="left")
 
             print(
                 f"Creating sample DataFrame with {len(sample_df)} rows "
-                f"({sample_df['raw_matrix_file_alias'].nunique()} raw matrix files)..."
+                f"({sample_df['raw_matrix_file_uuid'].nunique()} raw matrix files)..."
             )
 
         return main_df, sample_df
@@ -483,16 +487,16 @@ class DB2Flattener:
             or sample_df.empty
             or plate_id not in main_df.columns
             or plate_id in sample_df.columns
-            or "raw_matrix_file_alias" not in main_df.columns
-            or "raw_matrix_file_alias" not in sample_df.columns
+            or "raw_matrix_file_uuid" not in main_df.columns
+            or "raw_matrix_file_uuid" not in sample_df.columns
         ):
             return sample_df
 
-        file_level = main_df.loc[:, ["raw_matrix_file_alias", plate_id]]
-        file_level = file_level.groupby("raw_matrix_file_alias", as_index=False).agg(
+        file_level = main_df.loc[:, ["raw_matrix_file_uuid", plate_id]]
+        file_level = file_level.groupby("raw_matrix_file_uuid", as_index=False).agg(
             {plate_id: self._combine_sample_values}
         )
-        return sample_df.merge(file_level, on="raw_matrix_file_alias", how="left")
+        return sample_df.merge(file_level, on="raw_matrix_file_uuid", how="left")
 
     def _row_is_gex(self, row) -> bool:
         """Filter df to only GEX libraries"""
@@ -2431,8 +2435,8 @@ class DB2Flattener:
         if (
             sample_df is None
             or sample_df.empty
-            or "raw_matrix_file_alias" not in main_df.columns
-            or "raw_matrix_file_alias" not in sample_df.columns
+            or "raw_matrix_file_uuid" not in main_df.columns
+            or "raw_matrix_file_uuid" not in sample_df.columns
             or "raw_matrix_files_is_multiplexed" not in main_df.columns
         ):
             return main_df
@@ -2440,13 +2444,13 @@ class DB2Flattener:
         multiplexed = set(
             main_df.loc[
                 main_df["raw_matrix_files_is_multiplexed"].eq(True),
-                "raw_matrix_file_alias",
+                "raw_matrix_file_uuid",
             ].dropna()
         )
         if not multiplexed:
             return main_df
 
-        exploded = sample_df.loc[sample_df["raw_matrix_file_alias"].isin(multiplexed)].copy()
+        exploded = sample_df.loc[sample_df["raw_matrix_file_uuid"].isin(multiplexed)].copy()
         if exploded.empty:
             return main_df
 
@@ -2488,16 +2492,16 @@ class DB2Flattener:
                 extras.append(lib_id_col)
         if extras:
             file_level = main_df.loc[
-                main_df["raw_matrix_file_alias"].isin(exploded["raw_matrix_file_alias"]),
-                ["raw_matrix_file_alias", *extras],
+                main_df["raw_matrix_file_uuid"].isin(exploded["raw_matrix_file_uuid"]),
+                ["raw_matrix_file_uuid", *extras],
             ]
-            file_level = file_level.groupby("raw_matrix_file_alias", as_index=False).agg(
+            file_level = file_level.groupby("raw_matrix_file_uuid", as_index=False).agg(
                 {column: self._combine_sample_values for column in extras}
             )
-            exploded = exploded.merge(file_level, on="raw_matrix_file_alias", how="left")
+            exploded = exploded.merge(file_level, on="raw_matrix_file_uuid", how="left")
 
         plain = main_df.loc[
-            ~main_df["raw_matrix_file_alias"].isin(set(exploded["raw_matrix_file_alias"]))
+            ~main_df["raw_matrix_file_uuid"].isin(set(exploded["raw_matrix_file_uuid"]))
         ]
         return pd.concat([plain, exploded], ignore_index=True)
 
@@ -2999,11 +3003,11 @@ class DB2Flattener:
         return "; ".join(unique_items)
 
     @staticmethod
-    def _sample_uuid(sample_obj):
-        """A sample's uuid, which keys per-sample metadata; aliases and names can repeat."""
-        uuid = sample_obj.get("uuid")
+    def _object_uuid(obj):
+        """An object's uuid, used as a join key because aliases and names can repeat."""
+        uuid = obj.get("uuid")
         if is_empty(uuid):
-            raise ValueError(f"Sample {sample_obj.get('@id')!r} has no uuid")
+            raise ValueError(f"{obj.get('@id')!r} has no uuid")
         return uuid
 
     def _get_clean_alias(self, obj_or_list):
