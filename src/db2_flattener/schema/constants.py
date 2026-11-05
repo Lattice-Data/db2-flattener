@@ -238,6 +238,22 @@ SRA_FILE_LIBRARY_SELECTION_MAP = {
     "ATAC": "OTHER",
 }
 
+# library_ID / library_id is the CRO group identifier plus these suffixes,
+# joined with '_' in this order
+SRA_LIBRARY_ID_SUFFIX_MAP = {
+    "Gene Expression": "GEX",
+    "CRISPR Guide Capture": "CRI",
+    "Antibody Capture": "ADT",
+    "ATAC": "ATAC",
+}
+
+# Multiplexing Capture takes its suffix from the library's multiplexing_methods,
+# placed after the feature-type suffixes
+SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP = {
+    "antibody hashing": "HTO",
+    "combinatorial indexing": "hash_oligo",
+}
+
 SRA_FILE_LIBRARY_LAYOUT_MAP = {
     "paired-end": "paired",
     "single-end": "single",

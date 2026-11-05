@@ -166,6 +166,7 @@ def test_droplet_run_is_one_row_per_library(capsys):
     # and every one of those is present even where MAIN has nothing to fill it
     assert list(sra_df.columns) == [
         "sample_name",
+        "library_id",
         ORGANISM_COLUMN,
         BARCODE_COLUMN,
         ISOLATE_COLUMN,
@@ -310,24 +311,18 @@ def test_library_id_is_scoped_to_each_group():
     assert list(sra_df["library_id"]) == ["LIB_A_GEX, LIB_A_CRI", "LIB_B_GEX, LIB_B_CRI"]
 
 
-def test_library_id_strips_the_lab_prefix():
+def test_library_id_does_not_read_the_alias():
     main_df = main_frame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_aliases": [["some-other-lab:LIB_A_GEX"]],
+            "droplet_based_libraries_aliases": [["some-other-lab:something_else"]],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
-
-
-def test_missing_aliases_column_omits_library_id(capsys):
-    sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
-
-    assert "library_id" not in sra_df.columns
-    assert "no library aliases column" in capsys.readouterr().out
 
 
 def test_library_rows_disagreeing_on_the_map_collapse_to_a_list():
@@ -377,6 +372,7 @@ def test_key_only_main_df_collapses_without_aggregating():
 
     assert list(sra_df.columns) == [
         "sample_name",
+        "library_id",
         ISOLATE_COLUMN,
         AGE_COLUMN,
         SEX_COLUMN,

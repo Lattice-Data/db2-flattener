@@ -38,6 +38,8 @@ from db2_flattener.schema.constants import (
     SRA_FILE_LIBRARY_SOURCE_MAP,
     SRA_FILE_LIBRARY_STRATEGY_MAP,
     SRA_FILE_PLATFORM_PREFIXES,
+    SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP,
+    SRA_LIBRARY_ID_SUFFIX_MAP,
     TISSUE_TYPE_MAP,
     Configs,
 )
@@ -1460,18 +1462,13 @@ class DB2Flattener:
             sra_df.rename(columns={"raw_file_samples": "samples"}, inplace=True)
         sra_df = collapse_duplicate_columns(sra_df)
 
-        aliases = self._coalesce_columns(
-            main_df, [f"{kind}_based_libraries_aliases" for kind in ("droplet", "plate")]
-        )
+        sra_df["library_ID"] = self._library_ids(main_df)
         library_atid = self._coalesce_columns(
             main_df, [f"{kind}_based_libraries_@id" for kind in ("droplet", "plate")]
         )
-        if aliases is None:
-            print("Warning: MAIN has no library aliases column; SRA_FILE omits library_ID")
-        else:
-            sra_df["library_ID"] = aliases.map(
-                lambda alias: self._get_clean_alias({"aliases": to_items(alias)})
-            )
+        library_uuid = self._coalesce_columns(
+            main_df, [f"{kind}_based_libraries_uuid" for kind in ("droplet", "plate")]
+        )
 
         feature_types = self._coalesce_columns(
             main_df,
@@ -1518,13 +1515,13 @@ class DB2Flattener:
             )
             sra_df[barcode_column] = barcode_map
 
-        if library_atid is not None:
-            dedup_key = library_atid
-            if "library_ID" in sra_df.columns:
-                dedup_key = dedup_key.fillna(sra_df["library_ID"])
-            sra_df["_dedup"] = dedup_key
-        elif "library_ID" in sra_df.columns:
-            sra_df["_dedup"] = sra_df["library_ID"]
+        # library_ID comes last: a group's libraries share one when their feature
+        # types have no suffix, so it is only a guess at which library a row is
+        dedup_key = None
+        for key in (library_atid, library_uuid, sra_df["library_ID"]):
+            if key is not None:
+                dedup_key = key if dedup_key is None else dedup_key.fillna(key)
+        sra_df["_dedup"] = dedup_key
 
         unnamed = int(sra_df["sample_name"].isna().sum())
         if unnamed:
@@ -1660,6 +1657,49 @@ class DB2Flattener:
     def _sra_feature_has_crispr(ft) -> bool:
         """True when feature_types include CRISPR Guide Capture."""
         return any("CRISPR Guide Capture" in str(item) for item in to_items(ft))
+
+    @staticmethod
+    def _library_id_from_group(group, feature_types, multiplexing_methods=None):
+        """
+        A library's SRA id: its CRO group identifier plus one suffix per feature type.
+
+        Suffixes follow SRA_LIBRARY_ID_SUFFIX_MAP order rather than the API's list
+        order, so a library always gets the same id. Multiplexing Capture takes its
+        suffix from multiplexing_methods and goes last. Anything unmapped is left
+        out with a warning; with no suffix at all the plain group id is returned.
+        """
+        if is_empty(group):
+            return None
+
+        types = set(to_items(feature_types))
+        suffixes = [
+            suffix for feature, suffix in SRA_LIBRARY_ID_SUFFIX_MAP.items() if feature in types
+        ]
+
+        unmapped = types - set(SRA_LIBRARY_ID_SUFFIX_MAP) - {"Multiplexing Capture"}
+        if unmapped:
+            print(
+                f"Warning: library {group} has feature type(s) {sorted(unmapped)} "
+                "with no library ID suffix"
+            )
+
+        if "Multiplexing Capture" in types:
+            methods = [
+                SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP[method]
+                for method in SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP
+                if method in to_items(multiplexing_methods)
+            ]
+            if len(methods) == 1:
+                suffixes.extend(methods)
+            else:
+                print(
+                    f"Warning: Multiplexing Capture library {group} needs exactly one of "
+                    f"{sorted(SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP)} in multiplexing_methods; "
+                    f"found {to_items(multiplexing_methods)}. Its library ID has no "
+                    "multiplexing suffix"
+                )
+
+        return "_".join([str(group), *suffixes])
 
     @classmethod
     def _map_sra_library_layout(cls, val):
@@ -1883,36 +1923,55 @@ class DB2Flattener:
         on the wider frame. gex_mask is passed in rather than recomputed to keep
         one answer to what counts as GEX.
 
-        Aliases arrive with the lab prefix in MAIN, so they are cleaned. Sorted
-        within each half, but GEX before the rest: plain sorting would lead with
-        the CRISPR library, whose alias suffix happens to come first.
+        Each library's id comes from _library_ids. Sorted within each half, but
+        GEX before the rest: plain sorting would lead with the CRISPR library,
+        whose suffix happens to come first.
         """
         groups = self._coalesce_columns(
             main_df,
             [f"{kind}_based_libraries_CRO_group_identifier" for kind in ("droplet", "plate")],
         )
-        aliases = self._coalesce_columns(
-            main_df, [f"{kind}_based_libraries_aliases" for kind in ("droplet", "plate")]
-        )
-        if aliases is None:
-            print("Warning: MAIN has no library aliases column; SRA_BIOSAMPLE omits library_id")
+        library_ids = self._library_ids(main_df)
+        if library_ids is None:
             return {}
 
-        # {group: (gex aliases, everything else)}
+        # {group: (gex library ids, everything else)}
         by_group: dict[str, tuple[set[str], set[str]]] = {}
-        for group, alias, is_gex in zip(groups, aliases, gex_mask, strict=True):
-            if not isinstance(group, str):
-                continue
-            cleaned = self._get_clean_alias({"aliases": to_items(alias)})
-            if not cleaned:
+        for group, library_id, is_gex in zip(groups, library_ids, gex_mask, strict=True):
+            if not isinstance(group, str) or not library_id:
                 continue
             gex, other = by_group.setdefault(group, (set(), set()))
-            (gex if is_gex else other).add(cleaned)
+            (gex if is_gex else other).add(library_id)
 
         return {
             group: ", ".join(sorted(gex) + sorted(other))
             for group, (gex, other) in by_group.items()
         }
+
+    def _library_ids(self, main_df):
+        """Each MAIN row's library id from _library_id_from_group, or None with no group column."""
+
+        def coalesce(field):
+            return self._coalesce_columns(
+                main_df, [f"{kind}_based_libraries_{field}" for kind in ("droplet", "plate")]
+            )
+
+        groups = coalesce("CRO_group_identifier")
+        if groups is None:
+            return None
+        empty = pd.Series(None, index=main_df.index, dtype=object)
+        feature_types = coalesce("feature_types")
+        methods = coalesce("multiplexing_methods")
+        feature_types = empty if feature_types is None else feature_types
+        methods = empty if methods is None else methods
+        return pd.Series(
+            [
+                self._library_id_from_group(group, ft, mm)
+                for group, ft, mm in zip(groups, feature_types, methods, strict=True)
+            ],
+            index=main_df.index,
+            dtype=object,
+        )
 
     def _biomaterial_provider_by_library(self, main_df, library_key):
         """
