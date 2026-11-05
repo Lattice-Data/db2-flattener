@@ -425,4 +425,4 @@ def test_multiplexed_file_keeps_every_sample_term_as_a_dict():
         "type 2 diabetes mellitus",
     ]
     assert len(sample_df) == 2
-    assert list(sample_df["sample_alias"]) == ["s1", "s2"]
+    assert list(sample_df["sample_alias"]) == [["lab:s1"], ["lab:s2"]]

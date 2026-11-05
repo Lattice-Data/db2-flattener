@@ -333,7 +333,7 @@ class DB2Flattener:
                 sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
                 if sample_obj:
                     sample_uuids.append(self._object_uuid(sample_obj))
-                    sample_aliases.append(self._get_clean_alias(sample_obj))
+                    sample_aliases.append(sample_obj.get("aliases"))
                     sample_names.append(sample_obj.get("sample_name"))
 
             shared = {
@@ -410,7 +410,10 @@ class DB2Flattener:
             per_sample_df.index.name = "sample_uuid"
             per_sample_df = per_sample_df.reset_index()
 
-            pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates()
+            # sample_alias holds lists, which drop_duplicates() cannot hash
+            pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates(
+                subset=["raw_matrix_file_uuid", "sample_uuid"]
+            )
             sample_df = pairs_df.merge(per_sample_df, on="sample_uuid", how="left")
 
             # MAIN already has the file alias from shared, and carries each sample

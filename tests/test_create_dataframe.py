@@ -1031,7 +1031,7 @@ def test_multiplexed_file_gives_samples_a_row_each():
     _, sample_df = _mx_run(MX_TWO)
 
     assert len(sample_df) == 2
-    assert list(sample_df["sample_alias"]) == ["H1", "H2"]
+    assert list(sample_df["sample_alias"]) == [["lab:H1"], ["lab:H2"]]
     assert list(sample_df["raw_matrix_file_alias"]) == ["rmf1", "rmf1"]
     assert list(sample_df["tissues_suspension_type"]) == ["cell", "nucleus"]
 
@@ -1113,7 +1113,7 @@ def test_raw_file_samples_uses_sample_name_not_alias():
     main_df, sample_df = _mx_run(MX_TWO)
 
     assert main_df.loc[0, "raw_file_samples"] == "Heart 1; Heart 2"
-    assert list(sample_df["sample_alias"]) == ["H1", "H2"]
+    assert list(sample_df["sample_alias"]) == [["lab:H1"], ["lab:H2"]]
     assert list(sample_df["tissues_sample_name"]) == ["Heart 1", "Heart 2"]
 
 
@@ -1158,9 +1158,21 @@ def test_library_embedded_samples_get_sample_name():
 def test_multiplexed_file_joins_differing_sample_values_in_main():
     main_df, _ = _mx_run(MX_TWO)
 
-    assert main_df.loc[0, "sample_alias"] == "H1; H2"
+    assert main_df.loc[0, "sample_alias"] == "lab:H1; lab:H2"
     assert main_df.loc[0, "tissues_suspension_type"] == "cell; nucleus"
     assert main_df.loc[0, "tissues_selection_kits"] == "EasySep A; EasySep B"
+
+
+def test_sample_with_several_aliases_keeps_them_all_raw():
+    """sample_alias is a list here, so de-duplicating the pairs must not hash it."""
+    tissues = [
+        {**MX_TWO[0], "aliases": ["lab:H1", "other-lab:heart-1"]},
+        MX_TWO[1],
+    ]
+    main_df, sample_df = _mx_run(tissues)
+
+    assert list(sample_df["sample_alias"]) == [["lab:H1", "other-lab:heart-1"], ["lab:H2"]]
+    assert main_df.loc[0, "sample_alias"] == "lab:H1; lab:H2; other-lab:heart-1"
 
 
 def test_multiplexed_file_does_not_repeat_a_shared_value():
