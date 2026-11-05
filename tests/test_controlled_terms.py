@@ -194,6 +194,7 @@ def _tissue(sample_id="/tissues/t1/", alias="lab:sample1", **overrides):
     tissue = {
         "@id": sample_id,
         "@type": ["Tissue"],
+        "uuid": f"uuid-{sample_id.strip('/').split('/')[-1]}",
         "aliases": [alias],
         "preservation_method": "frozen",
     }
@@ -328,8 +329,18 @@ def test_unresolvable_term_stays_empty():
     """
     df = _main_df(
         [
-            _tissue(sample_id="/tissues/t1/", alias="lab:s1", diseases=[DIABETES["@id"]]),
-            _tissue(sample_id="/tissues/t2/", alias="lab:s2", diseases=[UNRESOLVABLE]),
+            _tissue(
+                sample_id="/tissues/t1/",
+                alias="lab:s1",
+                sample_name="s1",
+                diseases=[DIABETES["@id"]],
+            ),
+            _tissue(
+                sample_id="/tissues/t2/",
+                alias="lab:s2",
+                sample_name="s2",
+                diseases=[UNRESOLVABLE],
+            ),
         ]
     ).set_index("raw_file_samples")
 

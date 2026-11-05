@@ -20,7 +20,9 @@ def make_flattener():
 
 def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["raw_matrix_file_alias"] == "processed data file"
-    assert PROP_MAP_SAMPLES["sample_alias"] == "pre_pooled_sample"
+    assert "sample_alias" not in PROP_MAP_SAMPLES
+    for sample_type in ("tissues", "cell_lines", "organoids", "primary_cell_cultures"):
+        assert PROP_MAP_SAMPLES[f"{sample_type}_sample_name"] == "pre_pooled_sample"
     assert PROP_MAP_SAMPLES["human_donors_cxg_donor_id"] == "donor_id"
     assert PROP_MAP_SAMPLES["non_human_donors_cxg_donor_id"] == "donor_id"
     assert PROP_MAP_SAMPLES["human_donors_sex"] == "donor_sex"
@@ -61,6 +63,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
         {
             "raw_matrix_file_alias": ["rmf1"],
             "sample_alias": ["s1"],
+            "tissues_sample_name": ["Sample One"],
             "human_donors_cxg_donor_id": ["H1"],
             "human_donors_sex": ["female"],
             "human_donors_taxa_term_name": ["Homo sapiens"],
@@ -86,7 +89,8 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     result = flattener.create_samples_dataframe(sample_df)
 
     assert list(result["processed data file"]) == ["rmf1"]
-    assert list(result["pre_pooled_sample"]) == ["s1"]
+    assert list(result["pre_pooled_sample"]) == ["Sample One"]
+    assert "tissues_sample_name" not in result.columns
     assert list(result["donor_id"]) == ["H1"]
     assert list(result["donor_sex"]) == ["female"]
     assert list(result["organism"]) == ["Homo sapiens"]
@@ -110,6 +114,22 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert "raw_file_samples" not in result.columns
     assert "tissues_@id" not in result.columns
     assert "sample_alias" not in result.columns
+
+
+def test_create_samples_dataframe_pre_pooled_sample_coalesces_sample_types():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "sample_alias": ["t1", "c1"],
+            "tissues_sample_name": ["Tissue One", None],
+            "cell_lines_sample_name": [None, "Line One"],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert list(result["pre_pooled_sample"]) == ["Tissue One", "Line One"]
+    assert list(result.columns).count("pre_pooled_sample") == 1
 
 
 def test_create_samples_dataframe_maps_pcc_enriched_to_cell_type():
@@ -303,6 +323,7 @@ def test_create_samples_dataframe_drops_treatment_and_built_condition_columns():
         pd.DataFrame(
             {
                 "sample_alias": ["s1", "s2"],
+                "tissues_sample_name": ["s1", "s2"],
                 "treatments_ontological_term_term_name": ["LPS", None],
                 "treatments_description": ["stimulation", None],
                 "treatments_lower_bound_duration": [4, None],

@@ -252,7 +252,7 @@ class DB2Flattener:
         # Raw matrix file-based rows - samples field is always present
         # First, collect all raw matrix files and their associated libraries
         raw_file_to_libraries = {}
-        sample_metadata = {}  # One row per unique sample, keyed by sample_alias
+        sample_metadata = {}  # One row per unique sample, keyed by sample uuid
 
         for lib_data in libraries_data.values():
             library = lib_data["library"]
@@ -279,11 +279,11 @@ class DB2Flattener:
                 for sample_ref in raw_file.get("samples", []):
                     sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
                     if sample_obj:
-                        sample_alias = self._get_clean_alias(sample_obj)
-                        if sample_alias in sample_metadata:
+                        sample_key = self._sample_uuid(sample_obj)
+                        if sample_key in sample_metadata:
                             continue
 
-                        sample_metadata[sample_alias] = {}
+                        sample_metadata[sample_key] = {}
 
                         sample_type = get_config_obj_type(sample_obj, self.configs)
                         sample_config = self.configs.OBJECT_CONFIG[sample_type]
@@ -296,18 +296,18 @@ class DB2Flattener:
                             if field == "author_metadata" and isinstance(value, dict):
                                 for key, val in value.items():
                                     field_name = f"{sample_type}_{field}_{'_'.join(key.split(' '))}"
-                                    sample_metadata[sample_alias][field_name] = val
+                                    sample_metadata[sample_key][field_name] = val
                             else:
                                 if self._is_controlled_term_field(field, sample_refs):
                                     value = self._resolve_controlled_term_value(
                                         value, resolved_controlled_terms
                                     )
                                 field_name = f"{sample_type}_{field}"
-                                sample_metadata[sample_alias][field_name] = value
+                                sample_metadata[sample_key][field_name] = value
                                 if field == "sources":
                                     titles = self._source_titles(value)
                                     if titles:
-                                        sample_metadata[sample_alias][
+                                        sample_metadata[sample_key][
                                             f"{sample_type}_sources_title"
                                         ] = self._join_unique(titles)
 
@@ -315,7 +315,7 @@ class DB2Flattener:
                             sample_obj,
                             lib_data,
                             sample_metadata,
-                            sample_alias,
+                            sample_key,
                             resolved_controlled_terms,
                         )
 
@@ -326,15 +326,19 @@ class DB2Flattener:
 
             # File-level fields are the same on every library copy of this raw file.
             representative_raw_file = library_entries[0]["raw_file"]
+            sample_uuids = []
             sample_aliases = []
+            sample_names = []
             for sample_ref in representative_raw_file.get("samples", []):
                 sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
                 if sample_obj:
+                    sample_uuids.append(self._sample_uuid(sample_obj))
                     sample_aliases.append(self._get_clean_alias(sample_obj))
+                    sample_names.append(sample_obj.get("sample_name"))
 
             shared = {
                 "raw_matrix_file_alias": self._get_clean_alias(representative_raw_file),
-                "raw_file_samples": self._join_unique(sample_aliases),
+                "raw_file_samples": self._join_unique(sample_names),
             }
             # Direct copies, not _join_unique(): that stringifies booleans and integers.
             for field in (
@@ -346,14 +350,15 @@ class DB2Flattener:
             ):
                 shared[f"raw_matrix_files_{field}"] = representative_raw_file.get(field)
 
-            # Recorded here, where the aliases are still separate values, rather
+            # Recorded here, where the samples are still separate values, rather
             # than by splitting raw_file_samples back apart on '; ' afterwards
             file_sample_pairs.extend(
                 {
                     "raw_matrix_file_alias": shared["raw_matrix_file_alias"],
+                    "sample_uuid": uuid,
                     "sample_alias": alias,
                 }
-                for alias in sample_aliases
+                for uuid, alias in zip(sample_uuids, sample_aliases, strict=True)
             )
 
             for entry in library_entries:
@@ -367,6 +372,8 @@ class DB2Flattener:
                     value = lib.get(field)
                     if field == "audit" and self._is_empty_audit(value):
                         continue
+                    if field == "samples":
+                        value = self._with_sample_names(value, samples)
                     row[f"{lib_type}_{field}"] = value
 
                 for obj_type in ("sequence_files", "sequence_file_sets", "tabular_files"):
@@ -398,17 +405,18 @@ class DB2Flattener:
         sample_df = None
         if sample_metadata and file_sample_pairs and not main_df.empty:
             per_sample_df = pd.DataFrame.from_dict(sample_metadata, orient="index")
-            per_sample_df.index.name = "sample_alias"
+            per_sample_df.index.name = "sample_uuid"
             per_sample_df = per_sample_df.reset_index()
 
             pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates()
-            sample_df = pairs_df.merge(per_sample_df, on="sample_alias", how="left")
+            sample_df = pairs_df.merge(per_sample_df, on="sample_uuid", how="left")
 
+            # sample_uuid stays off MAIN, which already carries each type's _uuid column
             rolled_up = sample_df.groupby("raw_matrix_file_alias", as_index=False).agg(
                 {
                     column: self._combine_sample_values
                     for column in sample_df.columns
-                    if column != "raw_matrix_file_alias"
+                    if column not in ("raw_matrix_file_alias", "sample_uuid")
                 }
             )
             main_df = main_df.merge(rolled_up, on="raw_matrix_file_alias", how="left")
@@ -889,9 +897,10 @@ class DB2Flattener:
         Build one library's 'sample_name : barcode|barcode' map.
 
         library_samples is a library's embedded 'samples' field, each item
-        carrying 'aliases' and 'multiplexing_barcodes'. Entries are sorted by
-        cleaned alias, so the string does not depend on the API's ordering.
-        Returns None when no sample carries barcodes.
+        carrying 'sample_name' (added by _with_sample_names) and
+        'multiplexing_barcodes'. Entries are sorted by sample_name, so the
+        string does not depend on the API's ordering. Returns None when no
+        sample carries barcodes.
         """
         if not isinstance(library_samples, list):
             return None
@@ -900,19 +909,40 @@ class DB2Flattener:
         for sample in library_samples:
             if not isinstance(sample, dict):
                 continue
-            alias = self._get_clean_alias(sample)
-            if not alias:
+            name = sample.get("sample_name")
+            if is_empty(name):
                 continue
             barcodes = sample.get("multiplexing_barcodes") or []
             if isinstance(barcodes, str):
                 barcodes = [barcodes]
-            entries.append((alias, "|".join(str(barcode) for barcode in barcodes)))
+            entries.append((str(name), "|".join(str(barcode) for barcode in barcodes)))
 
         if not any(barcodes for _, barcodes in entries):
             return None
 
         entries.sort(key=lambda entry: entry[0])
-        return ", ".join(f"{alias} : {barcodes}" for alias, barcodes in entries)
+        return ", ".join(f"{name} : {barcodes}" for name, barcodes in entries)
+
+    @staticmethod
+    def _with_sample_names(library_samples, sample_objs):
+        """
+        Copy of a library's embedded 'samples' with each item's 'sample_name'
+        filled in from the full sample objects. The API embeds these items
+        without sample_name.
+        """
+        if not isinstance(library_samples, list):
+            return library_samples
+        names = {
+            obj.get("@id"): obj.get("sample_name")
+            for obj in sample_objs
+            if isinstance(obj, dict) and obj.get("@id")
+        }
+        result = []
+        for item in library_samples:
+            if isinstance(item, dict) and "sample_name" not in item and item.get("@id") in names:
+                item = {**item, "sample_name": names[item["@id"]]}
+            result.append(item)
+        return result
 
     def create_sra_biosample_dataframe(self, main_df) -> pd.DataFrame:
         """
@@ -2025,6 +2055,7 @@ class DB2Flattener:
             texts = [translate.get(text, text) for text in texts]
         return [text for text in texts if text]
 
+    SAMPLE_TYPES = ("tissues", "cell_lines", "organoids", "primary_cell_cultures")
     # Sample types with no tissue of origin to report
     TISSUELESS_SAMPLE_TYPES = ("cell_lines", "primary_cell_cultures")
 
@@ -2392,7 +2423,7 @@ class DB2Flattener:
         Rows create_biohub_dataframe should read.
 
         Files with raw_matrix_files_is_multiplexed true contribute the per-sample
-        frame (one row per sample, sample_name from the cleaned sample_alias).
+        frame (one row per sample, sample_name from that sample's own sample_name).
         Every other file contributes its main_df rows, where sample_name still
         comes from raw_file_samples. A flagged file with no sample rows stays
         on main_df.
@@ -2419,8 +2450,11 @@ class DB2Flattener:
         if exploded.empty:
             return main_df
 
-        if "sample_alias" in exploded.columns:
-            exploded["sample_name"] = exploded["sample_alias"]
+        names = self._coalesce_columns(
+            exploded, [f"{sample_type}_sample_name" for sample_type in self.SAMPLE_TYPES]
+        )
+        if names is not None:
+            exploded["sample_name"] = names
         if "raw_file_samples" in exploded.columns:
             exploded = exploded.drop(columns=["raw_file_samples"])
 
@@ -2474,7 +2508,7 @@ class DB2Flattener:
         plate_experiment = self._frame_has_plate_library(main_df)
         columns_to_keep = [k for k in PROP_MAP_BIOHUB if k in main_df.columns]
         columns_to_keep.extend([k for k in main_df.columns if re.search("_author_metadata_", k)])
-        # Multiplexed rows already carry sample_name from sample_alias. Keeping
+        # Multiplexed rows already carry sample_name from the sample. Keeping
         # it here lets collapse_duplicate_columns coalesce it with the
         # raw_file_samples rename used by every other row.
         if "sample_name" in main_df.columns and "sample_name" not in columns_to_keep:
@@ -2609,7 +2643,7 @@ class DB2Flattener:
         return value
 
     def _flatten_resolved_references(
-        self, sample_obj, lib_data, sample_metadata, sample_alias, resolved_controlled_terms
+        self, sample_obj, lib_data, sample_metadata, sample_key, resolved_controlled_terms
     ):
         """Flatten resolved reference objects into sample_metadata columns."""
         sample_type = get_config_obj_type(sample_obj, self.configs)
@@ -2674,19 +2708,17 @@ class DB2Flattener:
                                 values_by_key.setdefault(sanitized_key, []).append(val)
                     for key, vals in values_by_key.items():
                         col = f"{url_prefix}_{obj_field}_{key}"
-                        sample_metadata[sample_alias][col] = self._join_unique(vals)
+                        sample_metadata[sample_key][col] = self._join_unique(vals)
 
                 elif is_controlled_term:
                     # _join_unique() would str() these dicts into the cell
-                    sample_metadata[sample_alias][col] = self._dedupe_terms(values)
+                    sample_metadata[sample_key][col] = self._dedupe_terms(values)
 
                 elif obj_field == "audit" and not values:
                     continue
 
                 else:
-                    sample_metadata[sample_alias][col] = (
-                        self._join_unique(values) if values else None
-                    )
+                    sample_metadata[sample_key][col] = self._join_unique(values) if values else None
 
     def _resolve_controlled_term(self, term_ref, resolved_controlled_terms):
         """
@@ -2965,6 +2997,14 @@ class DB2Flattener:
         # Remove duplicates and sort
         unique_items = sorted(set(filtered_items))
         return "; ".join(unique_items)
+
+    @staticmethod
+    def _sample_uuid(sample_obj):
+        """A sample's uuid, which keys per-sample metadata; aliases and names can repeat."""
+        uuid = sample_obj.get("uuid")
+        if is_empty(uuid):
+            raise ValueError(f"Sample {sample_obj.get('@id')!r} has no uuid")
+        return uuid
 
     def _get_clean_alias(self, obj_or_list):
         """Extract alias from an object or list of objects, cleaning the result"""

@@ -73,10 +73,12 @@ def main_frame(columns):
     return frame
 
 
-def sample(alias, barcodes, lab="alex-marson"):
+def sample(name, barcodes, lab="alex-marson"):
+    """A library's embedded sample, after create_dataframe has added sample_name."""
     return {
-        "@id": f"/tissues/{alias}/",
-        "aliases": [f"{lab}:{alias}"],
+        "@id": f"/tissues/{name}/",
+        "aliases": [f"{lab}:alias-{name}"],
+        "sample_name": name,
         "multiplexing_barcodes": barcodes,
     }
 
@@ -100,7 +102,7 @@ FOUR_SAMPLES_MAP = (
 # _sample_probe_barcode_map
 
 
-def test_barcode_map_sorts_by_alias_and_strips_lab_prefix():
+def test_barcode_map_sorts_by_sample_name_and_ignores_alias():
     assert make_flattener()._sample_probe_barcode_map(FOUR_SAMPLES) == FOUR_SAMPLES_MAP
 
 
@@ -117,7 +119,10 @@ def test_barcode_map_keeps_sample_with_no_barcodes_when_another_has_some():
         pytest.param(float("nan"), id="nan"),
         pytest.param([sample("s1", []), sample("s2", None)], id="no-sample-has-barcodes"),
         pytest.param(["/tissues/s1/", "/tissues/s2/"], id="bare-id-strings"),
-        pytest.param([{"multiplexing_barcodes": ["BC001+CR001"]}], id="no-alias"),
+        pytest.param(
+            [{"aliases": ["lab:s1"], "multiplexing_barcodes": ["BC001+CR001"]}],
+            id="no-sample-name",
+        ),
     ],
 )
 def test_barcode_map_returns_none(library_samples):

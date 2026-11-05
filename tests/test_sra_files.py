@@ -613,6 +613,7 @@ def test_barcode_column_maps_library_samples():
         {
             "@id": "/tissues/s1/",
             "aliases": ["lab:s1"],
+            "sample_name": "Sample 1",
             "multiplexing_barcodes": ["BC001"],
         }
     ]
@@ -628,7 +629,7 @@ def test_barcode_column_maps_library_samples():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[BARCODE_COLUMN]) == ["s1 : BC001"]
+    assert list(sra_df[BARCODE_COLUMN]) == ["Sample 1 : BC001"]
     assert "sample_name: hash_index" not in sra_df.columns
 
 

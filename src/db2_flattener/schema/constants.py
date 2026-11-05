@@ -159,7 +159,10 @@ PROP_MAP_BIOHUB = {
 
 PROP_MAP_SAMPLES = {
     "raw_matrix_file_alias": "processed data file",
-    "sample_alias": "pre_pooled_sample",
+    "tissues_sample_name": "pre_pooled_sample",
+    "cell_lines_sample_name": "pre_pooled_sample",
+    "organoids_sample_name": "pre_pooled_sample",
+    "primary_cell_cultures_sample_name": "pre_pooled_sample",
     "human_donors_cxg_donor_id": "donor_id",
     "non_human_donors_cxg_donor_id": "donor_id",
     "human_donors_sex": "donor_sex",

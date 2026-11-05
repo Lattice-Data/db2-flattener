@@ -68,6 +68,7 @@ def _complete_data_for_write(*, tissue_audit, sequence_audit):
                     {
                         "@id": tissue_id,
                         "@type": ["Tissue"],
+                        "uuid": "uuid-sample1",
                         "aliases": ["lab:sample1"],
                         "audit": tissue_audit,
                     }
