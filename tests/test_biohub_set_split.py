@@ -38,11 +38,9 @@ def _base_flattener(complete_data, main_df, sample_df=None):
     f.gatherer = SimpleNamespace(gather_complete_library_data=lambda uuid: complete_data)
     f.create_dataframe = lambda data: (main_df.copy(), sample_df.copy())
     f.create_geo_dataframe = lambda main: pd.DataFrame({"library_name": ["lib1"]})
-    f.create_sra_biosample_dataframe = lambda main: pd.DataFrame({"sample_name": ["s1"]})
+    f.create_sra_biosample_dataframe = lambda main, **kwargs: pd.DataFrame({"sample_name": ["s1"]})
     f.create_sequence_file_set_dataframe = lambda data: pd.DataFrame()
-    f.create_sra_files_dataframe = lambda main, sequence_file_set_df=None: pd.DataFrame(
-        {"library_ID": ["lib1"]}
-    )
+    f.create_sra_files_dataframe = lambda main, **kwargs: pd.DataFrame({"library_ID": ["lib1"]})
     f._attach_plate_library_id = lambda main, sample: sample
     f.create_samples_dataframe = lambda sample: sample
     return f

@@ -41,9 +41,11 @@ def _stub_downstream_writers(flattener):
     flattener.biohub_source_dataframe = lambda main, samples: main
     flattener.create_biohub_dataframe = lambda main: pd.DataFrame({"sample_name": ["s1"]})
     flattener.create_geo_dataframe = lambda main: pd.DataFrame({"library_name": ["lib1"]})
-    flattener.create_sra_biosample_dataframe = lambda main: pd.DataFrame({"sample_name": ["s1"]})
+    flattener.create_sra_biosample_dataframe = lambda main, **kwargs: pd.DataFrame(
+        {"sample_name": ["s1"]}
+    )
     flattener.create_sequence_file_set_dataframe = lambda complete_data: pd.DataFrame()
-    flattener.create_sra_files_dataframe = lambda main, sequence_file_set_df=None: pd.DataFrame(
+    flattener.create_sra_files_dataframe = lambda main, **kwargs: pd.DataFrame(
         {"sample_name": ["s1"], "library_ID": ["lib1"], "file_size": [0]}
     )
     flattener._biohub_guide_sets = lambda complete_data: []

@@ -430,6 +430,119 @@ def test_library_id_without_group_is_none():
     assert DB2Flattener._library_id_from_group(None, ["Gene Expression"]) is None
 
 
+def unmapped_feature_main_df(rows=3):
+    """
+    One library with an unmapped feature type, on `rows` raw matrix files.
+
+    MAIN carries one row per (raw matrix file, library), so this is what a
+    library sequenced across several raw matrix files looks like: the same
+    library repeated, which is what used to warn once per row.
+    """
+    return pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * rows,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"] * rows,
+            "droplet_based_libraries_feature_types": [["Gene Expression", "Something New"]] * rows,
+        }
+    )
+
+
+def test_unmapped_feature_type_warns_once_per_library_not_once_per_row(capsys):
+    sra_df = make_flattener().create_sra_files_dataframe(unmapped_feature_main_df(rows=3))
+
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX"]
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+
+def test_multiplexing_warning_is_also_once_per_library(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_MUX"] * 3,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/mux/"] * 3,
+            "droplet_based_libraries_feature_types": [["Multiplexing Capture"]] * 3,
+            "droplet_based_libraries_multiplexing_methods": [["probe barcoding"]] * 3,
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert capsys.readouterr().out.count("needs exactly one of") == 1
+
+
+def test_each_bad_library_still_warns(capsys):
+    """Deduplication is per library, so two bad libraries are two warnings."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A", "LIB_B", "LIB_B"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/b/",
+                "/droplet_based_libraries/b/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression", "Something New"],
+                ["Gene Expression", "Something New"],
+                ["Gene Expression", "Another New"],
+                ["Gene Expression", "Another New"],
+            ],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    out = capsys.readouterr().out
+    assert out.count("with no library ID suffix") == 2
+    assert "library LIB_A has feature type(s) ['Something New']" in out
+    assert "library LIB_B has feature type(s) ['Another New']" in out
+
+
+def test_feature_types_listed_in_another_order_are_one_library(capsys):
+    """The dedup key sorts, because _library_id_from_group ignores list order."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"] * 2,
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression", "Something New"],
+                ["Something New", "Gene Expression"],
+            ],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+
+def test_library_ids_passed_in_are_used_instead_of_rebuilt(capsys):
+    """
+    What flatten_matrix_file_set does: build the ids once, hand them to both
+    sheets. The second sheet then re-warns about nothing.
+    """
+    flattener = make_flattener()
+    main_df = unmapped_feature_main_df(rows=3)
+    library_ids = flattener._library_ids(main_df)
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+    sra_df = flattener.create_sra_files_dataframe(main_df, library_ids=library_ids)
+
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX"]
+    assert "with no library ID suffix" not in capsys.readouterr().out
+
+
+def test_passing_library_ids_does_not_change_the_sheet():
+    main_df = unmapped_feature_main_df(rows=3)
+    built_here = make_flattener().create_sra_files_dataframe(main_df)
+
+    flattener = make_flattener()
+    passed_in = flattener.create_sra_files_dataframe(
+        main_df, library_ids=flattener._library_ids(main_df)
+    )
+
+    pd.testing.assert_frame_equal(built_here, passed_in)
+
+
 def test_library_strategy_maps_feature_types():
     main_df = pd.DataFrame(
         {

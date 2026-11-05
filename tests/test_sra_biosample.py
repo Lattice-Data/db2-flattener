@@ -311,6 +311,40 @@ def test_library_id_is_scoped_to_each_group():
     assert list(sra_df["library_id"]) == ["LIB_A_GEX, LIB_A_CRI", "LIB_B_GEX, LIB_B_CRI"]
 
 
+def test_library_ids_passed_in_are_used_instead_of_rebuilt(capsys):
+    """
+    What flatten_matrix_file_set does: both SRA sheets key off the same ids, so
+    it builds them once. Building them is what warns about unmapped feature
+    types, so the sheet given the ids must not quietly build its own.
+    """
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_feature_types": [["Gene Expression", "Something New"]] * 2,
+        }
+    )
+    library_ids = flattener._library_ids(main_df)
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+    sra_df = flattener.create_sra_biosample_dataframe(main_df, library_ids=library_ids)
+
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
+    assert "with no library ID suffix" not in capsys.readouterr().out
+
+
+def test_passing_library_ids_does_not_change_the_sheet():
+    main_df = library_id_main_df()
+    built_here = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    flattener = make_flattener()
+    passed_in = flattener.create_sra_biosample_dataframe(
+        main_df, library_ids=flattener._library_ids(main_df)
+    )
+
+    pd.testing.assert_frame_equal(built_here, passed_in)
+
+
 def test_library_id_does_not_read_the_alias():
     main_df = main_frame(
         {

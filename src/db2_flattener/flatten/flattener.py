@@ -203,11 +203,14 @@ class DB2Flattener:
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
 
-        # SRA sheets: chunk by sample_name so each set stays under 5 TB of files
-        sra_biosample_df = self.create_sra_biosample_dataframe(main_df)
+        # SRA sheets: chunk by sample_name so each set stays under 5 TB of files.
+        # Both sheets key off the same library ids, and building them warns about
+        # unmapped feature types, so they are built once here rather than per sheet.
+        library_ids = self._library_ids(main_df)
+        sra_biosample_df = self.create_sra_biosample_dataframe(main_df, library_ids=library_ids)
         sequence_file_set_df = self.create_sequence_file_set_dataframe(complete_data)
         sra_files_df = self.create_sra_files_dataframe(
-            main_df, sequence_file_set_df=sequence_file_set_df
+            main_df, sequence_file_set_df=sequence_file_set_df, library_ids=library_ids
         )
         self._write_sra_chunked_outputs(sra_dir, sra_files_df, sra_biosample_df)
 
@@ -1045,7 +1048,7 @@ class DB2Flattener:
             result.append(item)
         return result
 
-    def create_sra_biosample_dataframe(self, main_df) -> pd.DataFrame:
+    def create_sra_biosample_dataframe(self, main_df, library_ids=None) -> pd.DataFrame:
         """
         Build the SRA/BioSample dataframe from main_df: one row per CRO group.
 
@@ -1053,6 +1056,11 @@ class DB2Flattener:
         PROP_MAP_SRA_BIOSAMPLE renames to 'sample_name'. That identifier spans a
         group's libraries, so the GEX libraries are taken and the rest dropped,
         as on GEO, one row per group rather than per library.
+
+        library_ids is the _library_ids Series for this same main_df, row-aligned
+        and unfiltered. SRA_FILE needs the same Series, so flatten_matrix_file_set
+        builds it once and hands it to both; left unset it is built here, which is
+        what a caller holding only main_df wants.
         """
         group_cols = [
             col
@@ -1080,7 +1088,7 @@ class DB2Flattener:
             f"out of {len(main_df)} MAIN rows"
         )
         # The one cell taken from the unfiltered frame, so it has to be built here
-        library_id = self._library_ids_by_group(main_df, gex_mask)
+        library_id = self._library_ids_by_group(main_df, gex_mask, library_ids=library_ids)
         main_df = main_df[gex_mask].reset_index(drop=True)
         if main_df.empty:
             return pd.DataFrame()
@@ -1494,7 +1502,9 @@ class DB2Flattener:
             chunks.append(pd.concat(current_parts, ignore_index=True))
         return chunks or [df.iloc[0:0].copy()]
 
-    def create_sra_files_dataframe(self, main_df, sequence_file_set_df=None) -> pd.DataFrame:
+    def create_sra_files_dataframe(
+        self, main_df, sequence_file_set_df=None, library_ids=None
+    ) -> pd.DataFrame:
         """
         Build the SRA file dataframe from main_df: one row per CRO group × library.
 
@@ -1503,6 +1513,10 @@ class DB2Flattener:
         Duplicate MAIN rows (same library on more than one raw matrix file)
         collapse to one. CRISPR libraries expand to one row per SequenceFileSet
         when sequence_file_set_df is provided; non-CRISPR keep MAIN filenames.
+
+        library_ids is the _library_ids Series for this same main_df, shared with
+        SRA_BIOSAMPLE so the two sheets do not each rebuild it; left unset it is
+        built here.
         """
         group_cols = [
             col
@@ -1555,7 +1569,9 @@ class DB2Flattener:
             sra_df.rename(columns={"raw_file_samples": "samples"}, inplace=True)
         sra_df = collapse_duplicate_columns(sra_df)
 
-        sra_df["library_ID"] = self._library_ids(main_df)
+        if library_ids is None:
+            library_ids = self._library_ids(main_df)
+        sra_df["library_ID"] = library_ids
         self._warn_duplicate_library_ids(main_df, sra_df["library_ID"])
         library_atid = self._coalesce_columns(
             main_df, [f"{kind}_based_libraries_@id" for kind in ("droplet", "plate")]
@@ -1779,10 +1795,11 @@ class DB2Flattener:
             )
 
         if "Multiplexing Capture" in types:
+            declared = to_items(multiplexing_methods)
             methods = [
-                SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP[method]
-                for method in SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP
-                if method in to_items(multiplexing_methods)
+                suffix
+                for method, suffix in SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP.items()
+                if method in declared
             ]
             if len(methods) == 1:
                 suffixes.extend(methods)
@@ -1790,8 +1807,7 @@ class DB2Flattener:
                 print(
                     f"====WARNING==== Multiplexing Capture library {group} needs exactly one of "
                     f"{sorted(SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP)} in multiplexing_methods; "
-                    f"found {to_items(multiplexing_methods)}. Its library ID has no "
-                    "multiplexing suffix"
+                    f"found {declared}. Its library ID has no multiplexing suffix"
                 )
 
         return "_".join([str(group), *suffixes])
@@ -2008,7 +2024,7 @@ class DB2Flattener:
             return entries[0]
         return "pooled: " + sep.join(entries)
 
-    def _library_ids_by_group(self, main_df, gex_mask):
+    def _library_ids_by_group(self, main_df, gex_mask, library_ids=None):
         """
         Per-group 'library_id' cell: every library in the group, GEX ones first.
 
@@ -2018,15 +2034,17 @@ class DB2Flattener:
         on the wider frame. gex_mask is passed in rather than recomputed to keep
         one answer to what counts as GEX.
 
-        Each library's id comes from _library_ids. Sorted within each half, but
-        GEX before the rest: plain sorting would lead with the CRISPR library,
-        whose suffix happens to come first.
+        Each library's id comes from _library_ids, passed in where the caller
+        already has it. Sorted within each half, but GEX before the rest: plain
+        sorting would lead with the CRISPR library, whose suffix happens to come
+        first.
         """
         groups = self._coalesce_columns(
             main_df,
             [f"{kind}_based_libraries_CRO_group_identifier" for kind in ("droplet", "plate")],
         )
-        library_ids = self._library_ids(main_df)
+        if library_ids is None:
+            library_ids = self._library_ids(main_df)
         if library_ids is None:
             return {}
 
@@ -2097,7 +2115,17 @@ class DB2Flattener:
             )
 
     def _library_ids(self, main_df):
-        """Each MAIN row's library id from _library_id_from_group, or None with no group column."""
+        """
+        Each MAIN row's library id from _library_id_from_group, or None with no group column.
+
+        MAIN carries one row per (raw matrix file, library), so a library spanning
+        several raw matrix files reaches this loop once per file. _library_id_from_group
+        reads feature_types as a set and multiplexing_methods by membership, so rows
+        agreeing on those three values cannot produce different ids: the first row of
+        each distinct triple is computed and the rest reuse it. That keeps its two
+        warnings to one per library rather than one per row. The cache is local to the
+        call on purpose, so a later flatten in the same process warns again.
+        """
 
         def coalesce(field):
             return self._coalesce_columns(
@@ -2112,14 +2140,19 @@ class DB2Flattener:
         methods = coalesce("multiplexing_methods")
         feature_types = empty if feature_types is None else feature_types
         methods = empty if methods is None else methods
-        return pd.Series(
-            [
-                self._library_id_from_group(group, ft, mm)
-                for group, ft, mm in zip(groups, feature_types, methods, strict=True)
-            ],
-            index=main_df.index,
-            dtype=object,
-        )
+
+        cache: dict[tuple, str | None] = {}
+        library_ids = []
+        for group, ft, mm in zip(groups, feature_types, methods, strict=True):
+            key = (
+                None if is_empty(group) else str(group),
+                tuple(sorted(str(item) for item in to_items(ft))),
+                tuple(sorted(str(item) for item in to_items(mm))),
+            )
+            if key not in cache:
+                cache[key] = self._library_id_from_group(group, ft, mm)
+            library_ids.append(cache[key])
+        return pd.Series(library_ids, index=main_df.index, dtype=object)
 
     def _biomaterial_provider_by_library(self, main_df, library_key):
         """
