@@ -509,6 +509,7 @@ def _assert_no_title_source_cols(sra_df):
     leaked = [
         "samples",
         "raw_file_samples",
+        "raw_file_sample_uuids",
         "_feature_types",
         "sequence_file_sets_run_cardinality",
         "sequence_file_sets_sequencing_platform",
@@ -565,6 +566,29 @@ def test_title_pooled_and_strategy():
 
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; pooled; CRISPR knockout screen"]
     _assert_no_title_source_cols(sra_df)
+
+
+def test_title_pooled_for_samples_sharing_a_name():
+    main_df = title_main_df(
+        raw_file_samples=["Heart"],
+        raw_file_sample_uuids=["uuid-s1; uuid-s2"],
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; pooled"]
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_title_not_pooled_for_one_sample_uuid():
+    main_df = title_main_df(
+        raw_file_samples=["sample1"],
+        raw_file_sample_uuids=["uuid-s1"],
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq"]
 
 
 def test_title_joins_distinct_summaries_across_duplicate_rows():

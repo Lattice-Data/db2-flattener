@@ -1163,6 +1163,44 @@ def test_multiplexed_file_joins_differing_sample_values_in_main():
     assert main_df.loc[0, "tissues_selection_kits"] == "EasySep A; EasySep B"
 
 
+def test_main_lists_each_files_sample_uuids():
+    main_df, _ = _mx_run(MX_TWO)
+
+    assert main_df.loc[0, "raw_file_sample_uuids"] == "uuid-s1; uuid-s2"
+
+
+def test_samples_sharing_a_name_still_title_as_pooled():
+    twins = [
+        _mx_tissue("/tissues/s1/", "lab:H1", "cell", sample_name="Heart"),
+        _mx_tissue("/tissues/s2/", "lab:H2", "cell", sample_name="Heart"),
+    ]
+    main_df, _ = _mx_run(twins)
+
+    assert main_df.loc[0, "raw_file_samples"] == "Heart"
+    assert "pooled" in DB2Flattener._geo_title(main_df.loc[0])
+
+
+def test_unnamed_sample_warns_and_still_titles_as_pooled(capsys):
+    samples = [
+        _mx_tissue("/tissues/s1/", "lab:H1", "cell", sample_name="Heart"),
+        _mx_tissue("/tissues/s2/", "lab:H2", "cell"),
+    ]
+    main_df, _ = _mx_run(samples)
+
+    assert main_df.loc[0, "raw_file_samples"] == "Heart"
+    assert "pooled" in DB2Flattener._geo_title(main_df.loc[0])
+    out = capsys.readouterr().out
+    assert "1 sample(s) have no sample_name" in out
+    assert "/tissues/s2/" in out
+
+
+def test_single_sample_file_is_not_pooled():
+    main_df, _ = _mx_run([MX_TWO[0]])
+
+    assert main_df.loc[0, "raw_file_sample_uuids"] == "uuid-s1"
+    assert "pooled" not in (DB2Flattener._geo_title(main_df.loc[0]) or "")
+
+
 def test_sample_with_several_aliases_keeps_them_all_raw():
     """sample_alias is a list here, so de-duplicating the pairs must not hash it."""
     tissues = [

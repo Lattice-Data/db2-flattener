@@ -321,6 +321,8 @@ class DB2Flattener:
                             resolved_controlled_terms,
                         )
 
+        unnamed_samples = set()
+
         # Create one row per (raw matrix file, library)
         for file_data in raw_file_to_libraries.values():
             library_entries = file_data["library_entries"]
@@ -337,11 +339,16 @@ class DB2Flattener:
                     sample_uuids.append(self._object_uuid(sample_obj))
                     sample_aliases.append(sample_obj.get("aliases"))
                     sample_names.append(sample_obj.get("sample_name"))
+                    if is_empty(sample_obj.get("sample_name")):
+                        unnamed_samples.add(sample_obj.get("@id"))
 
             shared = {
                 "raw_matrix_file_uuid": self._object_uuid(representative_raw_file),
                 "raw_matrix_file_alias": self._get_clean_alias(representative_raw_file),
                 "raw_file_samples": self._join_unique(sample_names),
+                # Counted for 'pooled' in place of raw_file_samples, which collapses
+                # samples sharing a sample_name and drops unnamed ones
+                "raw_file_sample_uuids": self._join_unique(sample_uuids),
             }
             # Direct copies, not _join_unique(): that stringifies booleans and integers.
             for field in (
@@ -398,6 +405,12 @@ class DB2Flattener:
                             self._join_unique(values) if values else None
                         )
                 rows.append(row)
+
+        if unnamed_samples:
+            print(
+                f"Warning: {len(unnamed_samples)} sample(s) have no sample_name and are "
+                f"left out of raw_file_samples: {sorted(unnamed_samples)}"
+            )
 
         main_df = pd.DataFrame(rows)
 
@@ -583,6 +596,8 @@ class DB2Flattener:
         subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
         subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
+        if "raw_file_sample_uuids" in geo_source.columns:
+            subset_keys.append("raw_file_sample_uuids")
         geo_df = geo_source[subset_keys].copy()
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = strip_author_metadata_column_prefix(geo_df)
@@ -626,6 +641,7 @@ class DB2Flattener:
         geo_df = self._add_geo_title(
             geo_df, source_col=col, drop_source=False, max_length=GEO_TITLE_MAX_LENGTH
         )
+        geo_df = geo_df.drop(columns=["raw_file_sample_uuids"], errors="ignore")
         col = "*single or paired-end"
         if col in geo_df.columns:
             geo_df[col] = geo_df[col].replace(GEO_RUN_CARDINALITY_MAP)
@@ -766,7 +782,9 @@ class DB2Flattener:
         """
         One row's title; see _add_geo_title for the order.
 
-        'pooled' only when the row has more than one distinct sample. Any cell
+        'pooled' only when the row has more than one distinct sample uuid, so
+        samples sharing a sample_name, or lacking one, still count. A row without
+        raw_file_sample_uuids counts its distinct sample names instead. Any cell
         may be a list after collapse_dataframe, or a '; '-joined string, so each
         is read through _distinct_parts. A library whose samples carry several
         distinct summaries gets them sorted and joined with '; '. Genetic
@@ -787,10 +805,12 @@ class DB2Flattener:
             )
             if part
         )
+        uuids = parts(row.get("raw_file_sample_uuids"))
+        pooled = len(uuids) > 1 if uuids else len(parts(row.get("samples"))) > 1
         groups = [
             left,
             "; ".join(parts(row.get(summary_col))),
-            "pooled" if len(parts(row.get("samples"))) > 1 else "",
+            "pooled" if pooled else "",
             "; ".join(dict.fromkeys(strategies)),
         ]
         return "; ".join(group for group in groups if group) or None
@@ -1433,6 +1453,7 @@ class DB2Flattener:
         seen = set()
         for col in (
             "raw_file_samples",
+            "raw_file_sample_uuids",
             "genetic_modifications_strategy",
             EXPERIMENTAL_CONDITION_SUMMARY_COL,
         ):
@@ -1566,6 +1587,7 @@ class DB2Flattener:
             c
             for c in (
                 "samples",
+                "raw_file_sample_uuids",
                 "_feature_types",
             )
             if c in sra_df.columns
