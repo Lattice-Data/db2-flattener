@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 import numpy as np
 import pandas as pd
 
+from db2_flattener.flatten.biohub_version import next_biohub_version
 from db2_flattener.gather import lattice as DB2lattice
 from db2_flattener.gather.gatherer import DB2Gatherer
 from db2_flattener.schema.constants import (
@@ -110,15 +111,21 @@ class DB2Flattener:
         self.gatherer = DB2Gatherer(self.connection, configs)
 
     def flatten_matrix_file_set(
-        self, matrix_file_set_uuid, *, biohub_version: str, audit_mode: str = "strict"
+        self,
+        matrix_file_set_uuid,
+        *,
+        biohub_versions: dict[tuple[str, int], int] | None = None,
+        audit_mode: str = "strict",
     ):
         """
         Flatten a MatrixFileSet into library-indexed data and save CSVs under
         `{CRO_orders}_{timestamp}/` (or `MatrixFileSet_{uuid8}_{timestamp}/`
         when no CRO_order values are present).
 
-        biohub_version is the resolved template suffix (e.g. ``v1``) used for
-        BIOHUB samples_template / guide_template filenames.
+        biohub_versions maps ``(kind, set_number)`` (kind ``samples`` or
+        ``guide``) to the highest v# already present for that template. Each
+        BIOHUB file is written as that value + 1, or ``v1`` when absent.
+        None/empty → every template is ``v1``.
 
         audit_mode controls whether ERROR/WARNING audits stop the run:
         ``strict`` (default), ``warnings_ok``, or ``all_ok``.
@@ -192,7 +199,7 @@ class DB2Flattener:
             main_df,
             biohub_samples,
             complete_data,
-            biohub_version=biohub_version,
+            biohub_versions=biohub_versions,
         )
 
         # Create GEO DataFrame from main DataFrame
@@ -2177,10 +2184,12 @@ class DB2Flattener:
         biohub_samples,
         complete_data,
         *,
-        biohub_version: str,
+        biohub_versions: dict[tuple[str, int], int] | None = None,
     ):
         """Write BIOHUB samples/guide templates, split by GeneticModification set.
 
+        Each file's v# is resolved independently per type and set from
+        ``biohub_versions`` (see ``next_biohub_version``).
         Guide frames are also copied to GEO as ``{alias}_guide_metadata.csv``.
         """
         source = self.biohub_source_dataframe(main_df, biohub_samples)
@@ -2188,7 +2197,8 @@ class DB2Flattener:
 
         if not sets:
             biohub_df = self.create_biohub_dataframe(source)
-            biohub_output = biohub_dir / f"samples_template_set1_{biohub_version}.csv"
+            samples_version = next_biohub_version(biohub_versions, "samples", 1)
+            biohub_output = biohub_dir / f"samples_template_set1_{samples_version}.csv"
             print(f"Saving biohub DataFrame to {biohub_output}...")
             biohub_df.to_csv(biohub_output, index=False)
             print(f"✅ Biohub CSV file created: {biohub_output}")
@@ -2221,7 +2231,8 @@ class DB2Flattener:
         for biohub_set, subset in set_subsets:
             set_n = biohub_set["set_number"]
             biohub_df = self.create_biohub_dataframe(subset)
-            samples_output = biohub_dir / f"samples_template_set{set_n}_{biohub_version}.csv"
+            samples_version = next_biohub_version(biohub_versions, "samples", set_n)
+            samples_output = biohub_dir / f"samples_template_set{set_n}_{samples_version}.csv"
             print(f"Saving biohub DataFrame to {samples_output}...")
             biohub_df.to_csv(samples_output, index=False)
             print(f"✅ Biohub CSV file created: {samples_output}")
@@ -2232,7 +2243,8 @@ class DB2Flattener:
             guide_df = self.create_guide_metadata_dataframe(file_info)
             if guide_df is None or guide_df.empty:
                 continue
-            guide_output = biohub_dir / f"guide_template_set{set_n}_{biohub_version}.csv"
+            guide_version = next_biohub_version(biohub_versions, "guide", set_n)
+            guide_output = biohub_dir / f"guide_template_set{set_n}_{guide_version}.csv"
             print(f"Saving guide metadata DataFrame to {guide_output}...")
             guide_df.to_csv(guide_output, index=False)
             print(f"✅ Guide metadata CSV file created: {guide_output}")

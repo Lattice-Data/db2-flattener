@@ -20,10 +20,10 @@ From the repository root:
 pip install -e ".[dev]"
 ```
 
-Pin a release (requires the `v1.0.1` tag on GitHub):
+Pin a release (requires the `v2.0.0` tag on GitHub):
 
 ```bash
-pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v1.0.1"
+pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v2.0.0"
 ```
 
 Check the running code with `db2-flattener --version`.
@@ -45,13 +45,19 @@ is written under a directory in the current working directory named
 MAIN, sorted and joined by `_`). If no CRO_order values are present, the
 directory is `MatrixFileSet_{uuid8}_{timestamp}`.
 
-Exactly one of these BIOHUB version flags is required:
+`--s3-order-dir` / `-s` is required: the S3 URI of the order subdirectory.
+BIOHUB template versions are read from file names in `{order}/metadata/` and
+resolved **independently per template type and set**:
 
-- `--biohub-version` / `-b` — explicit version (`1` or `v1`)
-- `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; `v#` is taken from
-  `{order}/metadata/` (`samples_template(_set#)?_v#.csv` /
-  `guide_template(_set#)?_v#.csv`). Missing/empty metadata → `v1`; otherwise
-  highest found `v#` + 1.
+- Only `samples_template_set{N}_v{M}.csv` and `guide_template_set{N}_v{M}.csv`
+  count (case-insensitive). Names without a set number, or that otherwise
+  don't match, are ignored.
+- Each output is the highest `v#` found for that type and set, plus 1. If none
+  is found for that type and set, it is `v1`. Gaps are not filled.
+
+For example, with `samples_template_set1_v2.csv` and `guide_template_set1_v1.csv`
+in `metadata/`, the run writes `samples_template_set1_v3.csv` and
+`guide_template_set1_v2.csv`; a `set2` with no prior files gets `v1` for both.
 
 By default the run is **strict**: any ERROR or WARNING audit on gathered
 objects refuses flatten (exit 1) after printing category counts. Optional
@@ -62,10 +68,10 @@ mutually exclusive overrides:
 - `--force-all-audit` — continue even when ERROR or WARNING audits are present
 
 ```bash
-python flatten.py -u <matrix-file-set-uuid> -m db2_demo -b v1
+python flatten.py -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
 db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
-python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -b 2
-db2-flattener -u <matrix-file-set-uuid> -m db2_demo -b v1 --force-only-warning
+python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
+db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/ --force-only-warning
 ```
 
 Layout:
@@ -81,8 +87,8 @@ Layout:
     sra_biosample_setN.csv               # paired with sra_file_setN; ≤5 TB per set
     sra_file_setN.csv                    # sample_name groups packed under 5 TB
   BIOHUB/
-    samples_template_setN_v#.csv         # one per GeneticModification; set1 when none
-    guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing
+    samples_template_setN_v#.csv         # one per GeneticModification; set1 when none; own v#
+    guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing; own v#
 ```
 
 

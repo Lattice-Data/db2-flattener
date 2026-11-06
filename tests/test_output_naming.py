@@ -59,7 +59,7 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
         pd.DataFrame({"sample_alias": ["s1"]}),
         cro_orders=["ABC-123"],
     )
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    result = flattener.flatten_matrix_file_set(UUID)
 
     outdir_name = f"ABC-123_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -81,7 +81,7 @@ def test_multiple_cro_orders_concatenated_sorted(tmp_path, monkeypatch):
         pd.DataFrame({"sample_alias": ["s1", "s2"]}),
         cro_orders=["DEF-456; ABC-123", "ABC-123"],
     )
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    result = flattener.flatten_matrix_file_set(UUID)
 
     outdir_name = f"ABC-123_DEF-456_{TIMESTAMP}"
     assert result == outdir_name
@@ -93,7 +93,7 @@ def test_missing_cro_order_falls_back_to_uuid(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     flattener = make_flattener(pd.DataFrame({"sample_alias": ["s1"]}))
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    result = flattener.flatten_matrix_file_set(UUID)
 
     outdir_name = f"MatrixFileSet_{UUID[:8]}_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -110,7 +110,7 @@ def test_empty_sample_df_skips_demultiplexing_samples(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     flattener = make_flattener(pd.DataFrame(), cro_orders=["ABC-123"])
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    result = flattener.flatten_matrix_file_set(UUID)
 
     outdir_name = f"ABC-123_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -144,7 +144,7 @@ def test_guide_template_set_written_when_present(tmp_path, monkeypatch):
     ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
 
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    result = flattener.flatten_matrix_file_set(UUID)
 
     outdir_name = f"ABC-123_{TIMESTAMP}"
     outdir = tmp_path / outdir_name
@@ -178,7 +178,7 @@ def test_empty_guide_df_skips_guide_template(tmp_path, monkeypatch):
     ]
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame()
 
-    flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    flattener.flatten_matrix_file_set(UUID)
 
     outdir = tmp_path / f"ABC-123_{TIMESTAMP}"
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0
+
+- **Breaking:** removed `--biohub-version` / `-b`; `--s3-order-dir` / `-s` is
+  now required.
+- BIOHUB `samples_template` and `guide_template` versions are resolved
+  independently per type and set: each is the highest `v#` found in
+  `{order}/metadata/` for that type and set, plus 1 (or `v1` when none).
+- Only `{samples|guide}_template_set{N}_v{M}.csv` names count; names without a
+  set number are ignored.
+- `DB2Flattener.flatten_matrix_file_set` takes `biohub_versions` (latest `v#`
+  per `(kind, set)`) instead of `biohub_version`.
+
 ## 1.0.1
 
 - Blank Control guide `intended_features_*` fields; warn when unexpected

@@ -48,10 +48,7 @@ def _base_flattener(complete_data, main_df, sample_df=None):
     return f
 
 
-def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
-    _freeze_time(monkeypatch)
-    monkeypatch.chdir(tmp_path)
-
+def _two_set_flattener():
     main_df = pd.DataFrame(
         {
             "raw_matrix_file_alias": ["rmf1", "rmf2"],
@@ -119,7 +116,15 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
     )
     flattener.create_geo_dataframe = lambda main: DB2Flattener.create_geo_dataframe(flattener, main)
 
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    return flattener
+
+
+def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
+    _freeze_time(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    flattener = _two_set_flattener()
+    result = flattener.flatten_matrix_file_set(UUID)
     outdir = Path(result)
     biohub = outdir / "BIOHUB"
     geo = outdir / "GEO"
@@ -151,6 +156,48 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
         assert (geo / f"{label}_guide_metadata.csv").is_file()
 
 
+def test_versions_resolve_independently_per_kind_and_set(tmp_path, monkeypatch, capsys):
+    _freeze_time(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    flattener = _two_set_flattener()
+    latest = {("samples", 1): 2, ("guide", 1): 1, ("samples", 2): 4}
+    result = flattener.flatten_matrix_file_set(UUID, biohub_versions=latest)
+    biohub = Path(result) / "BIOHUB"
+
+    assert sorted(p.name for p in biohub.iterdir()) == [
+        "guide_template_set1_v2.csv",
+        "guide_template_set2_v1.csv",
+        "samples_template_set1_v3.csv",
+        "samples_template_set2_v5.csv",
+    ]
+    # GEO guide copies stay unversioned.
+    geo = Path(result) / "GEO"
+    assert (geo / "gm-a_guide_metadata.csv").is_file()
+    assert (geo / "gm-b_guide_metadata.csv").is_file()
+
+
+def test_no_gms_uses_samples_set1_version(tmp_path, monkeypatch):
+    _freeze_time(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    main_df = pd.DataFrame(
+        {
+            "raw_matrix_file_alias": ["rmf1"],
+            "raw_file_samples": ["s1"],
+            "sequence_file_sets_CRO_order": ["ABC-123"],
+        }
+    )
+    complete_data = {"libraries": {}, "resolved_objects": {}}
+    flattener = _base_flattener(complete_data, main_df)
+    flattener.create_biohub_dataframe = lambda source: pd.DataFrame({"sample_name": ["s1"]})
+
+    latest = {("samples", 1): 3, ("guide", 1): 7, ("samples", 2): 9}
+    result = flattener.flatten_matrix_file_set(UUID, biohub_versions=latest)
+    biohub = Path(result) / "BIOHUB"
+    assert sorted(p.name for p in biohub.iterdir()) == ["samples_template_set1_v4.csv"]
+
+
 def test_no_gms_writes_samples_template_set1_v1(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -166,7 +213,7 @@ def test_no_gms_writes_samples_template_set1_v1(tmp_path, monkeypatch):
     flattener = _base_flattener(complete_data, main_df)
     flattener.create_biohub_dataframe = lambda source: pd.DataFrame({"sample_name": ["s1"]})
 
-    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+    result = flattener.flatten_matrix_file_set(UUID)
     biohub = Path(result) / "BIOHUB"
     assert (biohub / "samples_template_set1_v1.csv").is_file()
     assert not (biohub / "samples_template_v1.csv").exists()
@@ -214,7 +261,7 @@ def test_unassigned_rows_fail(tmp_path, monkeypatch, capsys):
     flattener.create_guide_metadata_dataframe = lambda file_info: pd.DataFrame({"id": ["g1"]})
 
     with pytest.raises(ValueError, match="no matching GeneticModification set"):
-        flattener.flatten_matrix_file_set(UUID, biohub_version="v1")
+        flattener.flatten_matrix_file_set(UUID)
     assert (
         "1 BIOHUB source row(s) have no matching GeneticModification set" in capsys.readouterr().out
     )
