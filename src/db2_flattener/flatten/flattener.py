@@ -50,6 +50,7 @@ from db2_flattener.utils import (
     combine_bound_columns,
     expand_list_column,
     extract_references_from_field,
+    extract_uuid_from_id,
     get_config_obj_type,
     get_url_prefix_from_id,
     is_empty,
@@ -76,8 +77,8 @@ SEQUENCE_FILE_SET_FILE_SLOTS = (
     "untrimmed_cram",
 )
 
-# Max total SequenceFile bytes per SRA file/biosample chunk (5 TB)
-SRA_CHUNK_MAX_BYTES = 5 * 1000**4  # 5_000_000_000_000
+# Max total SequenceFile bytes per SRA file/biosample chunk (4.8 TB: margin under the 5 TB limit)
+SRA_CHUNK_MAX_BYTES = 4_800 * 1000**3  # 4_800_000_000_000
 
 # MAIN / biohub-source columns used to assign rows to a GeneticModification set
 BIOHUB_LIBRARY_ID_COLS = (
@@ -203,7 +204,7 @@ class DB2Flattener:
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
 
-        # SRA sheets: chunk by sample_name so each set stays under 5 TB of files.
+        # SRA sheets: chunk by sample_name so each set stays under 4.8 TB of files.
         # Both sheets key off the same library ids, and building them warns about
         # unmapped feature types, so they are built once here rather than per sheet.
         library_ids = self._library_ids(main_df)
@@ -1304,7 +1305,7 @@ class DB2Flattener:
 
     def create_sequence_file_set_dataframe(self, complete_data) -> pd.DataFrame:
         """
-        One row per SequenceFileSet: library link and filenames from linked files.
+        One row per SequenceFileSet: uuid, library link and filenames from linked files.
 
         Filenames come from index1, index2, read1, read2, read3, trimmed_cram,
         untrimmed_cram in that order. Each SequenceFile prefers sra_file_names,
@@ -1351,8 +1352,12 @@ class DB2Flattener:
                         names.extend(self._sequence_file_filenames(seq_file))
                         total_size += self._coerce_file_size(seq_file.get("file_size"))
                     names = list(dict.fromkeys(names))
+                    set_uuid = file_set.get("uuid")
+                    if is_empty(set_uuid):
+                        set_uuid = extract_uuid_from_id(set_id)
                     row = {
                         "sequence_file_set_@id": set_id,
+                        "sequence_file_set_uuid": set_uuid,
                         "library_@id": library_atid,
                         "file_size": total_size,
                     }
@@ -1411,6 +1416,38 @@ class DB2Flattener:
         )
 
     @staticmethod
+    def _sequence_file_set_uuids_by_library(sra_rows, sequence_file_set_df) -> pd.Series:
+        """Per SRA row, the uuids of every SequenceFileSet linked to its library."""
+        empty = pd.Series([[] for _ in range(len(sra_rows))], index=sra_rows.index, dtype=object)
+        if (
+            sra_rows.empty
+            or "_library_atid" not in sra_rows.columns
+            or sequence_file_set_df is None
+            or sequence_file_set_df.empty
+            or "library_@id" not in sequence_file_set_df.columns
+            or "sequence_file_set_uuid" not in sequence_file_set_df.columns
+        ):
+            return empty
+
+        sets = sequence_file_set_df
+        if "sequence_file_set_@id" in sets.columns:
+            sets = sets.sort_values("sequence_file_set_@id", kind="mergesort")
+        by_library = {}
+        for library_atid, set_uuid in zip(
+            sets["library_@id"], sets["sequence_file_set_uuid"], strict=True
+        ):
+            if is_empty(library_atid) or is_empty(set_uuid):
+                continue
+            uuids = by_library.setdefault(library_atid, [])
+            if set_uuid not in uuids:
+                uuids.append(set_uuid)
+        return pd.Series(
+            [list(by_library.get(atid, [])) for atid in sra_rows["_library_atid"]],
+            index=sra_rows.index,
+            dtype=object,
+        )
+
+    @staticmethod
     def _drop_empty_sra_filename_columns(df: pd.DataFrame) -> pd.DataFrame:
         """Drop filename / filenameN columns that are empty for every row."""
         if df is None or df.empty:
@@ -1423,11 +1460,54 @@ class DB2Flattener:
                 drop_cols.append(col)
         return df.drop(columns=drop_cols) if drop_cols else df
 
+    @staticmethod
+    def _sra_sequence_file_set_rows(file_chunk: pd.DataFrame) -> pd.DataFrame:
+        """
+        One row per (library_ID, sequence_file_set_uuid) for an SRA file chunk.
+
+        A library with several SequenceFileSets repeats its library_ID on each row.
+        Libraries with no linked SequenceFileSet are warned about and left out.
+        """
+        columns = ["library_ID", "sequence_file_set_uuid"]
+        if (
+            file_chunk is None
+            or file_chunk.empty
+            or "library_ID" not in file_chunk.columns
+            or "_sequence_file_set_uuids" not in file_chunk.columns
+        ):
+            return pd.DataFrame(columns=columns)
+
+        rows = []
+        missing = []
+        for library_id, uuids in zip(
+            file_chunk["library_ID"], file_chunk["_sequence_file_set_uuids"], strict=True
+        ):
+            if is_empty(library_id):
+                continue
+            uuids = [u for u in (uuids if isinstance(uuids, list) else []) if not is_empty(u)]
+            if not uuids:
+                if library_id not in missing:
+                    missing.append(library_id)
+                continue
+            rows.extend((library_id, set_uuid) for set_uuid in uuids)
+
+        if missing:
+            print(
+                f"====WARNING==== {len(missing)} library_ID(s) have no SequenceFileSet uuid "
+                f"and are left out of sra_sequence_fileset: {', '.join(map(str, missing))}"
+            )
+        return pd.DataFrame(rows, columns=columns).drop_duplicates().reset_index(drop=True)
+
     def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
-        """Write sra_file_setN.csv / sra_biosample_setN.csv under ≤5 TB sample_name packs."""
+        """
+        Write sra_file_setN.csv / sra_biosample_setN.csv / sra_sequence_fileset_setN.csv
+        under ≤4.8 TB sample_name packs.
+        """
         chunks = self._chunk_sra_by_sample_name(sra_files_df)
         for set_n, file_chunk in enumerate(chunks, start=1):
-            write_files = file_chunk.drop(columns=["file_size"], errors="ignore")
+            write_files = file_chunk.drop(
+                columns=["file_size", "_sequence_file_set_uuids"], errors="ignore"
+            )
             write_files = self._drop_empty_sra_filename_columns(write_files)
             sample_names = set()
             if "sample_name" in write_files.columns:
@@ -1457,6 +1537,13 @@ class DB2Flattener:
             print(f"✅ SRA/BioSample CSV file created: {bio_output}")
             print(f"   Rows: {len(bio_chunk)}")
             print(f"   Columns: {len(bio_chunk.columns)}")
+
+            fileset_chunk = self._sra_sequence_file_set_rows(file_chunk)
+            fileset_output = sra_dir / f"sra_sequence_fileset_set{set_n}.csv"
+            print(f"Saving SRA sequence file set DataFrame to {fileset_output}...")
+            fileset_chunk.to_csv(fileset_output, index=False)
+            print(f"✅ SRA sequence file set CSV file created: {fileset_output}")
+            print(f"   Rows: {len(fileset_chunk)}")
 
     @classmethod
     def _chunk_sra_by_sample_name(
@@ -1729,6 +1816,7 @@ class DB2Flattener:
                 "_is_crispr",
                 "library_@id",
                 "sequence_file_set_@id",
+                "sequence_file_set_uuid",
             )
             if c in sra_df.columns
         ]
@@ -1738,6 +1826,13 @@ class DB2Flattener:
             sra_df["file_size"] = sra_df["file_size"].map(self._coerce_file_size)
         else:
             sra_df["file_size"] = 0
+        if "_sequence_file_set_uuids" in sra_df.columns:
+            uuids = sra_df.pop("_sequence_file_set_uuids")
+            sra_df["_sequence_file_set_uuids"] = uuids.map(
+                lambda v: v if isinstance(v, list) else []
+            )
+        else:
+            sra_df["_sequence_file_set_uuids"] = [[] for _ in range(len(sra_df))]
         return sra_df.reset_index(drop=True)
 
     @staticmethod
@@ -1884,7 +1979,7 @@ class DB2Flattener:
         filename_basename: bool,
     ) -> pd.DataFrame:
         """
-        Attach filenames and file_size for SRA rows.
+        Attach filenames, file_size and _sequence_file_set_uuids for SRA rows.
 
         Non-CRISPR: MAIN filenames; file_size is the sum of matching SequenceFileSet
         totals (same SequenceFile object sums as CRISPR), one row per library.
@@ -1910,6 +2005,9 @@ class DB2Flattener:
             non_crispr["file_size"] = cls._sra_file_size_from_sequence_file_sets(
                 non_crispr, sequence_file_set_df
             )
+            non_crispr["_sequence_file_set_uuids"] = cls._sequence_file_set_uuids_by_library(
+                non_crispr, sequence_file_set_df
+            )
 
         if not crispr.empty:
             if filename_source and filename_source in crispr.columns:
@@ -1931,6 +2029,13 @@ class DB2Flattener:
                 crispr["file_size"] = 0
             else:
                 crispr["file_size"] = crispr["file_size"].map(cls._coerce_file_size)
+            if "sequence_file_set_uuid" in crispr.columns:
+                crispr["_sequence_file_set_uuids"] = crispr["sequence_file_set_uuid"].map(
+                    lambda v: [] if is_empty(v) else [v]
+                )
+                crispr = crispr.drop(columns=["sequence_file_set_uuid"])
+            else:
+                crispr["_sequence_file_set_uuids"] = [[] for _ in range(len(crispr))]
 
         parts = [part for part in (non_crispr, crispr) if not part.empty]
         if not parts:
