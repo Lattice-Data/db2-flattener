@@ -156,7 +156,7 @@ def test_write_splits_samples_and_guides_by_gm_set(tmp_path, monkeypatch):
         assert (geo / f"{label}_guide_metadata.csv").is_file()
 
 
-def test_versions_resolve_independently_per_kind_and_set(tmp_path, monkeypatch, capsys):
+def test_versions_resolve_independently_per_kind_and_set(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
