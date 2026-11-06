@@ -71,6 +71,7 @@ def test_create_dataframe_flattens_tabular_file_fields():
                 "raw_matrix_files": [
                     {
                         "@id": RMF_ID,
+                        "uuid": "uuid-rmf1",
                         "aliases": ["lab:rmf1.h5"],
                         "samples": [],
                         "sequence_files": [],
@@ -111,6 +112,7 @@ def test_create_dataframe_joins_multiple_tabular_files():
                 "raw_matrix_files": [
                     {
                         "@id": RMF_ID,
+                        "uuid": "uuid-rmf1",
                         "aliases": ["lab:rmf1.h5"],
                         "samples": [],
                         "tabular_files": [GUIDE_FILE, other],

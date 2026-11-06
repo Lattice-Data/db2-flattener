@@ -1,7 +1,7 @@
 """
 SRA file sheet: one row per CRO group × library, keyed on the library's
-CRO_group_identifier under the name 'sample_name' and the cleaned library
-alias under 'library_ID'. library_strategy, library_source, and
+CRO_group_identifier under the name 'sample_name', with 'library_ID' that
+identifier plus a feature-type suffix. library_strategy, library_source, and
 library_selection are derived from feature_types. library_layout is derived
 from sequence_file_sets_run_cardinality. platform is derived from
 sequence_file_sets_sequencing_platform; instrument_model is that same
@@ -189,7 +189,7 @@ def test_duplicate_rmf_rows_for_the_same_library_collapse_to_one():
 
     assert len(sra_df) == 1
     assert sra_df.loc[0, "sample_name"] == "LIB_A"
-    assert sra_df.loc[0, LIBRARY_ID_COLUMN] == "LIB_A_GEX"
+    assert sra_df.loc[0, LIBRARY_ID_COLUMN] == "LIB_A"
     assert pd.isna(sra_df.loc[0, LIBRARY_STRATEGY_COLUMN])
     assert pd.isna(sra_df.loc[0, LIBRARY_SOURCE_COLUMN])
     assert pd.isna(sra_df.loc[0, LIBRARY_SELECTION_COLUMN])
@@ -221,6 +221,7 @@ def test_rows_with_no_library_group_are_dropped(capsys):
                 "/droplet_based_libraries/a/",
                 "/droplet_based_libraries/b/",
             ],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
         }
     )
 
@@ -231,12 +232,13 @@ def test_rows_with_no_library_group_are_dropped(capsys):
     assert "dropping 1 of 2 MAIN row(s)" in capsys.readouterr().out
 
 
-def test_library_id_strips_the_lab_prefix():
+def test_library_id_does_not_read_the_alias():
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_aliases": [["some-other-lab:LIB_A_GEX"]],
+            "droplet_based_libraries_aliases": [["some-other-lab:something_else"]],
             "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
         }
     )
 
@@ -245,27 +247,300 @@ def test_library_id_strips_the_lab_prefix():
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX"]
 
 
-def test_missing_aliases_column_omits_library_id(capsys):
+def test_library_without_atid_dedupes_on_uuid():
+    """A group's GEX and CRISPR libraries stay two rows when neither has an @id."""
     main_df = pd.DataFrame(
         {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 3,
+            "droplet_based_libraries_uuid": ["uuid-gex", "uuid-gex", "uuid-cri"],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
         }
     )
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df["sample_name"]) == ["LIB_A"]
-    assert LIBRARY_ID_COLUMN not in sra_df.columns
-    assert LIBRARY_STRATEGY_COLUMN in sra_df.columns
-    assert LIBRARY_SOURCE_COLUMN in sra_df.columns
-    assert LIBRARY_SELECTION_COLUMN in sra_df.columns
-    assert LIBRARY_LAYOUT_COLUMN in sra_df.columns
-    assert PLATFORM_COLUMN in sra_df.columns
-    assert INSTRUMENT_MODEL_COLUMN in sra_df.columns
-    assert FILETYPE_COLUMN in sra_df.columns
-    assert TITLE_COLUMN in sra_df.columns
-    assert "no library aliases column" in capsys.readouterr().out
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
+
+
+def test_library_id_takes_the_multiplexing_suffix_from_its_method():
+    main_df = pd.DataFrame(
+        {
+            "plate_based_libraries_CRO_group_identifier": ["PLATE_1", "PLATE_1"],
+            "plate_based_libraries_@id": ["/plate_based_libraries/a/", "/plate_based_libraries/b/"],
+            "plate_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["Multiplexing Capture"],
+            ],
+            "plate_based_libraries_multiplexing_methods": [
+                ["combinatorial indexing"],
+                ["combinatorial indexing"],
+            ],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["PLATE_1_GEX", "PLATE_1_hash_oligo"]
+
+
+# duplicate library_ID warning
+
+
+def test_libraries_sharing_a_library_id_warn(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/111/",
+                "/droplet_based_libraries/222/",
+            ],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
+            "sequence_file_sets_CRO_order": ["ORD-1", "ORD-1"],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert (
+        '====WARNING==== library_ID "G1_GEX" is shared by 2 libraries in group G1 (Gene Expression):\n'
+        "  /droplet_based_libraries/111/ (CRO order ORD-1)\n"
+        "  /droplet_based_libraries/222/ (CRO order ORD-1)"
+    ) in capsys.readouterr().out
+
+
+def test_shared_library_id_without_cro_order(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/111/",
+                "/droplet_based_libraries/222/",
+            ],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert "  /droplet_based_libraries/111/ (no CRO order)" in capsys.readouterr().out
+
+
+def test_one_library_on_two_files_does_not_warn(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/111/"] * 2,
+            "droplet_based_libraries_feature_types": [["Gene Expression"]] * 2,
+            "sequence_file_sets_CRO_order": ["ORD-1", "ORD-2"],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert "is shared by" not in capsys.readouterr().out
+
+
+def test_gex_and_crispr_libraries_in_one_group_do_not_warn(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["G1", "G1"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/gex/",
+                "/droplet_based_libraries/cri/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert "is shared by" not in capsys.readouterr().out
+
+
+# _library_id_from_group
+
+
+def test_library_id_joins_gex_and_hash_oligo():
+    library_id = DB2Flattener._library_id_from_group(
+        "G", ["Gene Expression", "Multiplexing Capture"], ["combinatorial indexing"]
+    )
+
+    assert library_id == "G_GEX_hash_oligo"
+
+
+def test_library_id_joins_adt_and_hto():
+    library_id = DB2Flattener._library_id_from_group(
+        "G", ["Antibody Capture", "Multiplexing Capture"], ["antibody hashing"]
+    )
+
+    assert library_id == "G_ADT_HTO"
+
+
+def test_multiplexing_capture_alone_gets_hto():
+    library_id = DB2Flattener._library_id_from_group(
+        "G", ["Multiplexing Capture"], ["probe barcoding", "antibody hashing"]
+    )
+
+    assert library_id == "G_HTO"
+
+
+def test_library_id_suffix_order_ignores_list_order():
+    library_id = DB2Flattener._library_id_from_group(
+        "G",
+        ["Multiplexing Capture", "CRISPR Guide Capture", "Gene Expression"],
+        ["antibody hashing"],
+    )
+
+    assert library_id == "G_GEX_CRI_HTO"
+
+
+def test_multiplexing_capture_with_unmapped_method_warns(capsys):
+    library_id = DB2Flattener._library_id_from_group(
+        "G", ["Gene Expression", "Multiplexing Capture"], ["probe barcoding"]
+    )
+
+    assert library_id == "G_GEX"
+    assert "Multiplexing Capture library G needs exactly one of" in capsys.readouterr().out
+
+
+def test_multiplexing_capture_with_both_methods_warns(capsys):
+    library_id = DB2Flattener._library_id_from_group(
+        "G", ["Multiplexing Capture"], ["antibody hashing", "combinatorial indexing"]
+    )
+
+    assert library_id == "G"
+    assert "needs exactly one of" in capsys.readouterr().out
+
+
+def test_unmapped_feature_type_warns(capsys):
+    library_id = DB2Flattener._library_id_from_group("G", ["Gene Expression", "Something New"])
+
+    assert library_id == "G_GEX"
+    assert "['Something New'] with no library ID suffix" in capsys.readouterr().out
+
+
+def test_library_id_without_group_is_none():
+    assert DB2Flattener._library_id_from_group(None, ["Gene Expression"]) is None
+
+
+def unmapped_feature_main_df(rows=3):
+    """
+    One library with an unmapped feature type, on `rows` raw matrix files.
+
+    MAIN carries one row per (raw matrix file, library), so this is what a
+    library sequenced across several raw matrix files looks like: the same
+    library repeated, which is what used to warn once per row.
+    """
+    return pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * rows,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"] * rows,
+            "droplet_based_libraries_feature_types": [["Gene Expression", "Something New"]] * rows,
+        }
+    )
+
+
+def test_unmapped_feature_type_warns_once_per_library_not_once_per_row(capsys):
+    sra_df = make_flattener().create_sra_files_dataframe(unmapped_feature_main_df(rows=3))
+
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX"]
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+
+def test_multiplexing_warning_is_also_once_per_library(capsys):
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_MUX"] * 3,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/mux/"] * 3,
+            "droplet_based_libraries_feature_types": [["Multiplexing Capture"]] * 3,
+            "droplet_based_libraries_multiplexing_methods": [["probe barcoding"]] * 3,
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert capsys.readouterr().out.count("needs exactly one of") == 1
+
+
+def test_each_bad_library_still_warns(capsys):
+    """Deduplication is per library, so two bad libraries are two warnings."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A", "LIB_B", "LIB_B"],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/b/",
+                "/droplet_based_libraries/b/",
+            ],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression", "Something New"],
+                ["Gene Expression", "Something New"],
+                ["Gene Expression", "Another New"],
+                ["Gene Expression", "Another New"],
+            ],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    out = capsys.readouterr().out
+    assert out.count("with no library ID suffix") == 2
+    assert "library LIB_A has feature type(s) ['Something New']" in out
+    assert "library LIB_B has feature type(s) ['Another New']" in out
+
+
+def test_feature_types_listed_in_another_order_are_one_library(capsys):
+    """The dedup key sorts, because _library_id_from_group ignores list order."""
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"] * 2,
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression", "Something New"],
+                ["Something New", "Gene Expression"],
+            ],
+        }
+    )
+
+    make_flattener().create_sra_files_dataframe(main_df)
+
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+
+def test_library_ids_passed_in_are_used_instead_of_rebuilt(capsys):
+    """
+    What flatten_matrix_file_set does: build the ids once, hand them to both
+    sheets. The second sheet then re-warns about nothing.
+    """
+    flattener = make_flattener()
+    main_df = unmapped_feature_main_df(rows=3)
+    library_ids = flattener._library_ids(main_df)
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+    sra_df = flattener.create_sra_files_dataframe(main_df, library_ids=library_ids)
+
+    assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX"]
+    assert "with no library ID suffix" not in capsys.readouterr().out
+
+
+def test_passing_library_ids_does_not_change_the_sheet():
+    main_df = unmapped_feature_main_df(rows=3)
+    built_here = make_flattener().create_sra_files_dataframe(main_df)
+
+    flattener = make_flattener()
+    passed_in = flattener.create_sra_files_dataframe(
+        main_df, library_ids=flattener._library_ids(main_df)
+    )
+
+    pd.testing.assert_frame_equal(built_here, passed_in)
 
 
 def test_library_strategy_maps_feature_types():
@@ -424,6 +699,7 @@ def _assert_no_title_source_cols(sra_df):
     leaked = [
         "samples",
         "raw_file_samples",
+        "raw_file_sample_uuids",
         "_feature_types",
         "sequence_file_sets_run_cardinality",
         "sequence_file_sets_sequencing_platform",
@@ -480,6 +756,29 @@ def test_title_pooled_and_strategy():
 
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; pooled; CRISPR knockout screen"]
     _assert_no_title_source_cols(sra_df)
+
+
+def test_title_pooled_for_samples_sharing_a_name():
+    main_df = title_main_df(
+        raw_file_samples=["Heart"],
+        raw_file_sample_uuids=["uuid-s1; uuid-s2"],
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; pooled"]
+    _assert_no_title_source_cols(sra_df)
+
+
+def test_title_not_pooled_for_one_sample_uuid():
+    main_df = title_main_df(
+        raw_file_samples=["sample1"],
+        raw_file_sample_uuids=["uuid-s1"],
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq"]
 
 
 def test_title_joins_distinct_summaries_across_duplicate_rows():
@@ -613,6 +912,7 @@ def test_barcode_column_maps_library_samples():
         {
             "@id": "/tissues/s1/",
             "aliases": ["lab:s1"],
+            "sample_name": "Sample 1",
             "multiplexing_barcodes": ["BC001"],
         }
     ]
@@ -628,7 +928,7 @@ def test_barcode_column_maps_library_samples():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[BARCODE_COLUMN]) == ["s1 : BC001"]
+    assert list(sra_df[BARCODE_COLUMN]) == ["Sample 1 : BC001"]
     assert "sample_name: hash_index" not in sra_df.columns
 
 

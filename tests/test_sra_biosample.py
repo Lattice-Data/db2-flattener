@@ -73,10 +73,12 @@ def main_frame(columns):
     return frame
 
 
-def sample(alias, barcodes, lab="alex-marson"):
+def sample(name, barcodes, lab="alex-marson"):
+    """A library's embedded sample, after create_dataframe has added sample_name."""
     return {
-        "@id": f"/tissues/{alias}/",
-        "aliases": [f"{lab}:{alias}"],
+        "@id": f"/tissues/{name}/",
+        "aliases": [f"{lab}:alias-{name}"],
+        "sample_name": name,
         "multiplexing_barcodes": barcodes,
     }
 
@@ -100,7 +102,7 @@ FOUR_SAMPLES_MAP = (
 # _sample_probe_barcode_map
 
 
-def test_barcode_map_sorts_by_alias_and_strips_lab_prefix():
+def test_barcode_map_sorts_by_sample_name_and_ignores_alias():
     assert make_flattener()._sample_probe_barcode_map(FOUR_SAMPLES) == FOUR_SAMPLES_MAP
 
 
@@ -117,7 +119,10 @@ def test_barcode_map_keeps_sample_with_no_barcodes_when_another_has_some():
         pytest.param(float("nan"), id="nan"),
         pytest.param([sample("s1", []), sample("s2", None)], id="no-sample-has-barcodes"),
         pytest.param(["/tissues/s1/", "/tissues/s2/"], id="bare-id-strings"),
-        pytest.param([{"multiplexing_barcodes": ["BC001+CR001"]}], id="no-alias"),
+        pytest.param(
+            [{"aliases": ["lab:s1"], "multiplexing_barcodes": ["BC001+CR001"]}],
+            id="no-sample-name",
+        ),
     ],
 )
 def test_barcode_map_returns_none(library_samples):
@@ -161,6 +166,7 @@ def test_droplet_run_is_one_row_per_library(capsys):
     # and every one of those is present even where MAIN has nothing to fill it
     assert list(sra_df.columns) == [
         "sample_name",
+        "library_id",
         ORGANISM_COLUMN,
         BARCODE_COLUMN,
         ISOLATE_COLUMN,
@@ -305,24 +311,52 @@ def test_library_id_is_scoped_to_each_group():
     assert list(sra_df["library_id"]) == ["LIB_A_GEX, LIB_A_CRI", "LIB_B_GEX, LIB_B_CRI"]
 
 
-def test_library_id_strips_the_lab_prefix():
+def test_library_ids_passed_in_are_used_instead_of_rebuilt(capsys):
+    """
+    What flatten_matrix_file_set does: both SRA sheets key off the same ids, so
+    it builds them once. Building them is what warns about unmapped feature
+    types, so the sheet given the ids must not quietly build its own.
+    """
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * 2,
+            "droplet_based_libraries_feature_types": [["Gene Expression", "Something New"]] * 2,
+        }
+    )
+    library_ids = flattener._library_ids(main_df)
+    assert capsys.readouterr().out.count("with no library ID suffix") == 1
+
+    sra_df = flattener.create_sra_biosample_dataframe(main_df, library_ids=library_ids)
+
+    assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
+    assert "with no library ID suffix" not in capsys.readouterr().out
+
+
+def test_passing_library_ids_does_not_change_the_sheet():
+    main_df = library_id_main_df()
+    built_here = make_flattener().create_sra_biosample_dataframe(main_df)
+
+    flattener = make_flattener()
+    passed_in = flattener.create_sra_biosample_dataframe(
+        main_df, library_ids=flattener._library_ids(main_df)
+    )
+
+    pd.testing.assert_frame_equal(built_here, passed_in)
+
+
+def test_library_id_does_not_read_the_alias():
     main_df = main_frame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_aliases": [["some-other-lab:LIB_A_GEX"]],
+            "droplet_based_libraries_aliases": [["some-other-lab:something_else"]],
+            "droplet_based_libraries_feature_types": [["Gene Expression"]],
         }
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
     assert list(sra_df["library_id"]) == ["LIB_A_GEX"]
-
-
-def test_missing_aliases_column_omits_library_id(capsys):
-    sra_df = make_flattener().create_sra_biosample_dataframe(droplet_main_df())
-
-    assert "library_id" not in sra_df.columns
-    assert "no library aliases column" in capsys.readouterr().out
 
 
 def test_library_rows_disagreeing_on_the_map_collapse_to_a_list():
@@ -372,6 +406,7 @@ def test_key_only_main_df_collapses_without_aggregating():
 
     assert list(sra_df.columns) == [
         "sample_name",
+        "library_id",
         ISOLATE_COLUMN,
         AGE_COLUMN,
         SEX_COLUMN,

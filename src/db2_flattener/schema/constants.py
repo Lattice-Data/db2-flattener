@@ -159,7 +159,10 @@ PROP_MAP_BIOHUB = {
 
 PROP_MAP_SAMPLES = {
     "raw_matrix_file_alias": "processed data file",
-    "sample_alias": "pre_pooled_sample",
+    "tissues_sample_name": "pre_pooled_sample",
+    "cell_lines_sample_name": "pre_pooled_sample",
+    "organoids_sample_name": "pre_pooled_sample",
+    "primary_cell_cultures_sample_name": "pre_pooled_sample",
     "human_donors_cxg_donor_id": "donor_id",
     "non_human_donors_cxg_donor_id": "donor_id",
     "human_donors_sex": "donor_sex",
@@ -233,6 +236,22 @@ SRA_FILE_LIBRARY_SELECTION_MAP = {
     "CRISPR Guide Capture": "PCR",
     "Multiplexing Capture": "OTHER",
     "ATAC": "OTHER",
+}
+
+# library_ID / library_id is the CRO group identifier plus these suffixes,
+# joined with '_' in this order
+SRA_LIBRARY_ID_SUFFIX_MAP = {
+    "Gene Expression": "GEX",
+    "CRISPR Guide Capture": "CRI",
+    "Antibody Capture": "ADT",
+    "ATAC": "ATAC",
+}
+
+# Multiplexing Capture takes its suffix from the library's multiplexing_methods,
+# placed after the feature-type suffixes
+SRA_LIBRARY_ID_MULTIPLEXING_SUFFIX_MAP = {
+    "antibody hashing": "HTO",
+    "combinatorial indexing": "hash_oligo",
 }
 
 SRA_FILE_LIBRARY_LAYOUT_MAP = {

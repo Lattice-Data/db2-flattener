@@ -841,6 +841,64 @@ def test_create_geo_dataframe_title_pooled_from_joined_samples():
     assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled"]
 
 
+def test_create_geo_dataframe_title_pooled_for_samples_sharing_a_name():
+    """Two samples named 'Heart' are still two samples: they differ by uuid."""
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                raw_file_samples="Heart",
+                raw_file_sample_uuids="uuid-s1; uuid-s2",
+                tissues_suspension_type="cell",
+            )
+        ]
+    )
+
+    geo_df = make_flattener().create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled"]
+    assert list(geo_df["samples"]) == ["Heart"]
+    assert "raw_file_sample_uuids" not in geo_df.columns
+
+
+def test_create_geo_dataframe_title_not_pooled_for_one_sample_uuid():
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                raw_file_samples="sample1",
+                raw_file_sample_uuids="uuid-s1",
+                tissues_suspension_type="cell",
+            )
+        ]
+    )
+
+    geo_df = make_flattener().create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["libA scRNA-seq"]
+
+
+def test_create_geo_dataframe_title_pooled_across_a_librarys_files():
+    """One sample per file, but two files for the library, is still a pool."""
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                raw_file_samples="sample1",
+                raw_file_sample_uuids="uuid-s1",
+                tissues_suspension_type="cell",
+            ),
+            gex_row(
+                raw_matrix_file_alias="libA-2.h5",
+                raw_file_samples="sample2",
+                raw_file_sample_uuids="uuid-s2",
+                tissues_suspension_type="cell",
+            ),
+        ]
+    )
+
+    geo_df = make_flattener().create_geo_dataframe(main_df)
+
+    assert list(geo_df["*title"]) == ["libA scRNA-seq; pooled"]
+
+
 def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
     flattener = make_flattener()
     main_df = pd.DataFrame(

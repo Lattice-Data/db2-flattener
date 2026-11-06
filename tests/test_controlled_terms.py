@@ -194,6 +194,7 @@ def _tissue(sample_id="/tissues/t1/", alias="lab:sample1", **overrides):
     tissue = {
         "@id": sample_id,
         "@type": ["Tissue"],
+        "uuid": f"uuid-{sample_id.strip('/').split('/')[-1]}",
         "aliases": [alias],
         "preservation_method": "frozen",
     }
@@ -213,6 +214,7 @@ def _lib():
 def _rmf(sample_id="/tissues/t1/", rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1"):
     return {
         "@id": rmf_id,
+        "uuid": f"uuid-{rmf_id.strip('/').split('/')[-1]}",
         "aliases": [alias],
         "samples": [sample_id],
     }
@@ -328,8 +330,18 @@ def test_unresolvable_term_stays_empty():
     """
     df = _main_df(
         [
-            _tissue(sample_id="/tissues/t1/", alias="lab:s1", diseases=[DIABETES["@id"]]),
-            _tissue(sample_id="/tissues/t2/", alias="lab:s2", diseases=[UNRESOLVABLE]),
+            _tissue(
+                sample_id="/tissues/t1/",
+                alias="lab:s1",
+                sample_name="s1",
+                diseases=[DIABETES["@id"]],
+            ),
+            _tissue(
+                sample_id="/tissues/t2/",
+                alias="lab:s2",
+                sample_name="s2",
+                diseases=[UNRESOLVABLE],
+            ),
         ]
     ).set_index("raw_file_samples")
 
@@ -392,6 +404,7 @@ def test_multiplexed_file_keeps_every_sample_term_as_a_dict():
     t2 = _tissue("/tissues/t2/", "lab:s2", sample_terms=[DIABETES["@id"]])
     rmf = {
         "@id": "/raw_matrix_files/r1/",
+        "uuid": "uuid-r1",
         "aliases": ["lab:rmf1"],
         "samples": [t1["@id"], t2["@id"]],
     }
@@ -412,4 +425,4 @@ def test_multiplexed_file_keeps_every_sample_term_as_a_dict():
         "type 2 diabetes mellitus",
     ]
     assert len(sample_df) == 2
-    assert list(sample_df["sample_alias"]) == ["s1", "s2"]
+    assert list(sample_df["sample_alias"]) == [["lab:s1"], ["lab:s2"]]
