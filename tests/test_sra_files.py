@@ -80,7 +80,12 @@ def test_paired_libraries_each_get_a_row():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, OPTIONS_COLUMN, "file_size"]
+    assert list(sra_df.columns) == [
+        *SRA_FILE_COLUMNS,
+        OPTIONS_COLUMN,
+        "file_size",
+        "_sequence_file_set_uuids",
+    ]
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_A"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
     assert list(sra_df[DESIGN_DESCRIPTION_COLUMN]) == ["", ""]
@@ -622,7 +627,7 @@ def test_library_strategy_is_blank_when_feature_types_are_missing_or_unmapped():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "file_size"]
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "file_size", "_sequence_file_set_uuids"]
     assert sra_df[LIBRARY_STRATEGY_COLUMN].isna().all()
     assert sra_df[LIBRARY_SOURCE_COLUMN].isna().all()
     assert sra_df[LIBRARY_SELECTION_COLUMN].isna().all()
@@ -1162,7 +1167,12 @@ def test_filenames_from_one_s3_uri_basename():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "filename", "file_size"]
+    assert list(sra_df.columns) == [
+        *SRA_FILE_COLUMNS,
+        "filename",
+        "file_size",
+        "_sequence_file_set_uuids",
+    ]
     assert list(sra_df["filename"]) == ["R1.fastq.gz"]
     assert "filename2" not in sra_df.columns
     _assert_no_title_source_cols(sra_df)
@@ -1199,7 +1209,7 @@ def test_filenames_omitted_when_neither_source_column_exists():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "file_size"]
+    assert list(sra_df.columns) == [*SRA_FILE_COLUMNS, "file_size", "_sequence_file_set_uuids"]
     assert "filename" not in sra_df.columns
 
 

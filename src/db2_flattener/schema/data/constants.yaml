@@ -1047,7 +1047,7 @@ https://api.data.lattice-data.org/:
         submits_for: labs
   object_config_sha256: be398fe27daed73003fe5524c1e732ab56bd90829b9b5adca99da4f0206d4fb3
 https://lattice-api-dev.demo.lattice-data.org/:
-  date_parsed: '2026-10-27'
+  date_parsed: '2026-11-05'
   field_types:
     '@id':
       type: string
@@ -1199,6 +1199,8 @@ https://lattice-api-dev.demo.lattice-data.org/:
     matrix_file_sets:
       elements: string
       type: array
+    md5sum:
+      type: string
     multiplexing_barcodes:
       elements: string
       type: array
@@ -1245,6 +1247,8 @@ https://lattice-api-dev.demo.lattice-data.org/:
     run_cardinality:
       type: string
     s3_uri:
+      type: string
+    sample_name:
       type: string
     sample_procurement_interval:
       type: integer
@@ -1343,7 +1347,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
     viewing_groups:
       elements: string
       type: array
-  field_types_sha256: d6a8381c57ddd9339682a86e65b4b9ac98b72cc46dc4ecf418f4aad637eb16de
+  field_types_sha256: 6a7cc24d2d6cbb27e27d6f634d2be49f8fd58116bad0eaa204120abb748d288c
   object_config:
     access_keys:
       api_type: AccessKey
@@ -1390,6 +1394,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - multiplexing_barcodes
       - notes
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1668,6 +1673,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - notes
       - origin_cell_types
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1778,6 +1784,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - notes
       - passage_number
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -1821,6 +1828,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - is_multiplexed
       - lab
       - matrix_file_sets
+      - md5sum
       - no_file_available
       - notes
       - observation_count
@@ -1861,6 +1869,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - is_multiplexed
       - lab
       - matrix_file_sets
+      - md5sum
       - no_file_available
       - notes
       - observation_count
@@ -2031,6 +2040,7 @@ https://lattice-api-dev.demo.lattice-data.org/:
       - notes
       - orientation
       - preservation_method
+      - sample_name
       - sample_procurement_interval
       - sample_procurement_interval_units
       - sample_terms
@@ -2087,4 +2097,4 @@ https://lattice-api-dev.demo.lattice-data.org/:
       references:
         lab: labs
         submits_for: labs
-  object_config_sha256: b71464167f1e17ca348aa5bda8a13ce74d70792f4b8d6e5190b1804ab950b7be
+  object_config_sha256: 7941f02dbc7617350d74d0b4385907c86809f93e1dc1b205196000b8a6bb9154

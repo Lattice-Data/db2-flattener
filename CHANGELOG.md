@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Write `SRA/sra_sequence_fileset_setN.csv` alongside each `sra_file_setN.csv`:
+  one row per `library_ID` and SequenceFileSet uuid, repeating the library_ID
+  when it has several sets. Warn about libraries with no SequenceFileSet.
+- Lower the SRA set size cap from 5 TB to 4.8 TB to leave a safety margin.
+
 ## 1.0.1
 
 - Blank Control guide `intended_features_*` fields; warn when unexpected

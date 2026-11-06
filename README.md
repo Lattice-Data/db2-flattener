@@ -5,7 +5,7 @@
 
 Flattener utility for the [Lattice Database](https://data.lattice-data.org/).
 It gathers a MatrixFileSet from DB2 and writes MAIN, BIOHUB, GEO, SRA_BIOSAMPLE,
-SRA_FILE, SAMPLES, and GUIDE_METADATA CSVs.
+SRA_FILE, SRA_SEQUENCE_FILESET, SAMPLES, and GUIDE_METADATA CSVs.
 Ported from [lattice-tools](https://github.com/Lattice-Data/lattice-tools)
 `TOOLS-285-GEO-Flattener` at
 [`d4de994`](https://github.com/Lattice-Data/lattice-tools/commit/d4de994638e44e79c04dffed13e7a8b213955fd6).
@@ -78,8 +78,9 @@ Layout:
     demultiplexing_samples.csv           # omitted when empty; same alias column when present
     {gm_alias}_guide_metadata.csv        # copy of each BIOHUB guide template
   SRA/
-    sra_biosample_setN.csv               # paired with sra_file_setN; ≤5 TB per set
-    sra_file_setN.csv                    # sample_name groups packed under 5 TB
+    sra_biosample_setN.csv               # paired with sra_file_setN; ≤4.8 TB per set
+    sra_file_setN.csv                    # sample_name groups packed under 4.8 TB
+    sra_sequence_fileset_setN.csv        # library_ID, sequence_file_set_uuid; one row per set
   BIOHUB/
     samples_template_setN_v#.csv         # one per GeneticModification; set1 when none
     guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing
