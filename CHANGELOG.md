@@ -12,6 +12,11 @@
   template, mutually exclusive with `-s`.
 - `DB2Flattener.flatten_matrix_file_set` takes `biohub_versions` (latest `v#`
   per `(kind, set)`) or `biohub_version` (one version for all templates).
+- Removed internal helpers `resolve_biohub_version`,
+  `resolve_biohub_version_from_s3`, `versions_from_metadata_names` and
+  `next_biohub_version_from_versions` from `flatten/biohub_version.py`
+  (replaced by `latest_biohub_versions_from_s3`,
+  `latest_versions_from_metadata_names` and `next_biohub_version`).
 
 ## 1.0.1
 
