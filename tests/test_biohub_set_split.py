@@ -177,6 +177,33 @@ def test_versions_resolve_independently_per_kind_and_set(tmp_path, monkeypatch):
     assert (geo / "gm-b_guide_metadata.csv").is_file()
 
 
+def test_explicit_version_used_for_every_template(tmp_path, monkeypatch):
+    _freeze_time(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    flattener = _two_set_flattener()
+    result = flattener.flatten_matrix_file_set(UUID, biohub_version="v3")
+    biohub = Path(result) / "BIOHUB"
+
+    assert sorted(p.name for p in biohub.iterdir()) == [
+        "guide_template_set1_v3.csv",
+        "guide_template_set2_v3.csv",
+        "samples_template_set1_v3.csv",
+        "samples_template_set2_v3.csv",
+    ]
+
+
+def test_explicit_version_and_versions_map_rejected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    flattener = _two_set_flattener()
+    with pytest.raises(ValueError, match="only one of biohub_version or biohub_versions"):
+        flattener.flatten_matrix_file_set(
+            UUID, biohub_version="v3", biohub_versions={("samples", 1): 1}
+        )
+    assert not list(tmp_path.iterdir())
+
+
 def test_no_gms_uses_samples_set1_version(tmp_path, monkeypatch):
     _freeze_time(monkeypatch)
     monkeypatch.chdir(tmp_path)

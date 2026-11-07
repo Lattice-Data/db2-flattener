@@ -20,10 +20,10 @@ From the repository root:
 pip install -e ".[dev]"
 ```
 
-Pin a release (requires the `v2.0.0` tag on GitHub):
+Pin a release (requires the `v1.1.0` tag on GitHub):
 
 ```bash
-pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v2.0.0"
+pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v1.1.0"
 ```
 
 Check the running code with `db2-flattener --version`.
@@ -45,9 +45,15 @@ is written under a directory in the current working directory named
 MAIN, sorted and joined by `_`). If no CRO_order values are present, the
 directory is `MatrixFileSet_{uuid8}_{timestamp}`.
 
-`--s3-order-dir` / `-s` is required: the S3 URI of the order subdirectory.
-BIOHUB template versions are read from file names in `{order}/metadata/` and
-resolved **independently per template type and set**:
+Exactly one of these BIOHUB version flags is required:
+
+- `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; versions are
+  resolved per template type and set (below).
+- `--biohub-version` / `-b` — explicit version (`1` or `v1`) used for every
+  samples and guide template in the run; S3 is not checked.
+
+With `-s`, BIOHUB template versions are read from file names in
+`{order}/metadata/` and resolved **independently per template type and set**:
 
 - Only `samples_template_set{N}_v{M}.csv` and `guide_template_set{N}_v{M}.csv`
   count (case-insensitive). Names without a set number, or that otherwise
@@ -70,7 +76,7 @@ mutually exclusive overrides:
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
 db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
-python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
+python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -b 2
 db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/ --force-only-warning
 ```
 

@@ -21,6 +21,18 @@ BIOHUB_TEMPLATE_NAME_RE = re.compile(
 BIOHUB_TEMPLATE_KINDS = ("samples", "guide")
 
 
+def normalize_biohub_version(value: str) -> str:
+    """Accept ``3`` or ``v3`` and return ``v3``."""
+    text = str(value).strip()
+    if not text:
+        raise ValueError("biohub version must be a positive integer like 1 or v1")
+    if text.lower().startswith("v"):
+        text = text[1:].strip()
+    if not text.isdigit() or int(text) < 1:
+        raise ValueError(f"invalid biohub version {value!r}; expected e.g. 1 or v1")
+    return f"v{int(text)}"
+
+
 def latest_versions_from_metadata_names(names) -> dict[tuple[str, int], int]:
     """
     Map ``(kind, set_number)`` to the highest v# found among template basenames.

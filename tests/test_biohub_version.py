@@ -4,7 +4,27 @@ from db2_flattener.flatten.biohub_version import (
     latest_biohub_versions_from_s3,
     latest_versions_from_metadata_names,
     next_biohub_version,
+    normalize_biohub_version,
 )
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("1", "v1"),
+        ("v1", "v1"),
+        ("V3", "v3"),
+        (" 02 ", "v2"),
+    ],
+)
+def test_normalize_biohub_version(value, expected):
+    assert normalize_biohub_version(value) == expected
+
+
+@pytest.mark.parametrize("value", ["", "v", "v0", "0", "x1", "v1.2"])
+def test_normalize_biohub_version_rejects_invalid(value):
+    with pytest.raises(ValueError):
+        normalize_biohub_version(value)
 
 
 def test_latest_versions_tracks_kind_and_set_independently():

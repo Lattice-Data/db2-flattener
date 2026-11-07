@@ -12,13 +12,17 @@ class FakeFlattener:
     return_value = "ABC-123_20260814_095000"
     error = None
     last_biohub_versions = None
+    last_biohub_version = None
     last_audit_mode = None
 
     def __init__(self, connection, configs):
         pass
 
-    def flatten_matrix_file_set(self, uuid, *, biohub_versions=None, audit_mode="strict"):
+    def flatten_matrix_file_set(
+        self, uuid, *, biohub_versions=None, biohub_version=None, audit_mode="strict"
+    ):
         FakeFlattener.last_biohub_versions = biohub_versions
+        FakeFlattener.last_biohub_version = biohub_version
         FakeFlattener.last_audit_mode = audit_mode
         if self.error is not None:
             raise self.error
@@ -38,6 +42,7 @@ def _stub_cli(monkeypatch, flattener_cls=FakeFlattener, argv=None, latest_versio
     monkeypatch.setattr(cli, "load_and_return_constant_dicts", lambda mode: ({}, {}))
     monkeypatch.setattr(cli, "DB2Flattener", flattener_cls)
     FakeFlattener.last_biohub_versions = None
+    FakeFlattener.last_biohub_version = None
     FakeFlattener.last_audit_mode = None
     monkeypatch.setattr(
         "sys.argv",
@@ -61,6 +66,7 @@ def test_cli_success_prints_path(monkeypatch, capsys):
     assert "No BIOHUB templates in metadata/; all templates start at v1" in out
     assert "Success! Output directory created: ABC-123_20260814_095000" in out
     assert FakeFlattener.last_biohub_versions == {}
+    assert FakeFlattener.last_biohub_version is None
     assert FakeFlattener.last_audit_mode == "strict"
 
 
@@ -88,18 +94,38 @@ def test_cli_s3_error_exits_1(monkeypatch, capsys):
     assert "S3 order directory not found" in capsys.readouterr().out
 
 
-def test_cli_requires_s3_order_dir(monkeypatch):
+@pytest.mark.parametrize("value, expected", [("v3", "v3"), ("3", "v3")])
+def test_cli_biohub_version_skips_s3(monkeypatch, capsys, value, expected):
+    def no_s3(s3_order_dir):
+        raise AssertionError("S3 should not be listed when -b is given")
+
+    _stub_cli(monkeypatch, argv=["db2-flattener", "-u", "abc-uuid", "-b", value])
+    monkeypatch.setattr(cli, "latest_biohub_versions_from_s3", no_s3)
+    cli.main()
+    assert FakeFlattener.last_biohub_version == expected
+    assert FakeFlattener.last_biohub_versions is None
+    assert f"BIOHUB template version (all templates): {expected}" in capsys.readouterr().out
+
+
+def test_cli_invalid_biohub_version_exits_1(monkeypatch, capsys):
+    _stub_cli(monkeypatch, argv=["db2-flattener", "-u", "abc-uuid", "-b", "v0"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert "invalid biohub version" in capsys.readouterr().out
+
+
+def test_cli_requires_version_flag(monkeypatch):
     monkeypatch.setattr("sys.argv", ["db2-flattener", "-u", "abc-uuid"])
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
 
 
-@pytest.mark.parametrize("flag", ["-b", "--biohub-version"])
-def test_cli_rejects_removed_biohub_version_flag(monkeypatch, flag):
+def test_cli_rejects_both_version_flags(monkeypatch):
     monkeypatch.setattr(
         "sys.argv",
-        ["db2-flattener", "-u", "abc-uuid", "-s", ORDER, flag, "v1"],
+        ["db2-flattener", "-u", "abc-uuid", "-s", ORDER, "-b", "v1"],
     )
     with pytest.raises(SystemExit) as exc:
         cli.main()

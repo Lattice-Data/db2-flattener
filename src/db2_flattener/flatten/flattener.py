@@ -115,6 +115,7 @@ class DB2Flattener:
         matrix_file_set_uuid,
         *,
         biohub_versions: dict[tuple[str, int], int] | None = None,
+        biohub_version: str | None = None,
         audit_mode: str = "strict",
     ):
         """
@@ -127,9 +128,14 @@ class DB2Flattener:
         BIOHUB file is written as that value + 1, or ``v1`` when absent.
         None/empty → every template is ``v1``.
 
+        biohub_version (e.g. ``v3``), when given, is used for every BIOHUB
+        template instead. Mutually exclusive with biohub_versions.
+
         audit_mode controls whether ERROR/WARNING audits stop the run:
         ``strict`` (default), ``warnings_ok``, or ``all_ok``.
         """
+        if biohub_version is not None and biohub_versions is not None:
+            raise ValueError("provide only one of biohub_version or biohub_versions")
         print(f"Processing MatrixFileSet {matrix_file_set_uuid}")
 
         # Gather all data
@@ -200,6 +206,7 @@ class DB2Flattener:
             biohub_samples,
             complete_data,
             biohub_versions=biohub_versions,
+            biohub_version=biohub_version,
         )
 
         # Create GEO DataFrame from main DataFrame
@@ -2185,19 +2192,27 @@ class DB2Flattener:
         complete_data,
         *,
         biohub_versions: dict[tuple[str, int], int] | None = None,
+        biohub_version: str | None = None,
     ):
         """Write BIOHUB samples/guide templates, split by GeneticModification set.
 
         Each file's v# is resolved independently per type and set from
-        ``biohub_versions`` (see ``next_biohub_version``).
+        ``biohub_versions`` (see ``next_biohub_version``), unless
+        ``biohub_version`` is given, which is then used for every file.
         Guide frames are also copied to GEO as ``{alias}_guide_metadata.csv``.
         """
+
+        def template_version(kind, set_number):
+            if biohub_version is not None:
+                return biohub_version
+            return next_biohub_version(biohub_versions, kind, set_number)
+
         source = self.biohub_source_dataframe(main_df, biohub_samples)
         sets = self._biohub_guide_sets(complete_data)
 
         if not sets:
             biohub_df = self.create_biohub_dataframe(source)
-            samples_version = next_biohub_version(biohub_versions, "samples", 1)
+            samples_version = template_version("samples", 1)
             biohub_output = biohub_dir / f"samples_template_set1_{samples_version}.csv"
             print(f"Saving biohub DataFrame to {biohub_output}...")
             biohub_df.to_csv(biohub_output, index=False)
@@ -2231,7 +2246,7 @@ class DB2Flattener:
         for biohub_set, subset in set_subsets:
             set_n = biohub_set["set_number"]
             biohub_df = self.create_biohub_dataframe(subset)
-            samples_version = next_biohub_version(biohub_versions, "samples", set_n)
+            samples_version = template_version("samples", set_n)
             samples_output = biohub_dir / f"samples_template_set{set_n}_{samples_version}.csv"
             print(f"Saving biohub DataFrame to {samples_output}...")
             biohub_df.to_csv(samples_output, index=False)
@@ -2243,7 +2258,7 @@ class DB2Flattener:
             guide_df = self.create_guide_metadata_dataframe(file_info)
             if guide_df is None or guide_df.empty:
                 continue
-            guide_version = next_biohub_version(biohub_versions, "guide", set_n)
+            guide_version = template_version("guide", set_n)
             guide_output = biohub_dir / f"guide_template_set{set_n}_{guide_version}.csv"
             print(f"Saving guide metadata DataFrame to {guide_output}...")
             guide_df.to_csv(guide_output, index=False)
