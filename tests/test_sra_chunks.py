@@ -341,3 +341,86 @@ def test_write_sra_sequence_fileset_per_chunk(tmp_path):
         files = pd.read_csv(sra_dir / f"sra_file_set{n}.csv")
         assert "_sequence_file_set_uuids" not in files.columns
         assert "sequence_file_set_uuid" not in files.columns
+
+
+def _seq_file(name, size):
+    return {
+        "@id": f"/sequence_files/{name}/",
+        "sra_file_names": [f"{name}.fastq.gz"],
+        "file_size": size,
+    }
+
+
+def _seq_set(set_uuid, library_atid, *reads):
+    file_set = {
+        "@id": f"/sequence_file_sets/{set_uuid}/",
+        "uuid": set_uuid,
+        "library": library_atid,
+    }
+    for slot, name in zip(("read1", "read2"), reads, strict=False):
+        file_set[slot] = f"/sequence_files/{name}/"
+    return file_set
+
+
+def test_sequence_fileset_sheet_from_gathered_data_to_csv(tmp_path):
+    """Gathered sets → SRA file frame → chunked CSVs, with no stubbed steps."""
+    gex, cri = "/droplet_based_libraries/gex/", "/droplet_based_libraries/cri/"
+    complete_data = {
+        "libraries": {
+            "gex-uuid": {
+                "raw_matrix_files": [
+                    {
+                        "sequence_files": [_seq_file(n, 10) for n in ("g1", "g2", "g3")],
+                        "sequence_file_sets": [
+                            _seq_set("gex-set-b", gex, "g3"),
+                            _seq_set("gex-set-a", gex, "g1", "g2"),
+                        ],
+                    }
+                ]
+            },
+            "cri-uuid": {
+                "raw_matrix_files": [
+                    {
+                        "sequence_files": [_seq_file(n, 5) for n in ("c1", "c2")],
+                        "sequence_file_sets": [
+                            _seq_set("cri-set-a", cri, "c1"),
+                            _seq_set("cri-set-b", cri, "c2"),
+                        ],
+                    }
+                ]
+            },
+        },
+        "resolved_objects": {"SequenceFile": {}},
+    }
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_A"],
+            "droplet_based_libraries_@id": [gex, cri],
+            "droplet_based_libraries_feature_types": [
+                ["Gene Expression"],
+                ["CRISPR Guide Capture"],
+            ],
+            "sequence_files_sra_file_names": ["g1.fastq.gz; g2.fastq.gz; g3.fastq.gz", None],
+        }
+    )
+
+    flattener = make_flattener()
+    sets_df = flattener.create_sequence_file_set_dataframe(complete_data)
+    sra_files = flattener.create_sra_files_dataframe(main_df, sequence_file_set_df=sets_df)
+    sra_dir = tmp_path / "SRA"
+    sra_dir.mkdir()
+    flattener._write_sra_chunked_outputs(
+        sra_dir, sra_files, pd.DataFrame({"sample_name": ["LIB_A"]})
+    )
+
+    fileset = pd.read_csv(sra_dir / "sra_sequence_fileset_set1.csv")
+    assert list(fileset.columns) == ["library_ID", "sequence_file_set_uuid"]
+    assert sorted(fileset.values.tolist()) == [
+        ["LIB_A_CRI.1", "cri-set-a"],
+        ["LIB_A_CRI.2", "cri-set-b"],
+        ["LIB_A_GEX", "gex-set-a"],
+        ["LIB_A_GEX", "gex-set-b"],
+    ]
+    files = pd.read_csv(sra_dir / "sra_file_set1.csv")
+    assert set(fileset["library_ID"]) == set(files["library_ID"])
+    assert not (sra_dir / "sra_sequence_fileset_set2.csv").exists()
