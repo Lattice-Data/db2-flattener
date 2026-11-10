@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- With `--s3-order-dir` / `-s`, BIOHUB `samples_template` and `guide_template`
+  versions are resolved independently per type and set: each is the highest
+  `v#` found in `{order}/metadata/` for that type and set, plus 1 (or `v1`
+  when none).
+- Only `{samples|guide}_template_set{N}_v{M}.csv` names count; names without a
+  set number are ignored.
+- `--biohub-version` / `-b` is unchanged: one explicit version for every
+  template, mutually exclusive with `-s`.
+- `DB2Flattener.flatten_matrix_file_set` takes `biohub_versions` (latest `v#`
+  per `(kind, set)`) or `biohub_version` (one version for all templates).
+- Removed internal helpers `resolve_biohub_version`,
+  `resolve_biohub_version_from_s3`, `versions_from_metadata_names` and
+  `next_biohub_version_from_versions` from `flatten/biohub_version.py`
+  (replaced by `latest_biohub_versions_from_s3`,
+  `latest_versions_from_metadata_names` and `next_biohub_version`).
 - Write `SRA/sra_sequence_fileset_setN.csv` alongside each `sra_file_setN.csv`:
   one row per `library_ID` and SequenceFileSet uuid, repeating the library_ID
   when it has several sets. Warn about libraries with no SequenceFileSet.

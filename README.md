@@ -47,11 +47,23 @@ directory is `MatrixFileSet_{uuid8}_{timestamp}`.
 
 Exactly one of these BIOHUB version flags is required:
 
-- `--biohub-version` / `-b` — explicit version (`1` or `v1`)
-- `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; `v#` is taken from
-  `{order}/metadata/` (`samples_template(_set#)?_v#.csv` /
-  `guide_template(_set#)?_v#.csv`). Missing/empty metadata → `v1`; otherwise
-  highest found `v#` + 1.
+- `--s3-order-dir` / `-s` — S3 URI of the order subdirectory; versions are
+  resolved per template type and set (below).
+- `--biohub-version` / `-b` — explicit version (`1` or `v1`) used for every
+  samples and guide template in the run; S3 is not checked.
+
+With `-s`, BIOHUB template versions are read from file names in
+`{order}/metadata/` and resolved **independently per template type and set**:
+
+- Only `samples_template_set{N}_v{M}.csv` and `guide_template_set{N}_v{M}.csv`
+  count (case-insensitive). Names without a set number, or that otherwise
+  don't match, are ignored.
+- Each output is the highest `v#` found for that type and set, plus 1. If none
+  is found for that type and set, it is `v1`. Gaps are not filled.
+
+For example, with `samples_template_set1_v2.csv` and `guide_template_set1_v1.csv`
+in `metadata/`, the run writes `samples_template_set1_v3.csv` and
+`guide_template_set1_v2.csv`; a `set2` with no prior files gets `v1` for both.
 
 By default the run is **strict**: any ERROR or WARNING audit on gathered
 objects refuses flatten (exit 1) after printing category counts. Optional
@@ -62,10 +74,10 @@ mutually exclusive overrides:
 - `--force-all-audit` — continue even when ERROR or WARNING audits are present
 
 ```bash
-python flatten.py -u <matrix-file-set-uuid> -m db2_demo -b v1
+python flatten.py -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
 db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
 python -m db2_flattener -u <matrix-file-set-uuid> -m db2_demo -b 2
-db2-flattener -u <matrix-file-set-uuid> -m db2_demo -b v1 --force-only-warning
+db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/ --force-only-warning
 ```
 
 Layout:
@@ -82,8 +94,8 @@ Layout:
     sra_file_setN.csv                    # sample_name groups packed under 4.8 TB
     sra_sequence_fileset_setN.csv        # library_ID, sequence_file_set_uuid; one row per set
   BIOHUB/
-    samples_template_setN_v#.csv         # one per GeneticModification; set1 when none
-    guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing
+    samples_template_setN_v#.csv         # one per GeneticModification; set1 when none; own v#
+    guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing; own v#
 ```
 
 

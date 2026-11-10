@@ -265,7 +265,7 @@ def test_flatten_stops_on_audits_before_outputs(tmp_path, monkeypatch, capsys):
     f._validate_genetic_modification_aliases = lambda data: None
 
     with pytest.raises(ValueError, match="audits present"):
-        f.flatten_matrix_file_set("abc", biohub_version="v1", audit_mode="strict")
+        f.flatten_matrix_file_set("abc", audit_mode="strict")
 
     out = capsys.readouterr().out
     assert "WARNING audits:" in out
@@ -317,7 +317,7 @@ def test_sample_only_tissue_error_stops_strict_flatten(tmp_path, monkeypatch, ca
     assert counts["ERROR"] == {("Tissue", "missing developmental stage"): 1}
 
     with pytest.raises(ValueError, match="audits present"):
-        f.flatten_matrix_file_set("abc", biohub_version="v1", audit_mode="strict")
+        f.flatten_matrix_file_set("abc", audit_mode="strict")
 
     out = capsys.readouterr().out
     assert "ERROR audits:" in out
@@ -382,7 +382,7 @@ def test_stub_before_full_sample_audit_still_stops_strict_flatten(tmp_path, monk
     assert counts["ERROR"] == {("Tissue", "missing developmental stage"): 1}
 
     with pytest.raises(ValueError, match="audits present"):
-        f.flatten_matrix_file_set("abc", biohub_version="v1", audit_mode="strict")
+        f.flatten_matrix_file_set("abc", audit_mode="strict")
 
     out = capsys.readouterr().out
     assert "ERROR audits:" in out
@@ -405,7 +405,7 @@ def test_flatten_all_ok_writes_sample_and_sequence_audits_to_main(tmp_path, monk
     f._validate_genetic_modification_aliases = lambda data: None
     _stub_downstream_writers(f)
 
-    outdir = f.flatten_matrix_file_set("abc12345-uuid", biohub_version="v1", audit_mode="all_ok")
+    outdir = f.flatten_matrix_file_set("abc12345-uuid", audit_mode="all_ok")
 
     assert outdir is not None
     main_path = tmp_path / outdir / "MAIN.csv"
@@ -431,7 +431,7 @@ def test_flatten_all_ok_skips_empty_sample_and_sequence_audits(tmp_path, monkeyp
     f._validate_genetic_modification_aliases = lambda data: None
     _stub_downstream_writers(f)
 
-    outdir = f.flatten_matrix_file_set("abc12345-uuid", biohub_version="v1", audit_mode="all_ok")
+    outdir = f.flatten_matrix_file_set("abc12345-uuid", audit_mode="all_ok")
 
     assert outdir is not None
     main_df = pd.read_csv(tmp_path / outdir / "MAIN.csv")
@@ -454,9 +454,7 @@ def test_flatten_warnings_ok_writes_warning_audits_to_main(tmp_path, monkeypatch
     f._validate_genetic_modification_aliases = lambda data: None
     _stub_downstream_writers(f)
 
-    outdir = f.flatten_matrix_file_set(
-        "abc12345-uuid", biohub_version="v1", audit_mode="warnings_ok"
-    )
+    outdir = f.flatten_matrix_file_set("abc12345-uuid", audit_mode="warnings_ok")
 
     assert outdir is not None
     main_df = pd.read_csv(tmp_path / outdir / "MAIN.csv")
