@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0
+## Unreleased
 
 - With `--s3-order-dir` / `-s`, BIOHUB `samples_template` and `guide_template`
   versions are resolved independently per type and set: each is the highest
