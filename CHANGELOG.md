@@ -21,8 +21,10 @@
   one row per `library_ID` and SequenceFileSet uuid, repeating the library_ID
   when it has several sets. Warn about libraries with no SequenceFileSet.
 - Lower the SRA set size cap from 5 TB to 4.8 TB to leave a safety margin.
-- Warn when a SequenceFileSet's file slots and the raw matrix file's
-  `derived_from` SequenceFiles disagree, in either direction.
+- Warn when a SequenceFileSet's file slots and its library's gathered
+  `derived_from` SequenceFiles disagree: a slot file not in any `derived_from`,
+  a slot file missing its `sequence_file_sets` back-link, a file listing a set
+  with no slot for it, or a `derived_from` file that reaches no library.
 
 ## 1.0.1
 

@@ -463,7 +463,7 @@ def test_slot_file_outside_derived_from_warns(capsys):
     sfs_df = make_flattener().create_sequence_file_set_dataframe(data)
 
     out = capsys.readouterr().out
-    assert "====WARNING==== 1 SequenceFileSet slot file(s)" in out
+    assert "====WARNING==== 1 SequenceFileSet slot file(s) are not in any raw matrix" in out
     assert f"{SLOT_SET} index1: /sequence_files/i1/ (lab:sample_I1.fastq.gz)" in out
     assert "no slot pointing back" not in out
     # Filenames are unchanged: the unresolved I1 is still left out.
@@ -497,3 +497,62 @@ def test_slot_mismatch_seen_on_two_raw_files_warns_once(capsys):
     out = capsys.readouterr().out
     assert "====WARNING==== 1 SequenceFileSet slot file(s)" in out
     assert out.count(f"{SLOT_SET} index1: /sequence_files/i1/") == 1
+
+
+def _gathered(raw_files, extra=()):
+    """complete_data with resolved SequenceFiles as the gatherer leaves them."""
+    resolved = {sf["@id"]: sf for rf in raw_files for sf in rf["sequence_files"]}
+    resolved.update({sf["@id"]: sf for sf in extra})
+    return {
+        "libraries": {"lib-uuid": {"raw_matrix_files": raw_files}},
+        "resolved_objects": {"SequenceFile": resolved},
+    }
+
+
+def test_set_split_across_raw_files_of_one_library_is_quiet(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1", "r2")
+    data = _gathered(
+        [
+            {"sequence_files": [_linked_file("r1", SLOT_SET)], "sequence_file_sets": [file_set]},
+            {"sequence_files": [_linked_file("r2", SLOT_SET)], "sequence_file_sets": [file_set]},
+        ]
+    )
+
+    sfs_df = make_flattener().create_sequence_file_set_dataframe(data)
+
+    assert "====WARNING====" not in capsys.readouterr().out
+    assert sfs_df.loc[0, ["filename", "filename2"]].tolist() == ["r1.fastq.gz", "r2.fastq.gz"]
+
+
+def test_gathered_slot_file_without_back_link_names_the_link(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1", "r2")
+    r2 = {**_seq_file("r2", 1), "aliases": ["lab:r2"], "sequence_file_sets": []}
+    data = _gathered(
+        [{"sequence_files": [_linked_file("r1", SLOT_SET)], "sequence_file_sets": [file_set]}],
+        extra=[r2],
+    )
+
+    make_flattener().create_sequence_file_set_dataframe(data)
+
+    out = capsys.readouterr().out
+    assert "1 SequenceFileSet slot file(s) are in derived_from but do not list that set" in out
+    assert f"{SLOT_SET} read2: /sequence_files/r2/ (lab:r2)" in out
+    assert "not in any raw matrix" not in out
+    assert "reach no gathered library" in out
+    assert "/sequence_files/r2/ (lab:r2): sequence_file_sets none" in out
+
+
+def test_derived_from_file_reaching_no_library_warns(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1")
+    orphan = {**_seq_file("orphan", 1), "sequence_file_sets": ["/sequence_file_sets/gone/"]}
+    data = _gathered(
+        [{"sequence_files": [_linked_file("r1", SLOT_SET)], "sequence_file_sets": [file_set]}],
+        extra=[orphan],
+    )
+
+    make_flattener().create_sequence_file_set_dataframe(data)
+
+    out = capsys.readouterr().out
+    assert "====WARNING==== 1 derived_from SequenceFile(s) reach no gathered library" in out
+    assert "/sequence_files/orphan/: sequence_file_sets /sequence_file_sets/gone/" in out
+    assert "slot file(s)" not in out
