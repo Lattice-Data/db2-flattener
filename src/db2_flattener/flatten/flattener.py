@@ -1311,6 +1311,9 @@ class DB2Flattener:
         untrimmed_cram in that order. Each SequenceFile prefers sra_file_names,
         else the s3_uri basename.
         Intermediate only; not written as a CSV.
+
+        Cross-checks each set's slots against the raw matrix file's SequenceFiles
+        (its derived_from) in both directions and warns on mismatches.
         """
         if not complete_data:
             return pd.DataFrame()
@@ -1318,6 +1321,9 @@ class DB2Flattener:
         resolved = complete_data.get("resolved_objects") or {}
         seq_files_by_id = resolved.get("SequenceFile") or {}
         rows_by_set_id = {}
+        # Mismatch keys: (set @id, slot, file @id) → file label, and (set @id, file @id)
+        slot_files_not_gathered = {}
+        files_not_in_slots = {}
 
         for lib_data in (complete_data.get("libraries") or {}).values():
             for raw_file in lib_data.get("raw_matrix_files") or []:
@@ -1330,7 +1336,15 @@ class DB2Flattener:
                     if not isinstance(file_set, dict):
                         continue
                     set_id = file_set.get("@id")
-                    if not set_id or set_id in rows_by_set_id:
+                    if not set_id:
+                        continue
+                    self._cross_check_sequence_file_set_slots(
+                        file_set,
+                        local_files,
+                        slot_files_not_gathered,
+                        files_not_in_slots,
+                    )
+                    if set_id in rows_by_set_id:
                         continue
                     library_ref = file_set.get("library", "")
                     if isinstance(library_ref, dict):
@@ -1366,9 +1380,73 @@ class DB2Flattener:
                         row[col] = name
                     rows_by_set_id[set_id] = row
 
+        self._warn_sequence_file_set_slot_mismatches(slot_files_not_gathered, files_not_in_slots)
         if not rows_by_set_id:
             return pd.DataFrame()
         return pd.DataFrame(list(rows_by_set_id.values()))
+
+    @staticmethod
+    def _cross_check_sequence_file_set_slots(
+        file_set, local_files, slot_files_not_gathered, files_not_in_slots
+    ):
+        """
+        Record mismatches between a set's file slots and the raw matrix file's files.
+
+        local_files maps @id → SequenceFile for the files this raw matrix file was
+        derived from (and that link to this library). Two directions:
+        - a slot names a SequenceFile that is not among local_files, so the SRA
+          filenames for this row cannot include it;
+        - a local SequenceFile lists this set in sequence_file_sets, but none of the
+          set's slots names it.
+        """
+        set_id = file_set.get("@id")
+        slot_file_ids = set()
+        for slot in SEQUENCE_FILE_SET_FILE_SLOTS:
+            ref = file_set.get(slot)
+            if is_empty(ref):
+                continue
+            file_id = ref.get("@id") if isinstance(ref, dict) else ref
+            if not file_id:
+                continue
+            slot_file_ids.add(file_id)
+            if file_id not in local_files:
+                aliases = ref.get("aliases") if isinstance(ref, dict) else None
+                label = aliases[0] if isinstance(aliases, list) and aliases else file_id
+                slot_files_not_gathered.setdefault((set_id, slot, file_id), label)
+
+        for file_id, seq_file in local_files.items():
+            if file_id in slot_file_ids:
+                continue
+            set_refs = seq_file.get("sequence_file_sets") or []
+            if isinstance(set_refs, (str, dict)):
+                set_refs = [set_refs]
+            for set_ref in set_refs:
+                ref_id = set_ref.get("@id") if isinstance(set_ref, dict) else set_ref
+                if ref_id == set_id:
+                    files_not_in_slots.setdefault((set_id, file_id), None)
+                    break
+
+    @staticmethod
+    def _warn_sequence_file_set_slot_mismatches(slot_files_not_gathered, files_not_in_slots):
+        """Print one warning block per mismatch direction, sorted by set @id."""
+        if slot_files_not_gathered:
+            lines = [
+                f"====WARNING==== {len(slot_files_not_gathered)} SequenceFileSet slot file(s) "
+                "are not in the raw matrix file's derived_from; sra_sequence_fileset lists "
+                "their set, but sra_file_set filenames may leave them out:"
+            ]
+            for (set_id, slot, file_id), label in sorted(slot_files_not_gathered.items()):
+                name = "" if label == file_id else f" ({label})"
+                lines.append(f"  {set_id} {slot}: {file_id}{name}")
+            print("\n".join(lines))
+        if files_not_in_slots:
+            lines = [
+                f"====WARNING==== {len(files_not_in_slots)} SequenceFile(s) list a "
+                "SequenceFileSet in sequence_file_sets that has no slot pointing back:"
+            ]
+            for set_id, file_id in sorted(files_not_in_slots):
+                lines.append(f"  {set_id}: {file_id}")
+            print("\n".join(lines))
 
     @classmethod
     def _sequence_file_filenames(cls, seq_file: dict) -> list[str]:

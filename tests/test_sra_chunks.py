@@ -424,3 +424,76 @@ def test_sequence_fileset_sheet_from_gathered_data_to_csv(tmp_path):
     files = pd.read_csv(sra_dir / "sra_file_set1.csv")
     assert set(fileset["library_ID"]) == set(files["library_ID"])
     assert not (sra_dir / "sra_sequence_fileset_set2.csv").exists()
+
+
+def _slot_check_data(sequence_files, file_set):
+    return {
+        "libraries": {
+            "lib-uuid": {
+                "raw_matrix_files": [
+                    {"sequence_files": sequence_files, "sequence_file_sets": [file_set]}
+                ]
+            }
+        },
+        "resolved_objects": {"SequenceFile": {}},
+    }
+
+
+def _linked_file(name, set_id):
+    return {**_seq_file(name, 1), "sequence_file_sets": [set_id]}
+
+
+SLOT_SET = "/sequence_file_sets/s1/"
+
+
+def test_slot_cross_check_is_quiet_when_slots_match_files(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1", "r2")
+    data = _slot_check_data([_linked_file("r1", SLOT_SET), _linked_file("r2", SLOT_SET)], file_set)
+
+    make_flattener().create_sequence_file_set_dataframe(data)
+
+    assert "====WARNING====" not in capsys.readouterr().out
+
+
+def test_slot_file_outside_derived_from_warns(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1", "r2")
+    file_set["index1"] = {"@id": "/sequence_files/i1/", "aliases": ["lab:sample_I1.fastq.gz"]}
+    data = _slot_check_data([_linked_file("r1", SLOT_SET), _linked_file("r2", SLOT_SET)], file_set)
+
+    sfs_df = make_flattener().create_sequence_file_set_dataframe(data)
+
+    out = capsys.readouterr().out
+    assert "====WARNING==== 1 SequenceFileSet slot file(s)" in out
+    assert f"{SLOT_SET} index1: /sequence_files/i1/ (lab:sample_I1.fastq.gz)" in out
+    assert "no slot pointing back" not in out
+    # Filenames are unchanged: the unresolved I1 is still left out.
+    assert sfs_df.loc[0, "filename"] == "r1.fastq.gz"
+    assert "sample_I1.fastq.gz" not in sfs_df.iloc[0].tolist()
+
+
+def test_file_listing_a_set_without_a_slot_warns(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1")
+    data = _slot_check_data([_linked_file("r1", SLOT_SET), _linked_file("r2", SLOT_SET)], file_set)
+
+    make_flattener().create_sequence_file_set_dataframe(data)
+
+    out = capsys.readouterr().out
+    assert "====WARNING==== 1 SequenceFile(s) list a SequenceFileSet" in out
+    assert f"{SLOT_SET}: /sequence_files/r2/" in out
+    assert "slot file(s)" not in out
+
+
+def test_slot_mismatch_seen_on_two_raw_files_warns_once(capsys):
+    file_set = _seq_set("s1", "/droplet_based_libraries/gex/", "r1")
+    file_set["index1"] = "/sequence_files/i1/"
+    raw_file = {"sequence_files": [_linked_file("r1", SLOT_SET)], "sequence_file_sets": [file_set]}
+    data = {
+        "libraries": {"lib-uuid": {"raw_matrix_files": [raw_file, dict(raw_file)]}},
+        "resolved_objects": {"SequenceFile": {}},
+    }
+
+    make_flattener().create_sequence_file_set_dataframe(data)
+
+    out = capsys.readouterr().out
+    assert "====WARNING==== 1 SequenceFileSet slot file(s)" in out
+    assert out.count(f"{SLOT_SET} index1: /sequence_files/i1/") == 1
