@@ -82,15 +82,15 @@ def test_write_sra_chunked_outputs_pairs_biosample(tmp_path, monkeypatch):
     )
     flattener._write_sra_chunked_outputs(sra_dir, sra_files, biosample)
 
-    assert (sra_dir / "sra_file_set1.csv").is_file()
-    assert (sra_dir / "sra_biosample_set1.csv").is_file()
-    assert (sra_dir / "sra_file_set2.csv").is_file()
-    assert (sra_dir / "sra_biosample_set2.csv").is_file()
+    assert (sra_dir / "sra_file_set1.tsv").is_file()
+    assert (sra_dir / "sra_biosample_set1.tsv").is_file()
+    assert (sra_dir / "sra_file_set2.tsv").is_file()
+    assert (sra_dir / "sra_biosample_set2.tsv").is_file()
 
-    set1_files = pd.read_csv(sra_dir / "sra_file_set1.csv")
-    set1_bio = pd.read_csv(sra_dir / "sra_biosample_set1.csv")
-    set2_files = pd.read_csv(sra_dir / "sra_file_set2.csv")
-    set2_bio = pd.read_csv(sra_dir / "sra_biosample_set2.csv")
+    set1_files = pd.read_csv(sra_dir / "sra_file_set1.tsv", sep="\t")
+    set1_bio = pd.read_csv(sra_dir / "sra_biosample_set1.tsv", sep="\t")
+    set2_files = pd.read_csv(sra_dir / "sra_file_set2.tsv", sep="\t")
+    set2_bio = pd.read_csv(sra_dir / "sra_biosample_set2.tsv", sep="\t")
 
     assert "file_size" not in set1_files.columns
     assert list(set1_files["sample_name"]) == ["A", "A"]
@@ -116,7 +116,7 @@ def test_write_sra_drops_empty_filename_columns(tmp_path):
     biosample = pd.DataFrame({"sample_name": ["A", "B"]})
     flattener._write_sra_chunked_outputs(sra_dir, sra_files, biosample)
 
-    written = pd.read_csv(sra_dir / "sra_file_set1.csv")
+    written = pd.read_csv(sra_dir / "sra_file_set1.tsv", sep="\t")
     assert "filename" in written.columns
     assert "filename2" not in written.columns
     assert "filename3" not in written.columns
@@ -215,3 +215,50 @@ def test_non_crispr_counts_equal_sequence_file_set_sizes():
 
 def test_sra_chunk_max_bytes_is_five_tb():
     assert SRA_CHUNK_MAX_BYTES == 5 * 1000**4
+
+
+def test_write_sra_tsv_sanitizes_tabs_and_newlines(tmp_path):
+    """A stray tab or newline in Lattice free text must not break the TSV row."""
+    flattener = make_flattener()
+    sra_dir = tmp_path / "SRA"
+    sra_dir.mkdir()
+    sra_files = pd.DataFrame(
+        {
+            "sample_name": ["A", "B"],
+            "library_ID": ["A_GEX", "B_GEX"],
+            "title": ["clean title", "tabbed\ttitle"],
+            "file_size": [10, 10],
+        }
+    )
+    biosample = pd.DataFrame(
+        {
+            "sample_name": ["A", "B"],
+            "*biomaterial_provider": ["Lab A", "Lab B,\nStanford"],
+        }
+    )
+    flattener._write_sra_chunked_outputs(sra_dir, sra_files, biosample)
+
+    file_path = sra_dir / "sra_file_set1.tsv"
+    bio_path = sra_dir / "sra_biosample_set1.tsv"
+
+    # No quoting survives, so a naive tab-split parser reads the same columns.
+    for path, expected_cols in ((file_path, 3), (bio_path, 2)):
+        text = path.read_text()
+        assert '"' not in text
+        for line in text.splitlines():
+            assert len(line.split("\t")) == expected_cols
+
+    written_files = pd.read_csv(file_path, sep="\t")
+    written_bio = pd.read_csv(bio_path, sep="\t")
+    assert list(written_files["title"]) == ["clean title", "tabbed title"]
+    assert list(written_bio["*biomaterial_provider"]) == ["Lab A", "Lab B, Stanford"]
+
+
+def test_sanitize_leaves_clean_values_untouched():
+    from db2_flattener.utils import sanitize_tabular_dataframe
+
+    df = pd.DataFrame({"a": ["x, y", "z"], "n": [1, 2]})
+    out = sanitize_tabular_dataframe(df)
+    assert list(out["a"]) == ["x, y", "z"]
+    assert list(out["n"]) == [1, 2]
+    assert out["n"].dtype == df["n"].dtype
