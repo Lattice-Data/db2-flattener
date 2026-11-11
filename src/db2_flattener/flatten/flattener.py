@@ -1,3 +1,4 @@
+import csv
 import re
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -1460,18 +1461,21 @@ class DB2Flattener:
             else:
                 bio_chunk = pd.DataFrame()
 
+            # Sanitize first, then write unquoted: a literal '"' is written as-is
+            # rather than wrapped and doubled, and any tab or newline that got
+            # past the sanitizer raises instead of writing a corrupt row.
             write_files = sanitize_tabular_dataframe(write_files)
             bio_chunk = sanitize_tabular_dataframe(bio_chunk)
 
             file_output = sra_dir / f"sra_file_set{set_n}.tsv"
             bio_output = sra_dir / f"sra_biosample_set{set_n}.tsv"
             print(f"Saving SRA file DataFrame to {file_output}...")
-            write_files.to_csv(file_output, index=False, sep="\t")
+            write_files.to_csv(file_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
             print(f"✅ SRA file TSV file created: {file_output}")
             print(f"   Rows: {len(write_files)}")
             print(f"   Columns: {len(write_files.columns)}")
             print(f"Saving SRA/BioSample DataFrame to {bio_output}...")
-            bio_chunk.to_csv(bio_output, index=False, sep="\t")
+            bio_chunk.to_csv(bio_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
             print(f"✅ SRA/BioSample TSV file created: {bio_output}")
             print(f"   Rows: {len(bio_chunk)}")
             print(f"   Columns: {len(bio_chunk.columns)}")

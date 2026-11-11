@@ -479,9 +479,16 @@ def sanitize_tabular_text(val):
     ``preservation_method``, submitter-set CRO group identifiers) can carry a
     stray tab or newline from a paste. Written to a TSV those either corrupt
     the row or force pandas to quote the value, and the SRA templates do not
-    strip quotes. Empty cells and non-strings pass through untouched so dtypes
-    and blanks stay as they are.
+    strip quotes. List, tuple and set cells are sanitized element by element
+    and then rendered as the text pandas would write for them (``str(val)``);
+    stringifying first would not help, since ``repr`` turns a tab into a
+    literal backslash-t. Empty cells and other non-strings pass through
+    untouched so dtypes and blanks stay as they are.
     """
+    if isinstance(val, (list, tuple, set)):
+        if not val:
+            return val
+        return str(type(val)(sanitize_tabular_text(item) for item in val))
     if is_empty(val) or not isinstance(val, str):
         return val
     if not _TABULAR_BREAKING_CHARS.search(val):

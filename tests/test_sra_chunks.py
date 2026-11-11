@@ -262,3 +262,66 @@ def test_sanitize_leaves_clean_values_untouched():
     assert list(out["a"]) == ["x, y", "z"]
     assert list(out["n"]) == [1, 2]
     assert out["n"].dtype == df["n"].dtype
+
+
+def test_write_sra_tsv_keeps_quote_chars_and_list_cells_unquoted(tmp_path):
+    """A literal '"' or a list cell must reach the TSV as-is, never wrapped in quotes."""
+    flattener = make_flattener()
+    sra_dir = tmp_path / "SRA"
+    sra_dir.mkdir()
+    sra_files = pd.DataFrame(
+        {
+            "sample_name": ["A", "B", "C"],
+            "library_ID": ["A_GEX", "B_GEX", "C_GEX"],
+            "tissue": [["Peyer's patch", "ileum"], "liver", ["tabbed\tterm", "colon"]],
+            "file_size": [10, 10, 10],
+        }
+    )
+    biosample = pd.DataFrame(
+        {
+            "sample_name": ["A", "B", "C"],
+            "*biomaterial_provider": ['Dr. "J" Lab', "Lab B", "Lab C"],
+            "preservation_method": ['5" tube', "fresh", "frozen"],
+        }
+    )
+    flattener._write_sra_chunked_outputs(sra_dir, sra_files, biosample)
+
+    file_lines = (sra_dir / "sra_file_set1.tsv").read_text().splitlines()
+    bio_lines = (sra_dir / "sra_biosample_set1.tsv").read_text().splitlines()
+
+    # Naive tab-split, the way the NCBI templates read the sheet.
+    file_rows = [line.split("\t") for line in file_lines]
+    bio_rows = [line.split("\t") for line in bio_lines]
+    assert all(len(row) == 3 for row in file_rows)
+    assert all(len(row) == 3 for row in bio_rows)
+
+    assert file_rows[1][2] == "[\"Peyer's patch\", 'ileum']"
+    assert file_rows[2][2] == "liver"
+    assert file_rows[3][2] == "['tabbed term', 'colon']"
+    assert bio_rows[1][1] == 'Dr. "J" Lab'
+    assert bio_rows[1][2] == '5" tube'
+
+
+def test_write_sra_tsv_raises_if_tab_survives(tmp_path, monkeypatch):
+    """QUOTE_NONE is the backstop: an unsanitized tab fails the write loudly."""
+    import csv
+
+    import pytest
+
+    flattener = make_flattener()
+    sra_dir = tmp_path / "SRA"
+    sra_dir.mkdir()
+    monkeypatch.setattr("db2_flattener.flatten.flattener.sanitize_tabular_dataframe", lambda df: df)
+    sra_files = pd.DataFrame({"sample_name": ["A"], "title": ["bad\ttitle"], "file_size": [10]})
+    with pytest.raises(csv.Error):
+        flattener._write_sra_chunked_outputs(
+            sra_dir, sra_files, pd.DataFrame({"sample_name": ["A"]})
+        )
+
+
+def test_sanitize_stringifies_list_cells():
+    from db2_flattener.utils import sanitize_tabular_text
+
+    assert sanitize_tabular_text(["a\tb", "c"]) == "['a b', 'c']"
+    assert sanitize_tabular_text(["x", "y"]) == str(["x", "y"])
+    assert sanitize_tabular_text([]) == []
