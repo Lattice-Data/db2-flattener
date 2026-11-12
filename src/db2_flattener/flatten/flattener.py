@@ -171,6 +171,9 @@ class DB2Flattener:
             print("Error: No data gathered")
             return None
 
+        # Independent of audits and audit_mode: any deleted object is a hard stop.
+        self._enforce_no_deleted_objects(complete_data)
+
         print("Creating DataFrames...")
 
         # Fail before creating output dirs when any GM lacks exactly one alias.
@@ -3341,6 +3344,73 @@ class DB2Flattener:
             visit(value, None)
 
         yield from best.values()
+
+    def _collect_deleted_objects(self, complete_data):
+        """Return sorted (object_type, uuid, aliases) for every status 'deleted' object.
+
+        Independent of audits: walks all of ``complete_data`` (``resolved_objects``,
+        ``matrix_file_set``, ``libraries`` and everything nested) and picks up any
+        dict with an ``@id`` whose ``status`` is ``deleted``. Each ``@id`` is
+        reported once; link stubs carrying no ``status`` are ignored.
+        """
+        found = {}  # @id -> (object_type, uuid, aliases)
+
+        def consider(node, known_api_type=None):
+            obj_id = node.get("@id")
+            if not isinstance(obj_id, str) or not obj_id:
+                return
+            if node.get("status") != "deleted" or obj_id in found:
+                return
+            aliases = [str(a) for a in to_items(node.get("aliases"))]
+            found[obj_id] = (
+                known_api_type or self._api_type_for_object(node),
+                extract_uuid_from_id(obj_id),
+                aliases,
+            )
+
+        def visit(node, known_api_type=None):
+            if isinstance(node, dict):
+                consider(node, known_api_type)
+                for value in node.values():
+                    visit(value, None)
+            elif isinstance(node, (list, tuple)):
+                for item in node:
+                    visit(item, None)
+
+        data = complete_data or {}
+        resolved = data.get("resolved_objects") or {}
+        if isinstance(resolved, dict):
+            for api_type, by_id in resolved.items():
+                if isinstance(by_id, dict):
+                    for obj in by_id.values():
+                        visit(obj, api_type)
+                else:
+                    visit(by_id, api_type)
+        for key, value in data.items():
+            if key != "resolved_objects":
+                visit(value, None)
+
+        return sorted(found.values(), key=lambda row: (row[0], row[1]))
+
+    @staticmethod
+    def _print_deleted_objects(deleted) -> None:
+        """Print one row per deleted object: type | uuid | raw aliases."""
+        print("======")
+        print("DELETED objects:")
+        for object_type, uuid, aliases in deleted:
+            alias_text = ", ".join(aliases) if aliases else "(no aliases)"
+            print(f"  {object_type} | {uuid} | {alias_text}")
+        print("======")
+
+    def _enforce_no_deleted_objects(self, complete_data) -> None:
+        """Raise (after printing them) when any gathered object has status 'deleted'."""
+        deleted = self._collect_deleted_objects(complete_data)
+        if not deleted:
+            return
+        self._print_deleted_objects(deleted)
+        raise ValueError(
+            f"Refusing to flatten: {len(deleted)} gathered object(s) have status 'deleted'"
+        )
 
     def _collect_audit_category_counts(self, complete_data):
         """Count ERROR/WARNING audit categories by object type."""

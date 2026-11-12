@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Refuse flatten (exit 1) when any gathered object has `status: deleted`,
+  printing each object's type, UUID and raw aliases. Independent of audits and
+  not overridable by `--force-*` flags.
+- Every object fetch now always requests `@id`, `status` and `aliases`,
+  whatever the schema-derived field list contains, ControlledTerms included.
 - SRA outputs are now tab-separated: `SRA/sra_file_set{N}.tsv` and
   `SRA/sra_biosample_set{N}.tsv` replace the `.csv` files of the same names.
   These sheets routinely carry commas in free text (`*biomaterial_provider`,
