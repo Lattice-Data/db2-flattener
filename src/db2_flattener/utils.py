@@ -464,3 +464,46 @@ def normalize_guide_rna_file_refs(value):
         elif isinstance(item, str) and item.strip():
             refs.append({"@id": item})
     return refs
+
+
+# Characters that break a naive tab-split parser, such as the one behind the
+# NCBI SRA/BioSample submission templates.
+_TABULAR_BREAKING_CHARS = re.compile(r"[\t\r\n]+")
+
+
+def sanitize_tabular_text(val):
+    """
+    Collapse tabs and newlines in a cell to single spaces.
+
+    Lattice free-text fields (``*isolate``, ``*biomaterial_provider``,
+    ``preservation_method``, submitter-set CRO group identifiers) can carry a
+    stray tab or newline from a paste. Written to a TSV those either corrupt
+    the row or force pandas to quote the value, and the SRA templates do not
+    strip quotes. List, tuple and set cells are sanitized element by element
+    and then rendered as the text pandas would write for them (``str(val)``);
+    stringifying first would not help, since ``repr`` turns a tab into a
+    literal backslash-t. Empty cells and other non-strings pass through
+    untouched so dtypes and blanks stay as they are.
+    """
+    if isinstance(val, (list, tuple, set)):
+        if not val:
+            return val
+        return str(type(val)(sanitize_tabular_text(item) for item in val))
+    if is_empty(val) or not isinstance(val, str):
+        return val
+    if not _TABULAR_BREAKING_CHARS.search(val):
+        return val
+    return _TABULAR_BREAKING_CHARS.sub(" ", val).strip()
+
+
+def sanitize_tabular_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply sanitize_tabular_text to every object-dtype cell and to headers."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    for col in out.columns:
+        # object dtype on pandas 2, the dedicated str dtype on pandas 3.
+        if out[col].dtype == object or pd.api.types.is_string_dtype(out[col]):
+            out[col] = out[col].map(sanitize_tabular_text)
+    out.columns = [sanitize_tabular_text(c) for c in out.columns]
+    return out

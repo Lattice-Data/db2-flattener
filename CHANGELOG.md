@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- SRA outputs are now tab-separated: `SRA/sra_file_set{N}.tsv` and
+  `SRA/sra_biosample_set{N}.tsv` replace the `.csv` files of the same names.
+  These sheets routinely carry commas in free text (`*biomaterial_provider`,
+  joined donor stages, probe-barcode lists), which forced quoting on most rows;
+  tab-separated they need none.
+- Tabs, carriage returns and newlines in SRA cells are collapsed to single
+  spaces before writing (`sanitize_tabular_text` /
+  `sanitize_tabular_dataframe` in `utils.py`), so the output parses under the
+  naive tab-split the NCBI SRA/BioSample templates use. Other output files are
+  unchanged.
 - With `--s3-order-dir` / `-s`, BIOHUB `samples_template` and `guide_template`
   versions are resolved independently per type and set: each is the highest
   `v#` found in `{order}/metadata/` for that type and set, plus 1 (or `v1`

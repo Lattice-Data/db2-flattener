@@ -67,8 +67,8 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
     assert (outdir / "MAIN.csv").is_file()
     assert (outdir / "GEO" / "geo_metadata.csv").is_file()
     assert (outdir / "GEO" / "demultiplexing_samples.csv").is_file()
-    assert (outdir / "SRA" / "sra_biosample_set1.csv").is_file()
-    assert (outdir / "SRA" / "sra_file_set1.csv").is_file()
+    assert (outdir / "SRA" / "sra_biosample_set1.tsv").is_file()
+    assert (outdir / "SRA" / "sra_file_set1.tsv").is_file()
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
 
 
@@ -100,8 +100,8 @@ def test_missing_cro_order_falls_back_to_uuid(tmp_path, monkeypatch):
     assert result == outdir_name
     assert (outdir / "MAIN.csv").is_file()
     assert (outdir / "GEO" / "geo_metadata.csv").is_file()
-    assert (outdir / "SRA" / "sra_biosample_set1.csv").is_file()
-    assert (outdir / "SRA" / "sra_file_set1.csv").is_file()
+    assert (outdir / "SRA" / "sra_biosample_set1.tsv").is_file()
+    assert (outdir / "SRA" / "sra_file_set1.tsv").is_file()
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
 
 
