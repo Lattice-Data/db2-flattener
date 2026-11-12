@@ -32,7 +32,12 @@ def make_flattener(sample_df, *, cro_orders=None):
     f.create_sra_biosample_dataframe = lambda main, **kwargs: pd.DataFrame({"sample_name": ["s1"]})
     f.create_sequence_file_set_dataframe = lambda complete_data: pd.DataFrame()
     f.create_sra_files_dataframe = lambda main, **kwargs: pd.DataFrame(
-        {"sample_name": ["s1"], "library_ID": ["lib1"], "file_size": [0]}
+        {
+            "sample_name": ["s1"],
+            "library_ID": ["lib1"],
+            "file_size": [0],
+            "_sequence_file_set_uuids": [["sfs-uuid-1"]],
+        }
     )
     # No GeneticModifications → samples_template_set1_v1.csv
     f._biohub_guide_sets = lambda complete_data: []
@@ -69,6 +74,8 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
     assert (outdir / "GEO" / "demultiplexing_samples.csv").is_file()
     assert (outdir / "SRA" / "sra_biosample_set1.tsv").is_file()
     assert (outdir / "SRA" / "sra_file_set1.tsv").is_file()
+    fileset = pd.read_csv(outdir / "SRA" / "sra_sequence_fileset_set1.tsv", sep="\t")
+    assert fileset.values.tolist() == [["lib1", "sfs-uuid-1"]]
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
 
 
