@@ -74,7 +74,7 @@ def test_single_cro_order_names_output_dir(tmp_path, monkeypatch):
     assert (outdir / "GEO" / "demultiplexing_samples.csv").is_file()
     assert (outdir / "SRA" / "sra_biosample_set1.csv").is_file()
     assert (outdir / "SRA" / "sra_file_set1.csv").is_file()
-    fileset = pd.read_csv(outdir / "SRA" / "sra_sequence_fileset_set1.csv")
+    fileset = pd.read_csv(outdir / "SRA" / "sra_sequence_fileset_set1.tsv", sep="\t")
     assert fileset.values.tolist() == [["lib1", "sfs-uuid-1"]]
     assert (outdir / "BIOHUB" / "samples_template_set1_v1.csv").is_file()
 

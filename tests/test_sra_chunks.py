@@ -86,8 +86,8 @@ def test_write_sra_chunked_outputs_pairs_biosample(tmp_path, monkeypatch):
     assert (sra_dir / "sra_biosample_set1.csv").is_file()
     assert (sra_dir / "sra_file_set2.csv").is_file()
     assert (sra_dir / "sra_biosample_set2.csv").is_file()
-    assert (sra_dir / "sra_sequence_fileset_set1.csv").is_file()
-    assert (sra_dir / "sra_sequence_fileset_set2.csv").is_file()
+    assert (sra_dir / "sra_sequence_fileset_set1.tsv").is_file()
+    assert (sra_dir / "sra_sequence_fileset_set2.tsv").is_file()
 
     set1_files = pd.read_csv(sra_dir / "sra_file_set1.csv")
     set1_bio = pd.read_csv(sra_dir / "sra_biosample_set1.csv")
@@ -332,8 +332,8 @@ def test_write_sra_sequence_fileset_per_chunk(tmp_path):
     biosample = pd.DataFrame({"sample_name": ["A", "B"]})
     flattener._write_sra_chunked_outputs(sra_dir, sra_files, biosample)
 
-    set1 = pd.read_csv(sra_dir / "sra_sequence_fileset_set1.csv")
-    set2 = pd.read_csv(sra_dir / "sra_sequence_fileset_set2.csv")
+    set1 = pd.read_csv(sra_dir / "sra_sequence_fileset_set1.tsv", sep="\t")
+    set2 = pd.read_csv(sra_dir / "sra_sequence_fileset_set2.tsv", sep="\t")
     assert set1.values.tolist() == [["A_GEX", "u1"], ["A_GEX", "u2"], ["A_CRI.1", "u3"]]
     assert set2.values.tolist() == [["B_GEX", "u4"]]
 
@@ -362,7 +362,7 @@ def _seq_set(set_uuid, library_atid, *reads):
     return file_set
 
 
-def test_sequence_fileset_sheet_from_gathered_data_to_csv(tmp_path):
+def test_sequence_fileset_sheet_from_gathered_data_to_tsv(tmp_path):
     """Gathered sets → SRA file frame → chunked CSVs, with no stubbed steps."""
     gex, cri = "/droplet_based_libraries/gex/", "/droplet_based_libraries/cri/"
     complete_data = {
@@ -413,7 +413,7 @@ def test_sequence_fileset_sheet_from_gathered_data_to_csv(tmp_path):
         sra_dir, sra_files, pd.DataFrame({"sample_name": ["LIB_A"]})
     )
 
-    fileset = pd.read_csv(sra_dir / "sra_sequence_fileset_set1.csv")
+    fileset = pd.read_csv(sra_dir / "sra_sequence_fileset_set1.tsv", sep="\t")
     assert list(fileset.columns) == ["library_ID", "sequence_file_set_uuid"]
     assert sorted(fileset.values.tolist()) == [
         ["LIB_A_CRI.1", "cri-set-a"],
@@ -423,7 +423,7 @@ def test_sequence_fileset_sheet_from_gathered_data_to_csv(tmp_path):
     ]
     files = pd.read_csv(sra_dir / "sra_file_set1.csv")
     assert set(fileset["library_ID"]) == set(files["library_ID"])
-    assert not (sra_dir / "sra_sequence_fileset_set2.csv").exists()
+    assert not (sra_dir / "sra_sequence_fileset_set2.tsv").exists()
 
 
 def _slot_check_data(sequence_files, file_set):

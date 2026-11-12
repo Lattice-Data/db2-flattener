@@ -17,9 +17,10 @@
   `next_biohub_version_from_versions` from `flatten/biohub_version.py`
   (replaced by `latest_biohub_versions_from_s3`,
   `latest_versions_from_metadata_names` and `next_biohub_version`).
-- Write `SRA/sra_sequence_fileset_setN.csv` alongside each `sra_file_setN.csv`:
-  one row per `library_ID` and SequenceFileSet uuid, repeating the library_ID
-  when it has several sets. Warn about libraries with no SequenceFileSet.
+- Write `SRA/sra_sequence_fileset_setN.tsv` (tab-delimited) alongside each
+  `sra_file_setN.csv`: one row per `library_ID` and SequenceFileSet uuid,
+  repeating the library_ID when it has several sets. Warn about libraries
+  with no SequenceFileSet.
 - Lower the SRA set size cap from 5 TB to 4.8 TB to leave a safety margin.
 - Warn when a SequenceFileSet's file slots and its library's gathered
   `derived_from` SequenceFiles disagree: a slot file not in any `derived_from`,

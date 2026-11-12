@@ -92,7 +92,7 @@ Layout:
   SRA/
     sra_biosample_setN.csv               # paired with sra_file_setN; ≤4.8 TB per set
     sra_file_setN.csv                    # sample_name groups packed under 4.8 TB
-    sra_sequence_fileset_setN.csv        # library_ID, sequence_file_set_uuid; one row per set
+    sra_sequence_fileset_setN.tsv        # library_ID, sequence_file_set_uuid; one row per set
   BIOHUB/
     samples_template_setN_v#.csv         # one per GeneticModification; set1 when none; own v#
     guide_template_setN_v#.csv           # matching guide TabularFile; omitted when empty/missing; own v#

@@ -1638,7 +1638,7 @@ class DB2Flattener:
 
     def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
         """
-        Write sra_file_setN.csv / sra_biosample_setN.csv / sra_sequence_fileset_setN.csv
+        Write sra_file_setN.csv / sra_biosample_setN.csv / sra_sequence_fileset_setN.tsv
         under ≤4.8 TB sample_name packs.
         """
         chunks = self._chunk_sra_by_sample_name(sra_files_df)
@@ -1677,10 +1677,10 @@ class DB2Flattener:
             print(f"   Columns: {len(bio_chunk.columns)}")
 
             fileset_chunk = self._sra_sequence_file_set_rows(file_chunk)
-            fileset_output = sra_dir / f"sra_sequence_fileset_set{set_n}.csv"
+            fileset_output = sra_dir / f"sra_sequence_fileset_set{set_n}.tsv"
             print(f"Saving SRA sequence file set DataFrame to {fileset_output}...")
-            fileset_chunk.to_csv(fileset_output, index=False)
-            print(f"✅ SRA sequence file set CSV file created: {fileset_output}")
+            fileset_chunk.to_csv(fileset_output, index=False, sep="\t")
+            print(f"✅ SRA sequence file set TSV file created: {fileset_output}")
             print(f"   Rows: {len(fileset_chunk)}")
 
     @classmethod
