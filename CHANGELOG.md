@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- SRA outputs are now tab-separated: `SRA/sra_file_set{N}.tsv` and
+  `SRA/sra_biosample_set{N}.tsv` replace the `.csv` files of the same names.
+  These sheets routinely carry commas in free text (`*biomaterial_provider`,
+  joined donor stages, probe-barcode lists), which forced quoting on most rows;
+  tab-separated they need none.
+- Tabs, carriage returns and newlines in SRA cells are collapsed to single
+  spaces before writing (`sanitize_tabular_text` /
+  `sanitize_tabular_dataframe` in `utils.py`), so the output parses under the
+  naive tab-split the NCBI SRA/BioSample templates use. Other output files are
+  unchanged.
 - With `--s3-order-dir` / `-s`, BIOHUB `samples_template` and `guide_template`
   versions are resolved independently per type and set: each is the highest
   `v#` found in `{order}/metadata/` for that type and set, plus 1 (or `v1`
@@ -17,10 +27,10 @@
   `next_biohub_version_from_versions` from `flatten/biohub_version.py`
   (replaced by `latest_biohub_versions_from_s3`,
   `latest_versions_from_metadata_names` and `next_biohub_version`).
-- Write `SRA/sra_sequence_fileset_setN.tsv` (tab-delimited) alongside each
-  `sra_file_setN.csv`: one row per `library_ID` and SequenceFileSet uuid,
-  repeating the library_ID when it has several sets. Warn about libraries
-  with no SequenceFileSet.
+- Write `SRA/sra_sequence_fileset_setN.tsv` alongside each `sra_file_setN.tsv`:
+  one row per `library_ID` and SequenceFileSet uuid, repeating the library_ID
+  when it has several sets. Tab-separated and sanitized like the other SRA
+  sheets. Warn about libraries with no SequenceFileSet.
 - Lower the SRA set size cap from 5 TB to 4.8 TB to leave a safety margin.
 - Warn when a SequenceFileSet's file slots and its library's gathered
   `derived_from` SequenceFiles disagree: a slot file not in any `derived_from`,

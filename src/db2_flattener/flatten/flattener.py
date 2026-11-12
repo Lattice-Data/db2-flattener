@@ -1,3 +1,4 @@
+import csv
 import re
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -58,6 +59,7 @@ from db2_flattener.utils import (
     join_sequence_column,
     normalize_guide_rna_file_refs,
     numeric_text,
+    sanitize_tabular_dataframe,
     sort_ontology_term_id_column,
     split_controlled_term_columns,
     strip_author_metadata_column_prefix,
@@ -1638,7 +1640,7 @@ class DB2Flattener:
 
     def _write_sra_chunked_outputs(self, sra_dir, sra_files_df, sra_biosample_df):
         """
-        Write sra_file_setN.csv / sra_biosample_setN.csv / sra_sequence_fileset_setN.tsv
+        Write sra_file_setN.tsv / sra_biosample_setN.tsv / sra_sequence_fileset_setN.tsv
         under ≤4.8 TB sample_name packs.
         """
         chunks = self._chunk_sra_by_sample_name(sra_files_df)
@@ -1663,23 +1665,29 @@ class DB2Flattener:
             else:
                 bio_chunk = pd.DataFrame()
 
-            file_output = sra_dir / f"sra_file_set{set_n}.csv"
-            bio_output = sra_dir / f"sra_biosample_set{set_n}.csv"
+            # Sanitize first, then write unquoted: a literal '"' is written as-is
+            # rather than wrapped and doubled, and any tab or newline that got
+            # past the sanitizer raises instead of writing a corrupt row.
+            write_files = sanitize_tabular_dataframe(write_files)
+            bio_chunk = sanitize_tabular_dataframe(bio_chunk)
+
+            file_output = sra_dir / f"sra_file_set{set_n}.tsv"
+            bio_output = sra_dir / f"sra_biosample_set{set_n}.tsv"
             print(f"Saving SRA file DataFrame to {file_output}...")
-            write_files.to_csv(file_output, index=False)
-            print(f"✅ SRA file CSV file created: {file_output}")
+            write_files.to_csv(file_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
+            print(f"✅ SRA file TSV file created: {file_output}")
             print(f"   Rows: {len(write_files)}")
             print(f"   Columns: {len(write_files.columns)}")
             print(f"Saving SRA/BioSample DataFrame to {bio_output}...")
-            bio_chunk.to_csv(bio_output, index=False)
-            print(f"✅ SRA/BioSample CSV file created: {bio_output}")
+            bio_chunk.to_csv(bio_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
+            print(f"✅ SRA/BioSample TSV file created: {bio_output}")
             print(f"   Rows: {len(bio_chunk)}")
             print(f"   Columns: {len(bio_chunk.columns)}")
 
-            fileset_chunk = self._sra_sequence_file_set_rows(file_chunk)
+            fileset_chunk = sanitize_tabular_dataframe(self._sra_sequence_file_set_rows(file_chunk))
             fileset_output = sra_dir / f"sra_sequence_fileset_set{set_n}.tsv"
             print(f"Saving SRA sequence file set DataFrame to {fileset_output}...")
-            fileset_chunk.to_csv(fileset_output, index=False, sep="\t")
+            fileset_chunk.to_csv(fileset_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
             print(f"✅ SRA sequence file set TSV file created: {fileset_output}")
             print(f"   Rows: {len(fileset_chunk)}")
 
