@@ -3293,102 +3293,86 @@ class DB2Flattener:
             return atype
         return "Unknown"
 
+    @staticmethod
+    def _walk_objects(complete_data):
+        """Yield (known_api_type, node) for every dict with an ``@id`` in complete_data.
+
+        The one traversal shared by the audit and deleted-object checks, so both
+        always cover the same objects. Walks ``resolved_objects`` first (where the
+        API type is known from the key), then every other top-level key
+        (``matrix_file_set``, ``libraries``, ...) and everything nested in them.
+        ``known_api_type`` is None outside ``resolved_objects``. The same ``@id``
+        can be yielded more than once (link stubs, copies); callers choose which
+        copy to use.
+        """
+
+        def visit(node, known_api_type=None):
+            if isinstance(node, dict):
+                obj_id = node.get("@id")
+                if isinstance(obj_id, str) and obj_id:
+                    yield known_api_type, node
+                for value in node.values():
+                    yield from visit(value, None)
+            elif isinstance(node, (list, tuple)):
+                for item in node:
+                    yield from visit(item, None)
+
+        data = complete_data or {}
+        resolved = data.get("resolved_objects") or {}
+        if isinstance(resolved, dict):
+            for api_type, by_id in resolved.items():
+                if isinstance(by_id, dict):
+                    for obj in by_id.values():
+                        yield from visit(obj, api_type)
+                else:
+                    yield from visit(by_id, api_type)
+
+        for key, value in data.items():
+            if key != "resolved_objects":
+                yield from visit(value, None)
+
     def _iter_audited_objects(self, complete_data):
         """Yield (object_type, obj) for every Lattice object in complete_data.
 
-        Walks ``resolved_objects`` and all nested structures under ``libraries`` /
-        ``matrix_file_set`` (samples, raw matrix files, sequence files, GMs, …).
         Each ``@id`` is yielded once. When the same ``@id`` appears as an
         embedded link stub (no audit) and later as a full object with audit,
         the audited copy wins so policy does not miss sample ERROR/WARNING.
         """
         best = {}  # @id -> (object_type, obj)
 
-        def consider(node, known_api_type=None):
-            obj_id = node.get("@id")
-            if not isinstance(obj_id, str) or not obj_id:
-                return
+        for known_api_type, node in self._walk_objects(complete_data):
+            obj_id = node["@id"]
             object_type = known_api_type or self._api_type_for_object(node)
             prev = best.get(obj_id)
             if prev is None:
                 best[obj_id] = (object_type, node)
-                return
+                continue
             _, prev_obj = prev
             if self._is_empty_audit(prev_obj.get("audit")) and not self._is_empty_audit(
                 node.get("audit")
             ):
                 best[obj_id] = (object_type, node)
 
-        def visit(node, known_api_type=None):
-            if isinstance(node, dict):
-                consider(node, known_api_type)
-                for value in node.values():
-                    visit(value, None)
-            elif isinstance(node, (list, tuple)):
-                for item in node:
-                    visit(item, None)
-
-        data = complete_data or {}
-        resolved = data.get("resolved_objects") or {}
-        if isinstance(resolved, dict):
-            for api_type, by_id in resolved.items():
-                if isinstance(by_id, dict):
-                    for obj in by_id.values():
-                        visit(obj, api_type)
-                else:
-                    visit(by_id, api_type)
-
-        for key, value in data.items():
-            if key == "resolved_objects":
-                continue
-            visit(value, None)
-
         yield from best.values()
 
     def _collect_deleted_objects(self, complete_data):
         """Return sorted (object_type, uuid, aliases) for every status 'deleted' object.
 
-        Independent of audits: walks all of ``complete_data`` (``resolved_objects``,
-        ``matrix_file_set``, ``libraries`` and everything nested) and picks up any
-        dict with an ``@id`` whose ``status`` is ``deleted``. Each ``@id`` is
-        reported once; link stubs carrying no ``status`` are ignored.
+        Independent of audits: considers every object ``_walk_objects`` yields
+        whose ``status`` is ``deleted``. Each ``@id`` is reported once; link
+        stubs carrying no ``status`` are ignored.
         """
         found = {}  # @id -> (object_type, uuid, aliases)
 
-        def consider(node, known_api_type=None):
-            obj_id = node.get("@id")
-            if not isinstance(obj_id, str) or not obj_id:
-                return
+        for known_api_type, node in self._walk_objects(complete_data):
+            obj_id = node["@id"]
             if node.get("status") != "deleted" or obj_id in found:
-                return
-            aliases = [str(a) for a in to_items(node.get("aliases"))]
+                continue
             found[obj_id] = (
                 known_api_type or self._api_type_for_object(node),
                 extract_uuid_from_id(obj_id),
-                aliases,
+                [str(a) for a in to_items(node.get("aliases"))],
             )
-
-        def visit(node, known_api_type=None):
-            if isinstance(node, dict):
-                consider(node, known_api_type)
-                for value in node.values():
-                    visit(value, None)
-            elif isinstance(node, (list, tuple)):
-                for item in node:
-                    visit(item, None)
-
-        data = complete_data or {}
-        resolved = data.get("resolved_objects") or {}
-        if isinstance(resolved, dict):
-            for api_type, by_id in resolved.items():
-                if isinstance(by_id, dict):
-                    for obj in by_id.values():
-                        visit(obj, api_type)
-                else:
-                    visit(by_id, api_type)
-        for key, value in data.items():
-            if key != "resolved_objects":
-                visit(value, None)
 
         return sorted(found.values(), key=lambda row: (row[0], row[1]))
 

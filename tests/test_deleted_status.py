@@ -99,6 +99,46 @@ def test_deleted_controlled_term_reported():
     assert f._collect_deleted_objects(data) == [("ControlledTerm", "EFO:0001", ["lab:term"])]
 
 
+def test_audit_and_deleted_checks_cover_the_same_objects():
+    """Both checks share _walk_objects, so an object in any container is seen by both."""
+    f = make_flattener()
+    audit = {"ERROR": [{"category": "x"}]}
+
+    def obj(path, **extra):
+        return {"@id": path, "status": "deleted", "audit": audit, **extra}
+
+    data = {
+        "matrix_file_set": obj("/matrix_file_sets/m1/"),
+        "resolved_objects": {"Tissue": {TISSUE_ID: obj(TISSUE_ID)}},
+        "libraries": {
+            "uuid-a": {
+                "library": obj("/droplet_based_libraries/l1/"),
+                "samples": [obj("/tissues/t2/")],
+                "raw_matrix_files": [
+                    {
+                        "@id": "/raw_matrix_files/r1/",
+                        "sequence_files": [obj("/sequence_files/sf1/")],
+                    }
+                ],
+            }
+        },
+        "some_future_top_level_key": [{"nested": obj("/sequence_files/sf2/")}],
+    }
+
+    walked = {node["@id"] for _, node in f._walk_objects(data)}
+    audited = {node["@id"] for _, node in f._iter_audited_objects(data)}
+    deleted_uuids = {uuid for _, uuid, _ in f._collect_deleted_objects(data)}
+
+    # Everything with an @id is walked, including the undeleted raw matrix file
+    assert "/raw_matrix_files/r1/" in walked
+    assert audited == walked
+    # Every walked object except that undeleted raw matrix file is reported deleted
+    assert deleted_uuids == {
+        i.strip("/").split("/")[-1] for i in walked - {"/raw_matrix_files/r1/"}
+    }
+    assert len(deleted_uuids) == 6
+
+
 def test_deleted_in_matrix_file_set():
     f = make_flattener()
     data = {
