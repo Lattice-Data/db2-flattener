@@ -140,6 +140,8 @@ PROP_MAP_BIOHUB = {
     "tissues_enriched_cell_types_term_name": "suspension_enriched_cell_types",
     "tissues_sample_terms_term_id": "tissue_ontology_term_id",
     "cell_lines_sample_terms_term_id": "tissue_ontology_term_id",
+    "cell_lines_intended_cell_types_term_name": "intended_cell_types",
+    "organoids_intended_cell_types_term_name": "intended_cell_types",
     "tissues_developmental_stages_term_id": "development_stage_ontology_term_id",
     "tissues_multiplexing_barcodes": "sample_probe_barcode",
     "cell_lines_multiplexing_barcodes": "sample_probe_barcode",
@@ -350,4 +352,5 @@ REFORMAT_LIST = [
     "sample_probe_barcode",
     "suspension_enrichment_factors",
     "suspension_selection_kits",
+    "intended_cell_types",
 ]

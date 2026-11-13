@@ -641,6 +641,30 @@ def test_biohub_assay_ontology_term_id_from_plate_library():
     assert list(biohub_df["assay_ontology_term_id"]) == ["EFO:0030004"]
 
 
+def test_biohub_intended_cell_types_from_cell_lines_and_organoids():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "raw_file_samples": ["S1", "S2", "S3"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"] * 3,
+            "cell_lines_intended_cell_types_term_name": [["hepatocyte"], None, None],
+            "organoids_intended_cell_types_term_name": [
+                None,
+                ["neuron", "astrocyte"],
+                None,
+            ],
+        }
+    )
+
+    biohub_df = f.create_biohub_dataframe(main_df)
+
+    assert "cell_lines_intended_cell_types_term_name" not in biohub_df.columns
+    assert "organoids_intended_cell_types_term_name" not in biohub_df.columns
+    values = list(biohub_df["intended_cell_types"])
+    assert values[:2] == ["hepatocyte", "neuron|astrocyte"]
+    assert pd.isna(values[2])
+
+
 def test_biohub_plate_library_names_barcode_column_hash_index():
     f = make_flattener()
     main_df = pd.DataFrame(
