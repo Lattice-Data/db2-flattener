@@ -44,6 +44,10 @@ class Configs:
 # (and, in submitted_by's case, resolved as a reference) for every object type.
 EXCLUDED_FIELDS = {"creation_timestamp", "submitted_by"}
 
+# Fields appended to every object fetch, so the deleted-object check can report
+# the status, uuid (from @id) and aliases of any gathered object.
+REQUIRED_FETCH_FIELDS = ("@id", "status", "aliases")
+
 # URL length limit for chunking (includes base URL overhead)
 MAX_URL_LENGTH = 3800
 # Base URL overhead for chunking calculations (base URL + field params + safety margin)

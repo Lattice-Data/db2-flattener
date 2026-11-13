@@ -171,6 +171,9 @@ class DB2Flattener:
             print("Error: No data gathered")
             return None
 
+        # Independent of audits and audit_mode: any deleted object is a hard stop.
+        self._enforce_no_deleted_objects(complete_data)
+
         print("Creating DataFrames...")
 
         # Fail before creating output dirs when any GM lacks exactly one alias.
@@ -3290,40 +3293,29 @@ class DB2Flattener:
             return atype
         return "Unknown"
 
-    def _iter_audited_objects(self, complete_data):
-        """Yield (object_type, obj) for every Lattice object in complete_data.
+    @staticmethod
+    def _walk_objects(complete_data):
+        """Yield (known_api_type, node) for every dict with an ``@id`` in complete_data.
 
-        Walks ``resolved_objects`` and all nested structures under ``libraries`` /
-        ``matrix_file_set`` (samples, raw matrix files, sequence files, GMs, …).
-        Each ``@id`` is yielded once. When the same ``@id`` appears as an
-        embedded link stub (no audit) and later as a full object with audit,
-        the audited copy wins so policy does not miss sample ERROR/WARNING.
+        The one traversal shared by the audit and deleted-object checks, so both
+        always cover the same objects. Walks ``resolved_objects`` first (where the
+        API type is known from the key), then every other top-level key
+        (``matrix_file_set``, ``libraries``, ...) and everything nested in them.
+        ``known_api_type`` is None outside ``resolved_objects``. The same ``@id``
+        can be yielded more than once (link stubs, copies); callers choose which
+        copy to use.
         """
-        best = {}  # @id -> (object_type, obj)
-
-        def consider(node, known_api_type=None):
-            obj_id = node.get("@id")
-            if not isinstance(obj_id, str) or not obj_id:
-                return
-            object_type = known_api_type or self._api_type_for_object(node)
-            prev = best.get(obj_id)
-            if prev is None:
-                best[obj_id] = (object_type, node)
-                return
-            _, prev_obj = prev
-            if self._is_empty_audit(prev_obj.get("audit")) and not self._is_empty_audit(
-                node.get("audit")
-            ):
-                best[obj_id] = (object_type, node)
 
         def visit(node, known_api_type=None):
             if isinstance(node, dict):
-                consider(node, known_api_type)
+                obj_id = node.get("@id")
+                if isinstance(obj_id, str) and obj_id:
+                    yield known_api_type, node
                 for value in node.values():
-                    visit(value, None)
+                    yield from visit(value, None)
             elif isinstance(node, (list, tuple)):
                 for item in node:
-                    visit(item, None)
+                    yield from visit(item, None)
 
         data = complete_data or {}
         resolved = data.get("resolved_objects") or {}
@@ -3331,16 +3323,78 @@ class DB2Flattener:
             for api_type, by_id in resolved.items():
                 if isinstance(by_id, dict):
                     for obj in by_id.values():
-                        visit(obj, api_type)
+                        yield from visit(obj, api_type)
                 else:
-                    visit(by_id, api_type)
+                    yield from visit(by_id, api_type)
 
         for key, value in data.items():
-            if key == "resolved_objects":
+            if key != "resolved_objects":
+                yield from visit(value, None)
+
+    def _iter_audited_objects(self, complete_data):
+        """Yield (object_type, obj) for every Lattice object in complete_data.
+
+        Each ``@id`` is yielded once. When the same ``@id`` appears as an
+        embedded link stub (no audit) and later as a full object with audit,
+        the audited copy wins so policy does not miss sample ERROR/WARNING.
+        """
+        best = {}  # @id -> (object_type, obj)
+
+        for known_api_type, node in self._walk_objects(complete_data):
+            obj_id = node["@id"]
+            object_type = known_api_type or self._api_type_for_object(node)
+            prev = best.get(obj_id)
+            if prev is None:
+                best[obj_id] = (object_type, node)
                 continue
-            visit(value, None)
+            _, prev_obj = prev
+            if self._is_empty_audit(prev_obj.get("audit")) and not self._is_empty_audit(
+                node.get("audit")
+            ):
+                best[obj_id] = (object_type, node)
 
         yield from best.values()
+
+    def _collect_deleted_objects(self, complete_data):
+        """Return sorted (object_type, uuid, aliases) for every status 'deleted' object.
+
+        Independent of audits: considers every object ``_walk_objects`` yields
+        whose ``status`` is ``deleted``. Each ``@id`` is reported once; link
+        stubs carrying no ``status`` are ignored.
+        """
+        found = {}  # @id -> (object_type, uuid, aliases)
+
+        for known_api_type, node in self._walk_objects(complete_data):
+            obj_id = node["@id"]
+            if node.get("status") != "deleted" or obj_id in found:
+                continue
+            found[obj_id] = (
+                known_api_type or self._api_type_for_object(node),
+                extract_uuid_from_id(obj_id),
+                [str(a) for a in to_items(node.get("aliases"))],
+            )
+
+        return sorted(found.values(), key=lambda row: (row[0], row[1]))
+
+    @staticmethod
+    def _print_deleted_objects(deleted) -> None:
+        """Print one row per deleted object: type | uuid | raw aliases."""
+        print("======")
+        print("DELETED objects:")
+        for object_type, uuid, aliases in deleted:
+            alias_text = ", ".join(aliases) if aliases else "(no aliases)"
+            print(f"  {object_type} | {uuid} | {alias_text}")
+        print("======")
+
+    def _enforce_no_deleted_objects(self, complete_data) -> None:
+        """Raise (after printing them) when any gathered object has status 'deleted'."""
+        deleted = self._collect_deleted_objects(complete_data)
+        if not deleted:
+            return
+        self._print_deleted_objects(deleted)
+        raise ValueError(
+            f"Refusing to flatten: {len(deleted)} gathered object(s) have status 'deleted'"
+        )
 
     def _collect_audit_category_counts(self, complete_data):
         """Count ERROR/WARNING audit categories by object type."""

@@ -76,6 +76,10 @@ mutually exclusive overrides:
   still stop on ERROR
 - `--force-all-audit` — continue even when ERROR or WARNING audits are present
 
+Separately from audits, the run always stops (exit 1) if any gathered object
+has `status: deleted`. It prints one row per object (`type | uuid | aliases`)
+and no `--force-*` flag overrides it.
+
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
 db2-flattener -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/

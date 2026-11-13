@@ -3,6 +3,7 @@ from db2_flattener.schema.constants import (
     BASE_URL_OVERHEAD,
     CONTROLLED_TERM_FIELDS,
     MAX_URL_LENGTH,
+    REQUIRED_FETCH_FIELDS,
     Configs,
 )
 from db2_flattener.utils import (
@@ -44,7 +45,13 @@ class DB2Gatherer:
             print(f"Warning: No config found for {obj_type}")
             return []
 
-        field_lst = fields or config["fields"]
+        # status and aliases are always requested, whatever the config lists, so
+        # the deleted-object check can see every gathered object, ControlledTerms
+        # included.
+        field_lst = list(fields or config["fields"])
+        for required_field in REQUIRED_FETCH_FIELDS:
+            if required_field not in field_lst:
+                field_lst.append(required_field)
 
         print(f"Fetching {len(object_ids)} {obj_type} objects...")
 

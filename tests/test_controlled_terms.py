@@ -126,13 +126,14 @@ def test_other_types_still_fetched_by_uuid(recorded_requests):
     assert donor_call["filter"].startswith("&uuid=")
 
 
-def test_controlled_terms_request_only_id_and_term_name(recorded_requests):
-    """split_term_cell derives the term id from @id, so the rest is dead weight."""
+def test_controlled_terms_request_only_needed_fields(recorded_requests):
+    """split_term_cell needs @id and term_name; status and aliases are always
+    added for the deleted-object check. Nothing else is requested."""
     g = make_gatherer()
     g.resolve_references_for_samples(_sample_with_donor())
 
     ct_call = next(c for c in recorded_requests if c["type"] == "ControlledTerm")
-    assert ct_call["fields"] == ["@id", "term_name"]
+    assert ct_call["fields"] == ["@id", "term_name", "status", "aliases"]
 
 
 def test_terms_reachable_only_via_a_fetched_object_are_included(recorded_requests):
