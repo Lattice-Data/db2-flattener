@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-- BIOHUB `samples_template_set{N}_v{M}.csv` gains an `intended_cell_types`
-  column: the ControlledTerm `term_name`s from `CellLine.intended_cell_types`
-  and `Organoid.intended_cell_types`, joined with `|` when there are several.
-  Tissue and primary cell culture rows leave it empty.
 - Refuse flatten (exit 1) when any gathered object has `status: deleted`,
   printing each object's type, UUID and raw aliases. Independent of audits and
   not overridable by `--force-*` flags.
