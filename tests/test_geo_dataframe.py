@@ -998,3 +998,85 @@ def test_create_geo_dataframe_titles_stay_unique_for_a_shared_summary():
         "libA scRNA-seq; LPS for 4 hours",
         "libB scRNA-seq; LPS for 4 hours",
     ]
+
+
+def test_create_geo_dataframe_takes_dbxrefs_from_gex_library_only():
+    """A GroupID's GEX and ATAC libraries collapse to one row; SRA/BioSample are GEX's."""
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(
+                droplet_based_libraries_dbxrefs=["SRA:SRX123", "Biomaterial:SAMN1"],
+                tissues_suspension_type="nucleus",
+            ),
+            gex_row(
+                droplet_based_libraries_feature_types="ATAC",
+                droplet_based_libraries_dbxrefs=["SRA:SRX456", "Biomaterial:SAMN2"],
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df) == 1
+    assert geo_df["*SRA Experiment or Run"].iloc[0] == "SRX123"
+    assert geo_df["*BioSample"].iloc[0] == "SAMN1"
+
+
+def test_create_geo_dataframe_plate_dbxrefs_from_gex_library_only():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateA",
+                "plate_based_libraries_feature_types": "Gene Expression",
+                "plate_based_libraries_dbxrefs": ["SRA:SRX1"],
+                "raw_matrix_file_alias": "plateA.h5",
+            },
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateA",
+                "plate_based_libraries_feature_types": "ATAC",
+                "plate_based_libraries_dbxrefs": ["SRA:SRX2"],
+                "raw_matrix_file_alias": "plateA_atac.h5",
+            },
+        ]
+    )
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert list(geo_df["*SRA Experiment or Run"]) == ["SRX1"]
+
+
+def test_create_geo_dataframe_blank_when_only_atac_library_has_dbxrefs():
+    flattener = make_flattener()
+    main_df = pd.DataFrame(
+        [
+            gex_row(tissues_suspension_type="nucleus"),
+            gex_row(
+                droplet_based_libraries_feature_types="ATAC",
+                droplet_based_libraries_dbxrefs=["SRA:SRX456", "Biomaterial:SAMN2"],
+            ),
+        ]
+    ).dropna(axis=1, how="all")
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    assert len(geo_df) == 1
+    assert pd.isna(geo_df["*SRA Experiment or Run"].iloc[0])
+    assert pd.isna(geo_df["*BioSample"].iloc[0])
+
+
+def test_create_geo_dataframe_keeps_required_accession_columns_without_dbxrefs():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row()]).dropna(axis=1, how="all")
+    assert "droplet_based_libraries_dbxrefs" not in main_df.columns
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    columns = list(geo_df.columns)
+    sra = columns.index("*SRA Experiment or Run")
+    assert columns[sra + 1] == "*BioSample"
+    assert pd.isna(geo_df["*SRA Experiment or Run"].iloc[0])
+    assert pd.isna(geo_df["*BioSample"].iloc[0])
+    assert "droplet_based_libraries_dbxrefs" not in columns
+    assert "plate_based_libraries_dbxrefs" not in columns
