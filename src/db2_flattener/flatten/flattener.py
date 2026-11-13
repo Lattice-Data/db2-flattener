@@ -202,7 +202,7 @@ class DB2Flattener:
 
         # Fail before creating output dirs on libraries the GEO sheet can't represent.
         self._refuse_multiome_libraries(main_df)
-        self._refuse_library_groups_without_gex(main_df)
+        self._refuse_atac_libraries(main_df)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         cro_orders = self._unique_cro_orders(main_df)
@@ -713,12 +713,18 @@ class DB2Flattener:
         geo_source = main_df[geo_mask].copy()
         print(f"GEO: filtered to {len(geo_source)} GEX/ATAC rows out of {len(main_df)} MAIN rows")
 
-        subset_keys = [k for k in PROP_MAP_GEO if k in geo_source.columns]
+        # *SRA Experiment or Run (and *BioSample, read out of it below) are required
+        # GEO columns, so keep its dbxrefs sources even when no library has dbxrefs.
+        subset_keys = [
+            k
+            for k, geo_col in PROP_MAP_GEO.items()
+            if k in geo_source.columns or geo_col == "*SRA Experiment or Run"
+        ]
         subset_keys.extend(k for k in GEO_LIBRARY_STRATEGY_SOURCE_COLS if k in geo_source.columns)
         subset_keys.extend(k for k in geo_source.columns if re.search("_author_metadata_", k))
         if "raw_file_sample_uuids" in geo_source.columns:
             subset_keys.append("raw_file_sample_uuids")
-        geo_df = geo_source[subset_keys].copy()
+        geo_df = geo_source.reindex(columns=subset_keys)
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = strip_author_metadata_column_prefix(geo_df)
         geo_df = collapse_duplicate_columns(geo_df)
@@ -3435,29 +3441,25 @@ class DB2Flattener:
         print("\n".join(lines))
         raise ValueError("Refusing to flatten: multiome libraries are not supported")
 
-    def _refuse_library_groups_without_gex(self, main_df) -> None:
-        """Raise when a GEO GroupID has no Gene Expression library (standalone ATAC)."""
-        group_ids = self._coalesce_columns(main_df, LIBRARY_GROUP_ID_COLS)
-        if group_ids is None or main_df.empty:
-            return
-        geo_rows = main_df.apply(self._row_is_geo_library, axis=1).astype(bool)
-        gex_rows = main_df.apply(self._row_is_gex, axis=1).astype(bool)
-        has_gex: dict[str, bool] = {}
-        for group, is_geo, is_gex in zip(group_ids, geo_rows, gex_rows, strict=True):
-            # Rows without a GroupID are dropped from the GEO sheet, so skip them.
-            if not is_geo or is_empty(group):
+    @classmethod
+    def _refuse_atac_libraries(cls, main_df) -> None:
+        """Raise when any library's feature_types include ATAC."""
+        group_ids = cls._coalesce_columns(main_df, LIBRARY_GROUP_ID_COLS)
+        found: set[str] = set()
+        for col in (GEO_LIBRARY_STRATEGY_FEATURE_COL, GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL):
+            if col not in main_df.columns:
                 continue
-            label = str(group)
-            has_gex[label] = has_gex.get(label, False) or is_gex
-        missing = sorted(group for group, ok in has_gex.items() if not ok)
-        if not missing:
+            for idx, val in main_df[col].items():
+                if not any("ATAC" in str(item) for item in to_items(val)):
+                    continue
+                group = None if group_ids is None else group_ids.at[idx]
+                found.add("(no GroupID)" if is_empty(group) else str(group))
+        if not found:
             return
-        lines = [
-            f"====WARNING==== {len(missing)} library group(s) have no Gene Expression library:"
-        ]
-        lines.extend(f"  {group}" for group in missing)
+        lines = [f"====WARNING==== {len(found)} library group(s) have an ATAC library:"]
+        lines.extend(f"  {group}" for group in sorted(found))
         print("\n".join(lines))
-        raise ValueError("Refusing to flatten: library group(s) with no Gene Expression library")
+        raise ValueError("Refusing to flatten: ATAC libraries are not supported")
 
     @staticmethod
     def _is_controlled_term_field(field_name, references):

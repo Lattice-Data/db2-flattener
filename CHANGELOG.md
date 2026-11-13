@@ -37,12 +37,12 @@
   a slot file missing its `sequence_file_sets` back-link, a file listing a set
   with no slot for it, or a `derived_from` file that reaches no library.
 - GEO `*SRA Experiment or Run` and `*BioSample` now come from the GEX library
-  only. A GroupID holding a GEX and an ATAC library previously merged both
-  libraries' dbxrefs into one list cell (`['SRX123', 'SRX456']`).
+  only, and both columns are always written (empty when no library has
+  dbxrefs), since GEO requires them.
 - Refuse flatten (exit 1), before any output is written, when a library's
   `library_construction_technology` is a multiome assay (`EFO:0030059`,
-  `EFO:0920134`, `EFO:0920135`), or when a GEO GroupID has no Gene Expression
-  library (standalone ATAC). Each prints the affected GroupIDs first.
+  `EFO:0920134`, `EFO:0920135`), or when any library's `feature_types`
+  include ATAC. Each prints the affected GroupIDs first.
 
 ## 1.0.1
 

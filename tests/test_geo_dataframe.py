@@ -1064,3 +1064,19 @@ def test_create_geo_dataframe_blank_when_only_atac_library_has_dbxrefs():
     assert len(geo_df) == 1
     assert pd.isna(geo_df["*SRA Experiment or Run"].iloc[0])
     assert pd.isna(geo_df["*BioSample"].iloc[0])
+
+
+def test_create_geo_dataframe_keeps_required_accession_columns_without_dbxrefs():
+    flattener = make_flattener()
+    main_df = pd.DataFrame([gex_row()]).dropna(axis=1, how="all")
+    assert "droplet_based_libraries_dbxrefs" not in main_df.columns
+
+    geo_df = flattener.create_geo_dataframe(main_df)
+
+    columns = list(geo_df.columns)
+    sra = columns.index("*SRA Experiment or Run")
+    assert columns[sra + 1] == "*BioSample"
+    assert pd.isna(geo_df["*SRA Experiment or Run"].iloc[0])
+    assert pd.isna(geo_df["*BioSample"].iloc[0])
+    assert "droplet_based_libraries_dbxrefs" not in columns
+    assert "plate_based_libraries_dbxrefs" not in columns

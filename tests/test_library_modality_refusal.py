@@ -1,4 +1,4 @@
-"""Refuse to flatten multiome libraries and GroupIDs with no Gene Expression library."""
+"""Refuse to flatten multiome and ATAC libraries."""
 
 from types import SimpleNamespace
 
@@ -70,50 +70,71 @@ def test_allows_non_multiome_and_missing_term_ids():
     DB2Flattener._refuse_multiome_libraries(pd.DataFrame({"raw_matrix_file_alias": ["a.h5"]}))
 
 
-def test_refuses_standalone_atac_group(capsys):
+def test_refuses_atac_library_even_alongside_gex(capsys):
     main_df = pd.DataFrame(
         [
             library_row("libA"),
             library_row("libA", feature_types="ATAC"),
-            library_row("atacOnly", feature_types="ATAC"),
+            library_row("libB"),
         ]
     )
 
-    with pytest.raises(ValueError, match="no Gene Expression library"):
-        make_flattener()._refuse_library_groups_without_gex(main_df)
+    with pytest.raises(ValueError, match="Refusing to flatten: ATAC libraries"):
+        DB2Flattener._refuse_atac_libraries(main_df)
 
     out = capsys.readouterr().out
-    assert "====WARNING==== 1 library group(s) have no Gene Expression library:" in out
-    assert "  atacOnly" in out
-    assert "  libA" not in out
+    assert "====WARNING==== 1 library group(s) have an ATAC library:" in out
+    assert "  libA" in out
+    assert "libB" not in out
 
 
-def test_allows_gex_and_atac_in_one_group():
-    main_df = pd.DataFrame([library_row("libA"), library_row("libA", feature_types="ATAC")])
-    make_flattener()._refuse_library_groups_without_gex(main_df)
+def test_refuses_atac_in_a_feature_type_list():
+    main_df = pd.DataFrame([library_row("libA", feature_types=["Gene Expression", "ATAC"])])
+
+    with pytest.raises(ValueError, match="ATAC"):
+        DB2Flattener._refuse_atac_libraries(main_df)
 
 
-def test_ignores_non_geo_rows_and_rows_without_group_id():
+def test_refuses_plate_atac_library():
+    main_df = pd.DataFrame(
+        [
+            {
+                "plate_based_libraries_CRO_group_identifier": "plateA",
+                "plate_based_libraries_feature_types": "ATAC",
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="ATAC"):
+        DB2Flattener._refuse_atac_libraries(main_df)
+
+
+def test_refuses_atac_library_without_group_id(capsys):
+    main_df = pd.DataFrame([library_row(None, feature_types="ATAC")])
+
+    with pytest.raises(ValueError, match="ATAC"):
+        DB2Flattener._refuse_atac_libraries(main_df)
+
+    assert "  (no GroupID)" in capsys.readouterr().out
+
+
+def test_allows_libraries_without_atac():
     main_df = pd.DataFrame(
         [
             library_row("libA"),
-            library_row("crispr", feature_types="CRISPR Guide Capture"),
-            library_row(None, feature_types="ATAC"),
+            library_row("libA", feature_types="CRISPR Guide Capture"),
+            library_row("libB", feature_types=None),
         ]
     )
-    make_flattener()._refuse_library_groups_without_gex(main_df)
-
-
-def test_skips_when_no_group_id_column():
-    main_df = pd.DataFrame({"raw_matrix_file_alias": ["a.h5"]})
-    make_flattener()._refuse_library_groups_without_gex(main_df)
+    DB2Flattener._refuse_atac_libraries(main_df)
+    DB2Flattener._refuse_atac_libraries(pd.DataFrame({"raw_matrix_file_alias": ["a.h5"]}))
 
 
 @pytest.mark.parametrize(
     ("rows", "message"),
     [
         ([library_row("libA", term_id="EFO:0030059")], "multiome libraries"),
-        ([library_row("atacOnly", feature_types="ATAC")], "no Gene Expression library"),
+        ([library_row("libA", feature_types="ATAC")], "ATAC libraries"),
     ],
 )
 def test_flatten_refuses_before_writing_outputs(rows, message, tmp_path, monkeypatch, capsys):
