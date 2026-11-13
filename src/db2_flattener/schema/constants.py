@@ -335,6 +335,27 @@ GEO_FLEX_LIBRARY_PROTOCOLS = {
     "10x Next GEM Flex v1",
 }
 
+# library_construction_technology term ids the flattener refuses to flatten.
+MULTIOME_LIBRARY_TERM_IDS = frozenset(
+    {
+        "EFO:0030059",  # 10x multiome
+        "EFO:0920134",  # 10x GEM-X Epi Multiome
+        "EFO:0920135",  # 10x Next-GEM Multiome
+    }
+)
+
+# MAIN columns holding a library's library_construction_technology term id.
+LIBRARY_CONSTRUCTION_TECHNOLOGY_TERM_ID_COLS = (
+    "droplet_based_libraries_library_construction_technology_term_id",
+    "plate_based_libraries_library_construction_technology_term_id",
+)
+
+# MAIN columns holding a library's GroupID (the GEO "*library name").
+LIBRARY_GROUP_ID_COLS = (
+    "droplet_based_libraries_CRO_group_identifier",
+    "plate_based_libraries_CRO_group_identifier",
+)
+
 GENETIC_PERTURBATION_MAP = {
     "activation screen": "CRISPR activation screen",
     "interference screen": "CRISPR interference screen",

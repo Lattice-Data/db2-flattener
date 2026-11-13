@@ -28,6 +28,9 @@ from db2_flattener.schema.constants import (
     GUIDE_INTENDED_FEATURE_COLS,
     GUIDE_METADATA_COLUMN_MAP,
     GUIDE_NA_PLACEHOLDERS,
+    LIBRARY_CONSTRUCTION_TECHNOLOGY_TERM_ID_COLS,
+    LIBRARY_GROUP_ID_COLS,
+    MULTIOME_LIBRARY_TERM_IDS,
     PROP_MAP_BIOHUB,
     PROP_MAP_GEO,
     PROP_MAP_SAMPLES,
@@ -196,6 +199,10 @@ class DB2Flattener:
             biohub_samples = sample_df.copy()
             sample_df = self._attach_plate_library_id(main_df, sample_df)
             sample_df = self.create_samples_dataframe(sample_df)
+
+        # Fail before creating output dirs on libraries the GEO sheet can't represent.
+        self._refuse_multiome_libraries(main_df)
+        self._refuse_library_groups_without_gex(main_df)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         cro_orders = self._unique_cro_orders(main_df)
@@ -715,6 +722,12 @@ class DB2Flattener:
         geo_df.rename(columns=PROP_MAP_GEO, inplace=True)
         geo_df = strip_author_metadata_column_prefix(geo_df)
         geo_df = collapse_duplicate_columns(geo_df)
+        # *SRA Experiment or Run and *BioSample come from the GEX library only, so
+        # clear the dbxrefs on every other row before the rows are merged by GroupID.
+        col = "*SRA Experiment or Run"
+        if col in geo_df.columns and not geo_source.empty:
+            gex_rows = geo_source.apply(self._row_is_gex, axis=1).astype(bool)
+            geo_df.loc[~gex_rows, col] = pd.NA
         if "genetic_modification_alias" in geo_df.columns:
             geo_df["genetic_modification_alias"] = geo_df["genetic_modification_alias"].map(
                 self._map_geo_genetic_modification_alias
@@ -3398,6 +3411,53 @@ class DB2Flattener:
                 "Refusing to flatten: audits present "
                 "(use --force-only-warning or --force-all-audit)"
             )
+
+    @classmethod
+    def _refuse_multiome_libraries(cls, main_df) -> None:
+        """Raise when any library's construction technology is a multiome assay."""
+        group_ids = cls._coalesce_columns(main_df, LIBRARY_GROUP_ID_COLS)
+        found: dict[str, set[str]] = {}
+        for col in LIBRARY_CONSTRUCTION_TECHNOLOGY_TERM_ID_COLS:
+            if col not in main_df.columns:
+                continue
+            for idx, val in main_df[col].items():
+                terms = {str(item).strip() for item in to_items(val)}
+                terms &= MULTIOME_LIBRARY_TERM_IDS
+                if not terms:
+                    continue
+                group = None if group_ids is None else group_ids.at[idx]
+                label = "(no GroupID)" if is_empty(group) else str(group)
+                found.setdefault(label, set()).update(terms)
+        if not found:
+            return
+        lines = [f"====WARNING==== {len(found)} library group(s) use a multiome assay:"]
+        lines.extend(f"  {group} ({', '.join(sorted(found[group]))})" for group in sorted(found))
+        print("\n".join(lines))
+        raise ValueError("Refusing to flatten: multiome libraries are not supported")
+
+    def _refuse_library_groups_without_gex(self, main_df) -> None:
+        """Raise when a GEO GroupID has no Gene Expression library (standalone ATAC)."""
+        group_ids = self._coalesce_columns(main_df, LIBRARY_GROUP_ID_COLS)
+        if group_ids is None or main_df.empty:
+            return
+        geo_rows = main_df.apply(self._row_is_geo_library, axis=1).astype(bool)
+        gex_rows = main_df.apply(self._row_is_gex, axis=1).astype(bool)
+        has_gex: dict[str, bool] = {}
+        for group, is_geo, is_gex in zip(group_ids, geo_rows, gex_rows, strict=True):
+            # Rows without a GroupID are dropped from the GEO sheet, so skip them.
+            if not is_geo or is_empty(group):
+                continue
+            label = str(group)
+            has_gex[label] = has_gex.get(label, False) or is_gex
+        missing = sorted(group for group, ok in has_gex.items() if not ok)
+        if not missing:
+            return
+        lines = [
+            f"====WARNING==== {len(missing)} library group(s) have no Gene Expression library:"
+        ]
+        lines.extend(f"  {group}" for group in missing)
+        print("\n".join(lines))
+        raise ValueError("Refusing to flatten: library group(s) with no Gene Expression library")
 
     @staticmethod
     def _is_controlled_term_field(field_name, references):
