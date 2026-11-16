@@ -38,6 +38,7 @@ from db2_flattener.schema.constants import (
     PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
     SEX_ONTOLOGY_MAP,
+    SRA_FILE_INSTRUMENT_MODEL_MAP,
     SRA_FILE_LIBRARY_LAYOUT_MAP,
     SRA_FILE_LIBRARY_SELECTION_MAP,
     SRA_FILE_LIBRARY_SOURCE_MAP,
@@ -1909,6 +1910,13 @@ class DB2Flattener:
         col = "genetic_modifications_strategy"
         if col in sra_df.columns:
             sra_df[col] = sra_df[col].map(self._map_geo_genetic_strategy)
+
+        # Strings only: a cell can hold a list when a group spans several values
+        col = "instrument_model"
+        if col in sra_df.columns:
+            sra_df[col] = sra_df[col].map(
+                lambda v: SRA_FILE_INSTRUMENT_MODEL_MAP.get(v, v) if isinstance(v, str) else v
+            )
 
         sra_df = self._add_geo_title(
             sra_df,
