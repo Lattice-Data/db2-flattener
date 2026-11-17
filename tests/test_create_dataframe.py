@@ -1750,3 +1750,33 @@ def test_biohub_experimental_condition_summary_dedupes_joined_summaries():
     )
     biohub_df = f.create_biohub_dataframe(main_df)
     assert list(biohub_df["experimental_condition_summary"]) == ["a; b"]
+
+
+def test_biohub_experimental_condition_summary_defaults_to_na_for_tissue():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@id": ["/tissues/t1/", "/tissues/t2/", None],
+            "cell_lines_@id": [None, None, "/cell_lines/c1/"],
+            "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"] * 3,
+            "experimental_conditions_summary": ["LPS for 4 hours", None, None],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    summaries = biohub_df["experimental_condition_summary"].tolist()
+    assert summaries[:2] == ["LPS for 4 hours", "na"]
+    assert pd.isna(summaries[2])
+
+
+def test_biohub_experimental_condition_summary_absent_stays_absent():
+    f = make_flattener()
+    main_df = pd.DataFrame(
+        {
+            "tissues_@id": ["/tissues/t1/"],
+            "human_donors_cxg_donor_id": ["donor1"],
+            "human_donors_taxa_term_id": ["NCBITaxon:9606"],
+        }
+    )
+    biohub_df = f.create_biohub_dataframe(main_df)
+    assert "experimental_condition_summary" not in biohub_df.columns
