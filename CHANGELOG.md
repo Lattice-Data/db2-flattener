@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- New `db2-flattener-download` command (`src/db2_flattener/download/`, also
+  `python -m db2_flattener.download`): given a MatrixFileSet `--uuid`, downloads
+  each RawMatrixFile from its `s3_uri` into `--out-directory`, saved as its
+  `geo_file_name` when set and under its S3 file name otherwise. A file whose
+  name already exists in the directory is not downloaded; a
+  `====== WARNING ====== For {s3_uri}, there already exists a file
+  {geo_file_name}` line is printed instead (`{geo_file_name}` only when set).
+  Exits 1 if any file fails to download (TOOLS-304).
 - BIOHUB `samples_template_set{N}_v{M}.csv` gains an `intended_cell_types`
   column: the ControlledTerm `term_name`s from `CellLine.intended_cell_types`
   and `Organoid.intended_cell_types`, joined with `|` when there are several.
