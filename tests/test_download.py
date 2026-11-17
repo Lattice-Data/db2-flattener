@@ -1,3 +1,7 @@
+import uuid as uuid_mod
+from unittest import mock
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 
 from db2_flattener.download import cli, downloader
@@ -5,7 +9,10 @@ from db2_flattener.download.downloader import (
     download_matrix_file_set,
     existing_file_warning,
     target_file_name,
+    uuid_filter_chunks,
 )
+from db2_flattener.gather import lattice
+from db2_flattener.schema.constants import MAX_URL_LENGTH
 
 MFS_UUID = "mfs-uuid"
 
@@ -34,9 +41,91 @@ def _stub_report(monkeypatch, raw_matrix_files):
             ]
         assert obj_type == "RawMatrixFile"
         assert "geo_file_name" in field_lst and "s3_uri" in field_lst
-        return list(raw_matrix_files)
+        requested = {term.removeprefix("uuid=") for term in filter_url.split("&") if term}
+        return [r for r in raw_matrix_files if r["uuid"] in requested]
 
     monkeypatch.setattr(downloader, "get_report", fake_get_report)
+
+
+def _many_raw_matrix_files(n):
+    return [
+        {
+            "uuid": str(uuid_mod.UUID(int=i)),
+            "@id": f"/raw_matrix_files/{uuid_mod.UUID(int=i)}/",
+            "s3_uri": f"s3://b/o/file{i:04d}.h5",
+        }
+        for i in range(n)
+    ]
+
+
+def test_many_raw_matrix_files_are_fetched_in_bounded_filtered_requests(monkeypatch):
+    """Through the real get_report: every request is filtered and short enough."""
+    files = _many_raw_matrix_files(200)
+    sent = []
+
+    def fake_requests_get(url, auth=None):
+        sent.append(url)
+        query = parse_qs(urlparse(url).query)
+        if query["type"] == ["MatrixFileSet"]:
+            graph = [{"raw_matrix_files": [f["@id"] for f in files]}]
+        else:
+            requested = set(query.get("uuid", []))
+            # An unfiltered request would get every RawMatrixFile in the database.
+            graph = (
+                [f for f in files if f["uuid"] in requested]
+                if requested
+                else files
+                + [
+                    {
+                        "uuid": "stranger",
+                        "@id": "/raw_matrix_files/stranger/",
+                        "s3_uri": "s3://x/y.h5",
+                    }
+                ]
+            )
+        response = mock.Mock()
+        response.json.return_value = {"@graph": graph}
+        return response
+
+    class Conn:
+        server = "https://lattice.test/"
+        auth = None
+
+    monkeypatch.setattr(lattice.requests, "get", fake_requests_get)
+    result = downloader.fetch_raw_matrix_files(MFS_UUID, Conn())
+
+    rmf_urls = [u for u in sent if "type=RawMatrixFile" in u]
+    assert len(rmf_urls) > 1
+    for url in rmf_urls:
+        assert len(url) <= MAX_URL_LENGTH
+        assert "uuid=" in url
+        assert "@id=" not in url
+    requested = [u for url in rmf_urls for u in parse_qs(urlparse(url).query)["uuid"]]
+    assert sorted(requested) == sorted(f["uuid"] for f in files)
+    assert sorted(r["uuid"] for r in result) == sorted(f["uuid"] for f in files)
+
+
+def test_uuid_filter_chunks_respect_limit_and_keep_every_uuid():
+    uuids = [str(uuid_mod.UUID(int=i)) for i in range(200)]
+    chunks = uuid_filter_chunks(uuids, max_length=500)
+    assert len(chunks) > 1
+    assert all(0 < len(c) <= 500 for c in chunks)
+    assert "".join(chunks) == "".join(f"&uuid={u}" for u in uuids)
+    assert uuid_filter_chunks([]) == []
+
+
+def test_unrequested_raw_matrix_files_are_never_returned(monkeypatch):
+    listed = _many_raw_matrix_files(2)
+    stranger = {"uuid": "stranger", "@id": "/raw_matrix_files/stranger/", "s3_uri": "s3://x/y.h5"}
+
+    def fake_get_report(obj_type, filter_url, field_lst, connection):
+        if obj_type == "MatrixFileSet":
+            return [{"raw_matrix_files": [f["@id"] for f in listed]}]
+        return [*listed, stranger]
+
+    monkeypatch.setattr(downloader, "get_report", fake_get_report)
+    result = downloader.fetch_raw_matrix_files(MFS_UUID, None)
+    assert [r["uuid"] for r in result] == [f["uuid"] for f in listed]
 
 
 def test_target_file_name_prefers_geo_file_name():

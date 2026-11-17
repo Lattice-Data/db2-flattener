@@ -6,9 +6,11 @@ import posixpath
 import s3fs
 
 from db2_flattener.gather.lattice import get_report
+from db2_flattener.schema.constants import BASE_URL_OVERHEAD, MAX_URL_LENGTH
 from db2_flattener.utils import extract_uuid_from_id
 
 RAW_MATRIX_FILE_FIELDS = ["@id", "uuid", "s3_uri", "geo_file_name"]
+MAX_FILTER_LENGTH = MAX_URL_LENGTH - BASE_URL_OVERHEAD
 
 
 def target_file_name(raw_matrix_file: dict) -> str:
@@ -46,9 +48,38 @@ def fetch_raw_matrix_files(matrix_file_set_uuid: str, connection) -> list[dict]:
     if not uuids:
         return []
 
-    filter_url = "".join(f"&uuid={uuid}" for uuid in dict.fromkeys(uuids))
-    raw_matrix_files = get_report("RawMatrixFile", filter_url, RAW_MATRIX_FILE_FIELDS, connection)
+    wanted = list(dict.fromkeys(uuids))
+    raw_matrix_files = []
+    for filter_url in uuid_filter_chunks(wanted):
+        raw_matrix_files.extend(
+            get_report("RawMatrixFile", filter_url, RAW_MATRIX_FILE_FIELDS, connection)
+        )
+
+    # Belt and braces: never download a file this MatrixFileSet doesn't list,
+    # even if a report request somehow came back unfiltered.
+    wanted_set = set(wanted)
+    raw_matrix_files = [rmf for rmf in raw_matrix_files if rmf.get("uuid") in wanted_set]
     return sorted(raw_matrix_files, key=lambda rmf: rmf.get("s3_uri") or "")
+
+
+def uuid_filter_chunks(uuids: list[str], max_length: int = MAX_FILTER_LENGTH) -> list[str]:
+    """
+    Split uuids into "&uuid=..." filters each at most max_length characters.
+
+    get_report's own long-URL split only understands "&@id=" filters; an
+    oversized "&uuid=" filter makes it send a request with no filter at all,
+    so every filter must already fit before it gets there.
+    """
+    chunks, current = [], ""
+    for uuid in uuids:
+        term = f"&uuid={uuid}"
+        if current and len(current) + len(term) > max_length:
+            chunks.append(current)
+            current = ""
+        current += term
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def download_matrix_file_set(matrix_file_set_uuid: str, out_directory: str, connection, *, fs=None):
