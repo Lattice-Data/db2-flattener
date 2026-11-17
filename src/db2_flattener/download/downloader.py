@@ -2,6 +2,7 @@
 
 import os
 import posixpath
+from collections import defaultdict
 
 import s3fs
 
@@ -87,8 +88,9 @@ def download_matrix_file_set(matrix_file_set_uuid: str, out_directory: str, conn
     Download every RawMatrixFile of a MatrixFileSet into out_directory.
 
     A file whose target name already exists in out_directory is not downloaded;
-    a warning is printed instead. Returns (downloaded, skipped, failed) lists of
-    s3_uri strings.
+    a warning is printed instead. Files whose target names collide with each
+    other (case-insensitively) are all refused and counted as failed. Returns
+    (downloaded, skipped, failed) lists of s3_uri strings.
     """
     raw_matrix_files = fetch_raw_matrix_files(matrix_file_set_uuid, connection)
     print(f"Found {len(raw_matrix_files)} raw matrix files")
@@ -97,6 +99,7 @@ def download_matrix_file_set(matrix_file_set_uuid: str, out_directory: str, conn
     filesystem = fs if fs is not None else s3fs.S3FileSystem()
 
     downloaded, skipped, failed = [], [], []
+    planned = []
     for rmf in raw_matrix_files:
         s3_uri = rmf.get("s3_uri")
         if not s3_uri:
@@ -108,6 +111,31 @@ def download_matrix_file_set(matrix_file_set_uuid: str, out_directory: str, conn
         if not name or name in (".", "..") or os.path.basename(name) != name:
             print(f"====== WARNING ====== For {s3_uri}, invalid file name {name!r}; skipping")
             failed.append(s3_uri)
+            continue
+        planned.append((rmf, name))
+
+    # Two files resolving to one local name (e.g. Cell Ranger's
+    # filtered_feature_bc_matrix.h5 under different prefixes, or a repeated
+    # geo_file_name) would otherwise let the first one win and report the rest
+    # as "already exists". Picking one would be a guess, so none of them is
+    # downloaded. Names are compared case-insensitively because the default
+    # macOS filesystem treats GSM1.h5 and gsm1.h5 as the same file.
+    by_name = defaultdict(list)
+    for rmf, name in planned:
+        by_name[name.casefold()].append((rmf, name))
+    for group in by_name.values():
+        if len(group) > 1:
+            names = sorted({name for _, name in group})
+            uris = "\n".join(f"    {rmf['s3_uri']}" for rmf, _ in group)
+            print(
+                f"====== ERROR ====== {len(group)} raw matrix files would be saved as "
+                f"{' / '.join(names)}; none of them downloaded:\n{uris}"
+            )
+            failed.extend(rmf["s3_uri"] for rmf, _ in group)
+
+    for rmf, name in planned:
+        s3_uri = rmf["s3_uri"]
+        if len(by_name[name.casefold()]) > 1:
             continue
 
         destination = os.path.join(out_directory, name)

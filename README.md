@@ -118,8 +118,12 @@ and a warning is printed:
 ====== WARNING ====== For {s3_uri}, there already exists a file {geo_file_name}
 ```
 
-(`{geo_file_name}` only appears when the field is set.) The run exits 1 if any
-file failed to download.
+(`{geo_file_name}` only appears when the field is set.) If two or more
+RawMatrixFiles would be saved under the same name (compared case-insensitively,
+e.g. Cell Ranger's `filtered_feature_bc_matrix.h5` from different prefixes, or
+a repeated `geo_file_name`), none of them is downloaded and an error lists
+their `s3_uri`s; the other files still download. The run exits 1 if any file
+was refused or failed to download.
 
 ```bash
 db2-flattener-download -u <matrix-file-set-uuid> -m db2_demo --out-directory ./h5s

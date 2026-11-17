@@ -197,6 +197,87 @@ def test_existing_file_is_not_downloaded_and_warns(monkeypatch, tmp_path, capsys
     assert "====== WARNING ====== For s3://b/o/two.h5, there already exists a file\n" in out
 
 
+def _rmf(uuid, s3_uri, geo_file_name=None):
+    record = {"uuid": uuid, "@id": f"/raw_matrix_files/{uuid}/", "s3_uri": s3_uri}
+    if geo_file_name is not None:
+        record["geo_file_name"] = geo_file_name
+    return record
+
+
+@pytest.mark.parametrize(
+    ("clashing", "saved_as"),
+    [
+        pytest.param(
+            [
+                _rmf("1", "s3://b/s1/outs/filtered_feature_bc_matrix.h5"),
+                _rmf("2", "s3://b/s2/outs/filtered_feature_bc_matrix.h5"),
+            ],
+            "filtered_feature_bc_matrix.h5",
+            id="same-s3-basename",
+        ),
+        pytest.param(
+            [
+                _rmf("1", "s3://b/s1/a.h5", "GSM1.h5"),
+                _rmf("2", "s3://b/s2/b.h5", "GSM1.h5"),
+            ],
+            "GSM1.h5",
+            id="same-geo-file-name",
+        ),
+        pytest.param(
+            [
+                _rmf("1", "s3://b/s1/a.h5", "GSM1.h5"),
+                _rmf("2", "s3://b/s2/b.h5", "gsm1.h5"),
+            ],
+            "GSM1.h5 / gsm1.h5",
+            id="differ-only-in-case",
+        ),
+        pytest.param(
+            [
+                _rmf("1", "s3://b/s1/GSM1.h5"),
+                _rmf("2", "s3://b/s2/b.h5", "GSM1.h5"),
+            ],
+            "GSM1.h5",
+            id="s3-basename-vs-geo-file-name",
+        ),
+    ],
+)
+def test_colliding_target_names_are_all_refused(monkeypatch, tmp_path, capsys, clashing, saved_as):
+    ok = _rmf("9", "s3://b/s9/other.h5", "GSM9.h5")
+    _stub_report(monkeypatch, [*clashing, ok])
+    fs = FakeS3()
+
+    downloaded, skipped, failed = download_matrix_file_set(MFS_UUID, str(tmp_path), None, fs=fs)
+
+    assert downloaded == [ok["s3_uri"]]
+    assert skipped == []
+    assert sorted(failed) == sorted(r["s3_uri"] for r in clashing)
+    assert [call[0] for call in fs.calls] == [ok["s3_uri"]]
+    assert [p.name for p in tmp_path.iterdir()] == ["GSM9.h5"]
+    out = capsys.readouterr().out
+    assert f"2 raw matrix files would be saved as {saved_as}; none of them downloaded" in out
+    for record in clashing:
+        assert f"    {record['s3_uri']}\n" in out
+    assert "already exists" not in out
+
+
+def test_collision_is_refused_even_when_file_already_exists(monkeypatch, tmp_path):
+    """A clash is a metadata problem; a file left from an earlier run doesn't settle it."""
+    clashing = [
+        _rmf("1", "s3://b/s1/a.h5", "GSM1.h5"),
+        _rmf("2", "s3://b/s2/b.h5", "GSM1.h5"),
+    ]
+    _stub_report(monkeypatch, clashing)
+    (tmp_path / "GSM1.h5").write_text("old")
+
+    downloaded, skipped, failed = download_matrix_file_set(
+        MFS_UUID, str(tmp_path), None, fs=FakeS3()
+    )
+
+    assert downloaded == skipped == []
+    assert sorted(failed) == ["s3://b/s1/a.h5", "s3://b/s2/b.h5"]
+    assert (tmp_path / "GSM1.h5").read_text() == "old"
+
+
 def test_failed_download_leaves_no_partial_file(monkeypatch, tmp_path):
     _stub_report(
         monkeypatch,

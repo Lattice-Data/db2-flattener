@@ -9,7 +9,11 @@
   name already exists in the directory is not downloaded; a
   `====== WARNING ====== For {s3_uri}, there already exists a file
   {geo_file_name}` line is printed instead (`{geo_file_name}` only when set).
-  Exits 1 if any file fails to download (TOOLS-304).
+  RawMatrixFiles that would be saved under the same name (compared
+  case-insensitively), such as Cell Ranger's `filtered_feature_bc_matrix.h5`
+  from different prefixes or a repeated `geo_file_name`, are all refused with
+  an error listing their `s3_uri`s; the other files still download. Exits 1 if
+  any file is refused or fails to download (TOOLS-304).
 - `get_report` now splits a report URL over 8000 characters on its
   `&`-separated filter terms, whatever their key, into as many requests as
   needed. Previously it split only on `&@id=` and only in two: a long `&uuid=`
