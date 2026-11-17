@@ -1768,6 +1768,16 @@ CONDITION_CONFIGS = Configs(
             "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
             "references": {"experimental_condition": "experimental_conditions"},
         },
+        "organoids": {
+            "api_type": "Organoid",
+            "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
+            "references": {"experimental_condition": "experimental_conditions"},
+        },
+        "primary_cell_cultures": {
+            "api_type": "PrimaryCellCulture",
+            "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
+            "references": {"experimental_condition": "experimental_conditions"},
+        },
         "experimental_conditions": {
             "api_type": "ExperimentalCondition",
             "fields": ["@id", "summary"],
@@ -1782,7 +1792,7 @@ def _condition_sample(sample_id, condition=None):
     name = sample_id.strip("/").split("/")[-1]
     return {
         "@id": sample_id,
-        "@type": ["Tissue" if kind == "tissues" else "CellLine"],
+        "@type": [CONDITION_CONFIGS.OBJECT_CONFIG[kind]["api_type"]],
         "uuid": f"uuid-{name}",
         "aliases": [f"lab:{name}"],
         "sample_name": name,
@@ -1869,3 +1879,32 @@ def test_no_summary_anywhere_adds_no_na():
 
     assert sample_df["experimental_conditions_summary"].isna().all()
     assert main_df["experimental_conditions_summary"].isna().all()
+
+
+def test_summary_is_read_from_every_sample_type():
+    conditions = [
+        {"@id": f"/experimental_conditions/ec-{kind}/", "summary": f"{kind} condition"}
+        for kind in ("tissues", "cell_lines", "organoids", "primary_cell_cultures")
+    ]
+    samples = [
+        _condition_sample(f"/{kind}/s_{kind}/", f"/experimental_conditions/ec-{kind}/")
+        for kind in ("tissues", "cell_lines", "organoids", "primary_cell_cultures")
+    ]
+
+    f, main_df, sample_df = _condition_run(samples, conditions)
+
+    assert list(sample_df["experimental_conditions_summary"]) == [
+        "tissues condition",
+        "cell_lines condition",
+        "organoids condition",
+        "primary_cell_cultures condition",
+    ]
+    assert list(main_df["experimental_conditions_summary"]) == [
+        "cell_lines condition; organoids condition; "
+        "primary_cell_cultures condition; tissues condition"
+    ]
+    biosample = f.create_sra_biosample_dataframe(main_df)
+    assert list(biosample["experimental_condition_summary"]) == [
+        "pooled: cell_lines condition; organoids condition; "
+        "primary_cell_cultures condition; tissues condition"
+    ]
