@@ -1750,3 +1750,161 @@ def test_biohub_experimental_condition_summary_dedupes_joined_summaries():
     )
     biohub_df = f.create_biohub_dataframe(main_df)
     assert list(biohub_df["experimental_condition_summary"]) == ["a; b"]
+
+
+# --- experimental_condition_summary 'na' default ---
+
+CONDITION_CONFIGS = Configs(
+    FIELD_TYPES={},
+    OBJECT_CONFIG={
+        "droplet_based_libraries": MIN_CONFIGS.OBJECT_CONFIG["droplet_based_libraries"],
+        "tissues": {
+            "api_type": "Tissue",
+            "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
+            "references": {"experimental_condition": "experimental_conditions"},
+        },
+        "cell_lines": {
+            "api_type": "CellLine",
+            "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
+            "references": {"experimental_condition": "experimental_conditions"},
+        },
+        "organoids": {
+            "api_type": "Organoid",
+            "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
+            "references": {"experimental_condition": "experimental_conditions"},
+        },
+        "primary_cell_cultures": {
+            "api_type": "PrimaryCellCulture",
+            "fields": ["@id", "aliases", "sample_name", "experimental_condition"],
+            "references": {"experimental_condition": "experimental_conditions"},
+        },
+        "experimental_conditions": {
+            "api_type": "ExperimentalCondition",
+            "fields": ["@id", "summary"],
+            "references": {},
+        },
+    },
+)
+
+
+def _condition_sample(sample_id, condition=None):
+    kind = sample_id.strip("/").split("/")[0]
+    name = sample_id.strip("/").split("/")[-1]
+    return {
+        "@id": sample_id,
+        "@type": [CONDITION_CONFIGS.OBJECT_CONFIG[kind]["api_type"]],
+        "uuid": f"uuid-{name}",
+        "aliases": [f"lab:{name}"],
+        "sample_name": name,
+        "experimental_condition": condition,
+    }
+
+
+def _condition_run(samples, conditions):
+    """One GEX library on one raw matrix file pooling every sample given."""
+    f = DB2Flattener.__new__(DB2Flattener)
+    f.connection = None
+    f.configs = CONDITION_CONFIGS
+    f.gatherer = None
+    rmf = {
+        "@id": "/raw_matrix_files/r1/",
+        "uuid": "uuid-r1",
+        "aliases": ["lab:rmf1"],
+        "samples": [s["@id"] for s in samples],
+    }
+    lib = _lib("/droplet_based_libraries/d1/", ["Gene Expression"], cro="LIB_A")
+    data = _complete_data([(lib, [rmf], samples)])
+    data["libraries"]["uuid-0"]["experimental_conditions"] = conditions
+    main_df, sample_df = f.create_dataframe(data)
+    return f, main_df, sample_df
+
+
+LPS = {"@id": "/experimental_conditions/lps/", "summary": "LPS for 4 hours"}
+
+
+def test_pooled_tissue_without_summary_defaults_to_na_before_rollup():
+    _, main_df, sample_df = _condition_run(
+        [
+            _condition_sample("/tissues/t1/", LPS["@id"]),
+            _condition_sample("/tissues/t2/"),
+        ],
+        [LPS],
+    )
+
+    assert list(sample_df["experimental_conditions_summary"]) == ["LPS for 4 hours", "na"]
+    assert list(main_df["experimental_conditions_summary"]) == ["LPS for 4 hours; na"]
+
+
+def test_pooled_na_reaches_the_sheets_built_from_main():
+    f, main_df, _ = _condition_run(
+        [
+            _condition_sample("/tissues/t1/", LPS["@id"]),
+            _condition_sample("/tissues/t2/"),
+        ],
+        [LPS],
+    )
+
+    biosample = f.create_sra_biosample_dataframe(main_df)
+    sra_files = f.create_sra_files_dataframe(main_df)
+
+    assert list(biosample["experimental_condition_summary"]) == ["pooled: LPS for 4 hours; na"]
+    assert "LPS for 4 hours; na" in sra_files["title"].iloc[0]
+
+
+def test_pooled_cell_line_without_summary_stays_blank():
+    _, main_df, sample_df = _condition_run(
+        [
+            _condition_sample("/tissues/t1/", LPS["@id"]),
+            _condition_sample("/cell_lines/c1/"),
+        ],
+        [LPS],
+    )
+
+    summaries = sample_df["experimental_conditions_summary"].tolist()
+    assert summaries[0] == "LPS for 4 hours"
+    assert pd.isna(summaries[1])
+    assert list(main_df["experimental_conditions_summary"]) == ["LPS for 4 hours"]
+
+
+def test_no_summary_anywhere_adds_no_na():
+    """A condition with no summary makes the column, but leaves it empty."""
+    blank = {"@id": "/experimental_conditions/blank/", "summary": None}
+    _, main_df, sample_df = _condition_run(
+        [
+            _condition_sample("/tissues/t1/", blank["@id"]),
+            _condition_sample("/tissues/t2/"),
+        ],
+        [blank],
+    )
+
+    assert sample_df["experimental_conditions_summary"].isna().all()
+    assert main_df["experimental_conditions_summary"].isna().all()
+
+
+def test_summary_is_read_from_every_sample_type():
+    conditions = [
+        {"@id": f"/experimental_conditions/ec-{kind}/", "summary": f"{kind} condition"}
+        for kind in ("tissues", "cell_lines", "organoids", "primary_cell_cultures")
+    ]
+    samples = [
+        _condition_sample(f"/{kind}/s_{kind}/", f"/experimental_conditions/ec-{kind}/")
+        for kind in ("tissues", "cell_lines", "organoids", "primary_cell_cultures")
+    ]
+
+    f, main_df, sample_df = _condition_run(samples, conditions)
+
+    assert list(sample_df["experimental_conditions_summary"]) == [
+        "tissues condition",
+        "cell_lines condition",
+        "organoids condition",
+        "primary_cell_cultures condition",
+    ]
+    assert list(main_df["experimental_conditions_summary"]) == [
+        "cell_lines condition; organoids condition; "
+        "primary_cell_cultures condition; tissues condition"
+    ]
+    biosample = f.create_sra_biosample_dataframe(main_df)
+    assert list(biosample["experimental_condition_summary"]) == [
+        "pooled: cell_lines condition; organoids condition; "
+        "primary_cell_cultures condition; tissues condition"
+    ]

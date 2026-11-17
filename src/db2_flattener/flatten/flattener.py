@@ -554,6 +554,9 @@ class DB2Flattener:
                 subset=["raw_matrix_file_uuid", "sample_uuid"]
             )
             sample_df = pairs_df.merge(per_sample_df, on="sample_uuid", how="left")
+            # Before the rollup, which drops empty values: a tissue without a
+            # summary would otherwise vanish from a file pooling several samples
+            sample_df = self._default_tissue_condition_summary(sample_df)
 
             # MAIN already has the file alias from shared, and carries each sample
             # type's _uuid column, so neither is rolled up again
@@ -579,7 +582,11 @@ class DB2Flattener:
         Build the SAMPLES sheet from post-merge sample_df: keep mapped columns,
         and rename them.
         """
-        sample_df = sample_df.copy()
+        # The summary got its default in create_dataframe; the terms are still
+        # controlled-term dicts there, so they get theirs here, once split
+        sample_df = self._default_tissue_condition_summary(
+            sample_df.copy(), col="experimental_conditions_controlled_terms_term_name"
+        )
         plate_experiment = self._frame_has_plate_library(sample_df)
 
         columns_to_keep = [k for k in PROP_MAP_SAMPLES if k in sample_df.columns]
@@ -2487,6 +2494,33 @@ class DB2Flattener:
         if col not in df.columns:
             return pd.Series(False, index=df.index)
         return df[col].map(lambda v: not is_empty(v))
+
+    @classmethod
+    def _default_tissue_condition_summary(
+        cls, df, col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL
+    ) -> pd.DataFrame:
+        """
+        Fill an empty ExperimentalCondition field with 'na' on Tissue rows.
+
+        Only when some row has a value: a column that exists but is empty
+        everywhere is dropped later, and must not be revived as all 'na'.
+
+        create_dataframe calls this on the per-sample frame, before the rollup
+        to one MAIN row per file drops empty values, so a pooled file reports
+        'na' beside its other samples' summaries on every sheet. 'col' picks
+        another column, such as SAMPLES' controlled term names.
+        """
+        if col not in df.columns:
+            return df
+        empty = df[col].map(is_empty)
+        if empty.all():
+            return df
+        missing = empty & cls._tissue_row_mask(df)
+        if not missing.any():
+            return df
+        df = df.copy()
+        df.loc[missing, col] = "na"
+        return df
 
     def _add_samples_donor_ethnicity(self, sample_df) -> pd.DataFrame:
         """SRA-style pooled ethnicity for tissue rows only; drop source columns."""
