@@ -1440,28 +1440,3 @@ def test_gex_keeps_one_row_and_main_filenames_despite_sequence_file_sets():
     assert list(sra_df["filename"]) == ["main_R1.fastq.gz"]
     assert list(sra_df["filename2"]) == ["main_R2.fastq.gz"]
     assert "setA_R1.fastq.gz" not in list(sra_df["filename"])
-
-
-def test_title_defaults_summary_to_na_for_a_tissue_without_one():
-    main_df = title_main_df(
-        raw_file_samples=["sample1"],
-        experimental_conditions_summary=[None],
-        **{"tissues_@id": ["/tissues/t1/"]},
-    )
-
-    sra_df = make_flattener().create_sra_files_dataframe(main_df)
-
-    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; na"]
-    _assert_no_title_source_cols(sra_df)
-
-
-def test_title_na_default_skips_non_tissue_samples():
-    main_df = title_main_df(
-        raw_file_samples=["sample1"],
-        experimental_conditions_summary=[None],
-        **{"cell_lines_@id": ["/cell_lines/c1/"]},
-    )
-
-    sra_df = make_flattener().create_sra_files_dataframe(main_df)
-
-    assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq"]

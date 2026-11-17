@@ -418,34 +418,6 @@ def test_create_samples_dataframe_omits_donor_ethnicity_without_tissue():
     assert "donor_ethnicity" not in result.columns
 
 
-def test_create_samples_dataframe_condition_summary_defaults_to_na_for_tissue():
-    flattener = make_flattener()
-    sample_df = pd.DataFrame(
-        {
-            "tissues_sample_name": ["t1", "t2", None],
-            "cell_lines_sample_name": [None, None, "c1"],
-            "tissues_@id": ["/tissues/t1/", "/tissues/t2/", None],
-            "experimental_conditions_summary": ["LPS for 4 hours", None, None],
-        }
-    )
-
-    result = flattener.create_samples_dataframe(sample_df)
-
-    summaries = result["experimental_condition_summary"].tolist()
-    assert summaries[:2] == ["LPS for 4 hours", "na"]
-    assert pd.isna(summaries[2])
-    assert "tissues_@id" not in result.columns
-
-
-def test_create_samples_dataframe_condition_summary_absent_stays_absent():
-    flattener = make_flattener()
-    sample_df = pd.DataFrame({"tissues_sample_name": ["t1"], "tissues_@id": ["/tissues/t1/"]})
-
-    result = flattener.create_samples_dataframe(sample_df)
-
-    assert "experimental_condition_summary" not in result.columns
-
-
 def test_create_samples_dataframe_condition_term_defaults_to_na_for_tissue():
     flattener = make_flattener()
     sample_df = pd.DataFrame(

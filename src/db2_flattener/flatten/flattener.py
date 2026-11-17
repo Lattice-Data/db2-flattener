@@ -553,6 +553,9 @@ class DB2Flattener:
                 subset=["raw_matrix_file_uuid", "sample_uuid"]
             )
             sample_df = pairs_df.merge(per_sample_df, on="sample_uuid", how="left")
+            # Before the rollup, which drops empty values: a tissue without a
+            # summary would otherwise vanish from a file pooling several samples
+            sample_df = self._default_tissue_condition_summary(sample_df)
 
             # MAIN already has the file alias from shared, and carries each sample
             # type's _uuid column, so neither is rolled up again
@@ -578,9 +581,10 @@ class DB2Flattener:
         Build the SAMPLES sheet from post-merge sample_df: keep mapped columns,
         and rename them.
         """
-        sample_df = self._default_tissue_condition_summary(sample_df.copy())
+        # The summary got its default in create_dataframe; the terms are still
+        # controlled-term dicts there, so they get theirs here, once split
         sample_df = self._default_tissue_condition_summary(
-            sample_df, col="experimental_conditions_controlled_terms_term_name"
+            sample_df.copy(), col="experimental_conditions_controlled_terms_term_name"
         )
         plate_experiment = self._frame_has_plate_library(sample_df)
 
@@ -716,7 +720,7 @@ class DB2Flattener:
         Expects _term_name columns (not raw dict columns).
         """
         geo_mask = main_df.apply(self._row_is_geo_library, axis=1)
-        geo_source = self._default_tissue_condition_summary(main_df[geo_mask].copy())
+        geo_source = main_df[geo_mask].copy()
         print(f"GEO: filtered to {len(geo_source)} GEX/ATAC rows out of {len(main_df)} MAIN rows")
 
         # *SRA Experiment or Run (and *BioSample, read out of it below) are required
@@ -1153,7 +1157,6 @@ class DB2Flattener:
         # The one cell taken from the unfiltered frame, so it has to be built here
         library_id = self._library_ids_by_group(main_df, gex_mask, library_ids=library_ids)
         main_df = main_df[gex_mask].reset_index(drop=True)
-        main_df = self._default_tissue_condition_summary(main_df)
         if main_df.empty:
             return pd.DataFrame()
 
@@ -1793,9 +1796,6 @@ class DB2Flattener:
 
         if main_df.empty:
             return pd.DataFrame()
-
-        # Before the collapse: the summary is part of the title
-        main_df = self._default_tissue_condition_summary(main_df)
 
         title_source_cols = []
         seen = set()
@@ -2478,24 +2478,30 @@ class DB2Flattener:
 
     @classmethod
     def _default_tissue_condition_summary(
-        cls, main_df, col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL
+        cls, df, col: str = EXPERIMENTAL_CONDITION_SUMMARY_COL
     ) -> pd.DataFrame:
         """
         Fill an empty ExperimentalCondition field with 'na' on Tissue rows.
 
-        Only when the column is present at all. Every sheet reading the summary
-        calls this on MAIN before its rows are collapsed, so a pooled library
-        reports 'na' beside its other samples' summaries. 'col' picks another
-        ExperimentalCondition column, such as SAMPLES' controlled term names.
+        Only when some row has a value: a column that exists but is empty
+        everywhere is dropped later, and must not be revived as all 'na'.
+
+        create_dataframe calls this on the per-sample frame, before the rollup
+        to one MAIN row per file drops empty values, so a pooled file reports
+        'na' beside its other samples' summaries on every sheet. 'col' picks
+        another column, such as SAMPLES' controlled term names.
         """
-        if col not in main_df.columns:
-            return main_df
-        missing = main_df[col].map(is_empty) & cls._tissue_row_mask(main_df)
+        if col not in df.columns:
+            return df
+        empty = df[col].map(is_empty)
+        if empty.all():
+            return df
+        missing = empty & cls._tissue_row_mask(df)
         if not missing.any():
-            return main_df
-        main_df = main_df.copy()
-        main_df.loc[missing, col] = "na"
-        return main_df
+            return df
+        df = df.copy()
+        df.loc[missing, col] = "na"
+        return df
 
     def _add_samples_donor_ethnicity(self, sample_df) -> pd.DataFrame:
         """SRA-style pooled ethnicity for tissue rows only; drop source columns."""
@@ -3067,7 +3073,6 @@ class DB2Flattener:
         Build Biohub samples dataframe from main_df
         """
         plate_experiment = self._frame_has_plate_library(main_df)
-        main_df = self._default_tissue_condition_summary(main_df)
         columns_to_keep = [k for k in PROP_MAP_BIOHUB if k in main_df.columns]
         columns_to_keep.extend([k for k in main_df.columns if re.search("_author_metadata_", k)])
         # Multiplexed rows already carry sample_name from the sample. Keeping

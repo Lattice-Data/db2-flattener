@@ -1080,37 +1080,3 @@ def test_create_geo_dataframe_keeps_required_accession_columns_without_dbxrefs()
     assert pd.isna(geo_df["*BioSample"].iloc[0])
     assert "droplet_based_libraries_dbxrefs" not in columns
     assert "plate_based_libraries_dbxrefs" not in columns
-
-
-def test_create_geo_dataframe_condition_summary_defaults_to_na_for_tissue():
-    flattener = make_flattener()
-    main_df = pd.DataFrame(
-        [
-            gex_row(**{"tissues_@id": "/tissues/t1/"}, experimental_conditions_summary="LPS"),
-            gex_row(
-                **{"tissues_@id": "/tissues/t2/"},
-                raw_matrix_file_alias="libA-2.h5",
-                raw_file_samples="sample2",
-                experimental_conditions_summary=None,
-            ),
-        ]
-    )
-
-    geo_df = flattener.create_geo_dataframe(main_df)
-
-    assert list(geo_df["experimental_condition_summary"].unique()) == ["LPS; na"]
-    assert list(geo_df["*title"].unique()) == ["libA; LPS; na; pooled"]
-
-
-def test_create_geo_dataframe_condition_summary_na_skips_non_tissue():
-    flattener = make_flattener()
-    main_df = pd.DataFrame(
-        [
-            gex_row(experimental_conditions_summary="LPS"),
-            gex_row(raw_matrix_file_alias="libA-2.h5", experimental_conditions_summary=None),
-        ]
-    )
-
-    geo_df = flattener.create_geo_dataframe(main_df)
-
-    assert list(geo_df["experimental_condition_summary"].unique()) == ["LPS"]

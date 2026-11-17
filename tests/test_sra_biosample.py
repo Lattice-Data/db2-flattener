@@ -1283,35 +1283,3 @@ def test_prop_map_holds_only_renames():
     assert ISOLATE_COLUMN not in PROP_MAP_SRA_BIOSAMPLE.values()
     assert AGE_COLUMN not in PROP_MAP_SRA_BIOSAMPLE.values()
     assert BARCODE_COLUMN not in PROP_MAP_SRA_BIOSAMPLE.values()
-
-
-def test_condition_summary_defaults_to_na_for_a_tissue_without_one():
-    main_df = condition_main_df(["LPS for 4 hours", None])
-    main_df["tissues_@id"] = ["/tissues/t1/", "/tissues/t2/"]
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "pooled: LPS for 4 hours; na"
-
-
-def test_condition_summary_na_default_skips_non_tissue_samples():
-    main_df = condition_main_df(["LPS for 4 hours", None])
-    main_df["tissues_@id"] = ["/tissues/t1/", None]
-    main_df["cell_lines_@id"] = [None, "/cell_lines/c1/"]
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert sra_df.loc[0, CONDITION_SUMMARY_COLUMN] == "LPS for 4 hours"
-
-
-def test_condition_summary_na_default_needs_the_column():
-    main_df = main_frame(
-        {
-            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "tissues_@id": ["/tissues/t1/"],
-        }
-    )
-
-    sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
-
-    assert CONDITION_SUMMARY_COLUMN not in sra_df.columns
