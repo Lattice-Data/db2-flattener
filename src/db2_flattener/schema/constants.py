@@ -273,6 +273,12 @@ SRA_FILE_PLATFORM_PREFIXES = (
     ("Ultima", "ULTIMA"),
 )
 
+# SRA_FILE instrument_model values rewritten from the DB2 sequencing_platform
+# value. Kept apart from GEO_INSTRUMENT_MODEL_MAP so the two sheets can diverge.
+SRA_FILE_INSTRUMENT_MODEL_MAP = {
+    "Ultima Genomics UG 100": "UG 100",
+}
+
 BIOHUB_SORT_ONTOLOGY_IDS = [
     "disease_ontology_term_id",
     "experimental_condition_ontology_term_id",

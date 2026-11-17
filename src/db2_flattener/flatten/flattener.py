@@ -38,6 +38,7 @@ from db2_flattener.schema.constants import (
     PROP_MAP_SRA_FILE,
     REFORMAT_LIST,
     SEX_ONTOLOGY_MAP,
+    SRA_FILE_INSTRUMENT_MODEL_MAP,
     SRA_FILE_LIBRARY_LAYOUT_MAP,
     SRA_FILE_LIBRARY_SELECTION_MAP,
     SRA_FILE_LIBRARY_SOURCE_MAP,
@@ -1863,6 +1864,9 @@ class DB2Flattener:
             sra_df["platform"] = sequencing_platform.map(self._map_sra_platform)
         if "instrument_model" not in sra_df.columns:
             sra_df["instrument_model"] = None
+        # Mapped before the collapse, like platform, so libraries spanning several
+        # values (list or '; '-joined cells) are rewritten per value too
+        sra_df["instrument_model"] = sra_df["instrument_model"].map(self._map_sra_instrument_model)
         if "filetype" not in sra_df.columns:
             sra_df["filetype"] = None
 
@@ -2097,6 +2101,21 @@ class DB2Flattener:
             "library_layout (paired or single)"
         )
         return None
+
+    @classmethod
+    def _map_sra_instrument_model(cls, val):
+        """Rewrite instrument models through SRA_FILE_INSTRUMENT_MODEL_MAP.
+
+        Takes a string, a '; '-joined string, or a list, and returns the same
+        shape with each value mapped. Anything else (None, NaN) is unchanged.
+        """
+        if isinstance(val, (list, tuple)):
+            return [cls._map_sra_instrument_model(item) for item in val]
+        if isinstance(val, str):
+            return "; ".join(
+                SRA_FILE_INSTRUMENT_MODEL_MAP.get(part, part) for part in val.split("; ")
+            )
+        return val
 
     @staticmethod
     def _map_sra_platform(val):

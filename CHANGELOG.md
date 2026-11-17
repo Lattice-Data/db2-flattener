@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- SRA_FILE `instrument_model` now reads `UG 100` instead of
+  `Ultima Genomics UG 100`, via the new `SRA_FILE_INSTRUMENT_MODEL_MAP`
+  (separate from the GEO map). Other instrument models are unchanged.
 - BIOHUB `samples_template_set{N}_v{M}.csv` gains an `intended_cell_types`
   column: the ControlledTerm `term_name`s from `CellLine.intended_cell_types`
   and `Organoid.intended_cell_types`, joined with `|` when there are several.
