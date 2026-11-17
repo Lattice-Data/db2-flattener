@@ -43,30 +43,57 @@ class Connection:
         self.auth = (self.authid, self.authpw)
 
 
+MAX_REPORT_URL_LENGTH = 8000
+
+
+def _report_urls(obj_type, filter_url, field_lst, connection, max_length=MAX_REPORT_URL_LENGTH):
+    """
+    Return report URLs that together cover filter_url, each at most max_length long.
+
+    A URL that fits is returned as is. Otherwise the filter is split on its
+    "&"-separated terms, whatever their key (uuid=, @id=, ...), and packed into
+    as many URLs as needed. A non-empty filter never produces an unfiltered
+    URL; a single term too long to fit raises ValueError instead of being sent.
+    """
+    field_url = "".join(["&field=" + i for i in field_lst])
+
+    def build(filter_part):
+        return urljoin(
+            connection.server,
+            f"report/?type={obj_type}{filter_part}{field_url}&format=json&limit=all",
+        )
+
+    url = build(filter_url)
+    if len(url) <= max_length:
+        return [url]
+
+    terms = [term for term in filter_url.split("&") if term]
+    if not terms:
+        raise ValueError(f"report URL for {obj_type} exceeds {max_length} characters")
+
+    budget = max_length - len(build(""))
+    chunks, current = [], ""
+    for term in terms:
+        piece = "&" + term
+        if len(piece) > budget:
+            raise ValueError(
+                f"report filter term {term[:80]!r} is too long to fit in a "
+                f"{max_length}-character URL for {obj_type}"
+            )
+        if current and len(current) + len(piece) > budget:
+            chunks.append(current)
+            current = ""
+        current += piece
+    chunks.append(current)
+    return [build(chunk) for chunk in chunks]
+
+
 def get_report(obj_type, filter_url, field_lst, connection):
     """
     Constructs a report url of fields in field_list for the objects determined by the filter and returns list of dictionaries from @graph
-    Will split url into two requests if url is > 8000 characters, and still return a single list of dictionaries from @graph
+    URLs over MAX_REPORT_URL_LENGTH are split into as many filtered requests as needed (see _report_urls); results are returned as a single list of dictionaries from @graph
     """
-    field_url = "".join(["&field=" + i for i in field_lst])
-    url1 = urljoin(
-        connection.server, f"report/?type={obj_type}{filter_url}{field_url}&format=json&limit=all"
-    )
-    urls = []
-    if len(url1) > 8000:
-        filter_lst = filter_url.split("&@id=")
-        filter_url1 = "".join(["&@id=" + i for i in filter_lst[: len(filter_lst) // 2]])
-        filter_url2 = "".join(["&@id=" + i for i in filter_lst[len(filter_lst) // 2 :]])
-        url1 = urljoin(
-            connection.server,
-            f"report/?type={obj_type}{filter_url1}{field_url}&format=json&limit=all",
-        )
-        url2 = urljoin(
-            connection.server,
-            f"report/?type={obj_type}{filter_url2}{field_url}&format=json&limit=all",
-        )
-        urls.append(url2)
-    urls.append(url1)
+    urls = _report_urls(obj_type, filter_url, field_lst, connection)
     graph = []
     for url in urls:
         obj = requests.get(url, auth=connection.auth)

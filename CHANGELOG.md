@@ -10,6 +10,12 @@
   `====== WARNING ====== For {s3_uri}, there already exists a file
   {geo_file_name}` line is printed instead (`{geo_file_name}` only when set).
   Exits 1 if any file fails to download (TOOLS-304).
+- `get_report` now splits a report URL over 8000 characters on its
+  `&`-separated filter terms, whatever their key, into as many requests as
+  needed. Previously it split only on `&@id=` and only in two: a long `&uuid=`
+  filter produced one request with no filter at all (returning every object of
+  that type), and `&@id=` filters gained an empty `&@id=` term. A filter term
+  too long to fit now raises instead of being sent (TOOLS-304).
 - BIOHUB `samples_template_set{N}_v{M}.csv` gains an `intended_cell_types`
   column: the ControlledTerm `term_name`s from `CellLine.intended_cell_types`
   and `Organoid.intended_cell_types`, joined with `|` when there are several.
