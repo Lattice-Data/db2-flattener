@@ -71,16 +71,122 @@ def test_short_filter_is_one_unchanged_request(monkeypatch):
     ]
 
 
-def test_mixed_filter_keys_are_all_kept(monkeypatch):
-    sent = _capture(monkeypatch)
-    terms = [("uuid" if i % 2 else "@id", f"value-{i:04d}-" + "x" * 30) for i in range(400)]
-    get_report("Sample", "".join(f"&{k}={v}" for k, v in terms), FIELDS, Conn())
+def _matches(obj, query_terms):
+    """snovault-style filter: same key OR'd, different keys AND'd, "key!" negated."""
+    by_key = {}
+    for key, value in query_terms:
+        by_key.setdefault(key, set()).add(value)
+    for key, values in by_key.items():
+        if key.endswith("!"):
+            if obj.get(key[:-1]) in values:
+                return False
+        elif obj.get(key) not in values:
+            return False
+    return True
+
+
+FILTER_SKIP = {"type", "field", "format", "limit"}
+
+
+def _query_filter(url):
+    query = parse_qsl(urlparse(url).query, keep_blank_values=True)
+    return [(k, v) for k, v in query if k not in FILTER_SKIP]
+
+
+def _serve(monkeypatch, database):
+    sent = []
+
+    def fake_get(url, auth=None):
+        sent.append(url)
+        terms = _query_filter(url)
+        response = mock.Mock()
+        response.json.return_value = {"@graph": [o for o in database if _matches(o, terms)]}
+        return response
+
+    monkeypatch.setattr(lattice.requests, "get", fake_get)
+    return sent
+
+
+DATABASE = [
+    {
+        "@id": f"/samples/{uuid_mod.UUID(int=i)}/",
+        "uuid": str(uuid_mod.UUID(int=i)),
+        "status": ["released", "in progress", "deleted"][i % 3],
+        "lab": ["/labs/a/", "/labs/b/"][i % 2],
+    }
+    for i in range(600)
+]
+
+
+def _expected(filter_url):
+    terms = parse_qsl(filter_url.lstrip("&"), keep_blank_values=True)
+    return sorted(o["uuid"] for o in DATABASE if _matches(o, terms))
+
+
+@pytest.mark.parametrize(
+    "filter_url",
+    [
+        pytest.param(
+            "&status=released" + "".join(f"&@id={o['@id']}" for o in DATABASE[:400]),
+            id="one-and-term-plus-many-ids",
+        ),
+        pytest.param(
+            "".join(f"&@id={o['@id']}" for o in DATABASE[:400]) + "&status!=deleted",
+            id="negated-term-after-ids",
+        ),
+        pytest.param(
+            "&status=released&status=in progress&lab=/labs/a/"
+            + "".join(f"&uuid={o['uuid']}" for o in DATABASE[:400]),
+            id="two-multi-value-keys",
+        ),
+        pytest.param(
+            "".join(f"&uuid={o['uuid']}" for o in DATABASE[:300])
+            + "".join(f"&@id={o['@id']}" for o in DATABASE[150:170]),
+            id="uuid-and-id-both-required",
+        ),
+    ],
+)
+def test_split_preserves_filter_meaning(monkeypatch, filter_url):
+    """The union of the split requests returns exactly what the unsplit filter means."""
+    sent = _serve(monkeypatch, DATABASE)
+
+    graph = get_report("Sample", filter_url, FIELDS, Conn())
+
     assert len(sent) > 1
-    assert [t for url in sent for t in _filter_terms(url)] == terms
+    assert all(len(url) <= MAX_REPORT_URL_LENGTH for url in sent)
+    assert sorted(o["uuid"] for o in graph) == _expected(filter_url)
+
+
+def test_split_repeats_every_other_term_in_each_request(monkeypatch):
+    sent = _serve(monkeypatch, DATABASE)
+    ids = [o["@id"] for o in DATABASE[:400]]
+    filter_url = "&status=released&lab=/labs/a/&status!=deleted" + "".join(f"&@id={i}" for i in ids)
+
+    get_report("Sample", filter_url, FIELDS, Conn())
+
+    assert len(sent) > 1
+    split_values = []
+    for url in sent:
+        terms = _query_filter(url)
+        others = [t for t in terms if t[0] != "@id"]
+        assert others == [("status", "released"), ("lab", "/labs/a/"), ("status!", "deleted")]
+        split_values.extend(v for k, v in terms if k == "@id")
+    assert split_values == ids
 
 
 def test_single_oversized_term_raises_instead_of_sending(monkeypatch):
     sent = _capture(monkeypatch)
-    with pytest.raises(ValueError, match="too long"):
+    with pytest.raises(ValueError, match="can't fit"):
         get_report("Sample", "&uuid=" + "x" * 9000, FIELDS, Conn())
+    assert sent == []
+
+
+def test_two_large_keys_raise_instead_of_changing_meaning(monkeypatch):
+    """Only one key is split; when the repeated keys alone don't fit, nothing is sent."""
+    sent = _capture(monkeypatch)
+    filter_url = "".join(f"&uuid={o['uuid']}" for o in DATABASE[:300]) + "".join(
+        f"&@id={o['@id']}" for o in DATABASE[:299]
+    )
+    with pytest.raises(ValueError, match="can't fit"):
+        get_report("Sample", filter_url, FIELDS, Conn())
     assert sent == []

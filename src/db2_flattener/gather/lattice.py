@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+from collections import Counter
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -50,10 +51,16 @@ def _report_urls(obj_type, filter_url, field_lst, connection, max_length=MAX_REP
     """
     Return report URLs that together cover filter_url, each at most max_length long.
 
-    A URL that fits is returned as is. Otherwise the filter is split on its
-    "&"-separated terms, whatever their key (uuid=, @id=, ...), and packed into
-    as many URLs as needed. A non-empty filter never produces an unfiltered
-    URL; a single term too long to fit raises ValueError instead of being sent.
+    A URL that fits is returned as is. Otherwise one key's values are spread
+    across as many URLs as needed, and every other filter term is repeated in
+    each URL.
+
+    Repeated values of one key are OR'd and different keys are AND'd, so
+    splitting a single key while keeping the rest preserves the filter exactly:
+    (a1 OR a2) AND b == (a1 AND b) OR (a2 AND b). The key split is the one with
+    the most terms. A non-empty filter never produces an unfiltered URL; if the
+    repeated terms plus any one split value can't fit, ValueError is raised
+    instead of sending anything.
     """
     field_url = "".join(["&field=" + i for i in field_lst])
 
@@ -71,21 +78,30 @@ def _report_urls(obj_type, filter_url, field_lst, connection, max_length=MAX_REP
     if not terms:
         raise ValueError(f"report URL for {obj_type} exceeds {max_length} characters")
 
-    budget = max_length - len(build(""))
+    def key_of(term):
+        # "status!=deleted" has key "status!", distinct from "status".
+        return term.split("=", 1)[0]
+
+    counts = Counter(key_of(term) for term in terms)
+    split_key = max(counts, key=counts.get)  # ties: the key seen first
+    fixed = "".join("&" + term for term in terms if key_of(term) != split_key)
+    split_pieces = ["&" + term for term in terms if key_of(term) == split_key]
+
+    budget = max_length - len(build(fixed))
     chunks, current = [], ""
-    for term in terms:
-        piece = "&" + term
+    for piece in split_pieces:
         if len(piece) > budget:
             raise ValueError(
-                f"report filter term {term[:80]!r} is too long to fit in a "
-                f"{max_length}-character URL for {obj_type}"
+                f"report filter for {obj_type} can't fit in a {max_length}-character URL: "
+                f"{piece[1:81]!r} plus the {len(fixed)} characters of other filter terms "
+                "repeated in every request"
             )
         if current and len(current) + len(piece) > budget:
             chunks.append(current)
             current = ""
         current += piece
     chunks.append(current)
-    return [build(chunk) for chunk in chunks]
+    return [build(fixed + chunk) for chunk in chunks]
 
 
 def get_report(obj_type, filter_url, field_lst, connection):

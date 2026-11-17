@@ -14,12 +14,15 @@
   from different prefixes or a repeated `geo_file_name`, are all refused with
   an error listing their `s3_uri`s; the other files still download. Exits 1 if
   any file is refused or fails to download (TOOLS-304).
-- `get_report` now splits a report URL over 8000 characters on its
-  `&`-separated filter terms, whatever their key, into as many requests as
-  needed. Previously it split only on `&@id=` and only in two: a long `&uuid=`
-  filter produced one request with no filter at all (returning every object of
-  that type), and `&@id=` filters gained an empty `&@id=` term. A filter term
-  too long to fit now raises instead of being sent (TOOLS-304).
+- `get_report` now splits a report URL over 8000 characters by spreading the
+  values of one filter key (the one with the most terms) across as many
+  requests as needed, repeating every other filter term in each request, so
+  the AND/OR meaning of the filter is unchanged. Previously it split only on
+  `&@id=` and only in two: a long `&uuid=` filter produced one request with no
+  filter at all (returning every object of that type), and `&@id=` filters
+  gained an empty `&@id=` term. A filter that can't be split to fit (a single
+  oversized term, or repeated terms already over the limit) now raises instead
+  of being sent (TOOLS-304).
 - BIOHUB `samples_template_set{N}_v{M}.csv` gains an `intended_cell_types`
   column: the ControlledTerm `term_name`s from `CellLine.intended_cell_types`
   and `Organoid.intended_cell_types`, joined with `|` when there are several.
