@@ -190,3 +190,66 @@ def test_two_large_keys_raise_instead_of_changing_meaning(monkeypatch):
     with pytest.raises(ValueError, match="can't fit"):
         get_report("Sample", filter_url, FIELDS, Conn())
     assert sent == []
+
+
+FILES = [
+    {
+        "@id": f"/raw_matrix_files/{i}/",
+        "samples": [f"/samples/{i:045d}/", f"/samples/{i + 1:045d}/"],
+    }
+    for i in range(300)
+]
+
+
+def _serve_list_field(monkeypatch, database, key):
+    """Fake server for a list-valued field: an object matches if any value is requested."""
+    sent = []
+
+    def fake_get(url, auth=None):
+        sent.append(url)
+        wanted = {v for k, v in parse_qsl(urlparse(url).query) if k == key}
+        response = mock.Mock()
+        response.json.return_value = {"@graph": [o for o in database if wanted & set(o[key])]}
+        return response
+
+    monkeypatch.setattr(lattice.requests, "get", fake_get)
+    return sent
+
+
+def test_split_on_list_field_returns_each_object_once(monkeypatch):
+    """A file whose two samples land in different chunks must not come back twice."""
+    sent = _serve_list_field(monkeypatch, FILES, "samples")
+    filter_url = "".join(f"&samples=/samples/{i:045d}/" for i in range(301))
+
+    graph = get_report("RawMatrixFile", filter_url, FIELDS, Conn())
+
+    assert len(sent) > 1
+    ids = [o["@id"] for o in graph]
+    assert len(ids) == len(set(ids))
+    assert sorted(ids) == sorted(f["@id"] for f in FILES)
+
+
+def test_repeated_values_in_long_filter_are_requested_once(monkeypatch):
+    sent = _serve(monkeypatch, DATABASE)
+    ids = [o["@id"] for o in DATABASE[:200]]
+    filter_url = "".join(f"&@id={i}" for i in ids + ids)
+
+    graph = get_report("Sample", filter_url, FIELDS, Conn())
+
+    assert len(sent) > 1
+    requested = [v for url in sent for k, v in _query_filter(url) if k == "@id"]
+    assert requested == ids
+    assert [o["@id"] for o in graph] == ids
+
+
+def test_split_keeps_objects_without_an_id(monkeypatch):
+    def fake_get(url, auth=None):
+        response = mock.Mock()
+        response.json.return_value = {"@graph": [{"uuid": "no-id"}]}
+        return response
+
+    monkeypatch.setattr(lattice.requests, "get", fake_get)
+    filter_url = "".join(f"&uuid={o['uuid']}" for o in DATABASE[:400])
+    graph = get_report("Sample", filter_url, FIELDS, Conn())
+    assert len(graph) > 1
+    assert all(o == {"uuid": "no-id"} for o in graph)

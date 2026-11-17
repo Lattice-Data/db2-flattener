@@ -85,7 +85,8 @@ def _report_urls(obj_type, filter_url, field_lst, connection, max_length=MAX_REP
     counts = Counter(key_of(term) for term in terms)
     split_key = max(counts, key=counts.get)  # ties: the key seen first
     fixed = "".join("&" + term for term in terms if key_of(term) != split_key)
-    split_pieces = ["&" + term for term in terms if key_of(term) == split_key]
+    # A value repeated across chunks would return the same objects twice.
+    split_pieces = list(dict.fromkeys("&" + term for term in terms if key_of(term) == split_key))
 
     budget = max_length - len(build(fixed))
     chunks, current = [], ""
@@ -121,7 +122,28 @@ def get_report(obj_type, filter_url, field_lst, connection):
                 continue
             raise
         graph.extend(obj.json().get("@graph"))
+    if len(urls) > 1:
+        graph = _dedupe_by_id(graph)
     return graph
+
+
+def _dedupe_by_id(graph):
+    """
+    Drop repeat objects (same @id) from split requests, keeping the first.
+
+    When the split key is a list field (e.g. samples), one object can match
+    values in two chunks. Objects without an @id are kept as they are.
+    """
+    seen = set()
+    unique = []
+    for obj in graph:
+        object_id = obj.get("@id") if isinstance(obj, dict) else None
+        if object_id is not None:
+            if object_id in seen:
+                continue
+            seen.add(object_id)
+        unique.append(obj)
+    return unique
 
 
 def _separator_for_file(file_info):
