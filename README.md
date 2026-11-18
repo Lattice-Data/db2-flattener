@@ -106,6 +106,30 @@ Layout:
 ```
 
 
+## Download a MatrixFileSet's raw matrix files
+
+`db2-flattener-download` downloads every RawMatrixFile of a MatrixFileSet from
+its `s3_uri` into `--out-directory` (created if missing). A file with a
+`geo_file_name` is saved under that name; otherwise it keeps its S3 file name.
+If a file of that name already exists in the directory it is not downloaded,
+and a warning is printed:
+
+```
+====== WARNING ====== For {s3_uri}, there already exists a file {geo_file_name}
+```
+
+(`{geo_file_name}` only appears when the field is set.) If two or more
+RawMatrixFiles would be saved under the same name (compared case-insensitively,
+e.g. Cell Ranger's `filtered_feature_bc_matrix.h5` from different prefixes, or
+a repeated `geo_file_name`), none of them is downloaded and an error lists
+their `s3_uri`s; the other files still download. The run exits 1 if any file
+was refused or failed to download.
+
+```bash
+db2-flattener-download -u <matrix-file-set-uuid> -m db2_demo --out-directory ./h5s
+python -m db2_flattener.download -u <matrix-file-set-uuid> -m db2_demo -o ./h5s
+```
+
 ## Fetch latest schema from Lattice
 
 After the editable install, the following can be used to run

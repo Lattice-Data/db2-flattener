@@ -37,6 +37,7 @@ Issues = "https://github.com/Lattice-Data/db2-flattener/issues"
 
 [project.scripts]
 db2-flattener = "db2_flattener.cli:main"
+db2-flattener-download = "db2_flattener.download.cli:main"
 db2-flattener-generate-constants = "db2_flattener.schema.generate:main"
 
 [tool.hatch.version]

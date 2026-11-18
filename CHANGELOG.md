@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- New `db2-flattener-download` command (`src/db2_flattener/download/`, also
+  `python -m db2_flattener.download`): given a MatrixFileSet `--uuid`, downloads
+  each RawMatrixFile from its `s3_uri` into `--out-directory`, saved as its
+  `geo_file_name` when set and under its S3 file name otherwise. A file whose
+  name already exists in the directory is not downloaded; a
+  `====== WARNING ====== For {s3_uri}, there already exists a file
+  {geo_file_name}` line is printed instead (`{geo_file_name}` only when set).
+  RawMatrixFiles that would be saved under the same name (compared
+  case-insensitively), such as Cell Ranger's `filtered_feature_bc_matrix.h5`
+  from different prefixes or a repeated `geo_file_name`, are all refused with
+  an error listing their `s3_uri`s; the other files still download. Exits 1 if
+  any file is refused or fails to download (TOOLS-304).
+- `get_report` now splits a report URL over 8000 characters by spreading the
+  values of one filter key (the one with the most terms) across as many
+  requests as needed, repeating every other filter term in each request, so
+  the AND/OR meaning of the filter is unchanged. Previously it split only on
+  `&@id=` and only in two: a long `&uuid=` filter produced one request with no
+  filter at all (returning every object of that type), and `&@id=` filters
+  gained an empty `&@id=` term. A filter that can't be split to fit (a single
+  oversized term, or repeated terms already over the limit) now raises instead
+  of being sent. A split request sends each value once and returns each object
+  (by `@id`) once, even when the split key is a list field such as `samples`
+  (TOOLS-304).
 - SRA_FILE `instrument_model` now reads `UG 100` instead of
   `Ultima Genomics UG 100`, via the new `SRA_FILE_INSTRUMENT_MODEL_MAP`
   (separate from the GEO map). Other instrument models are unchanged.
