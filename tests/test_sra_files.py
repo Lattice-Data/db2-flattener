@@ -5,13 +5,15 @@ identifier plus a feature-type suffix. library_strategy, library_source, and
 library_selection are derived from feature_types. library_layout is derived
 from sequence_file_sets_run_cardinality. platform is derived from
 sequence_file_sets_sequencing_platform; instrument_model is that same
-field without a value transform. filetype is sequence_files_file_format
+field, with values in SRA_FILE_INSTRUMENT_MODEL_MAP rewritten (Ultima
+Genomics UG 100 -> UG 100) and all others unchanged. filetype is sequence_files_file_format
 without a value transform. title follows GEO *title: library and strategy,
 ExperimentalCondition summary, pooled, genetic modification strategy.
 Every library is kept, including non-GEX.
 """
 
 import pandas as pd
+import pytest
 
 from db2_flattener.flatten.flattener import DB2Flattener
 from db2_flattener.schema.constants import (
@@ -1098,9 +1100,81 @@ def test_platform_maps_sequencing_platform_prefix():
     assert list(sra_df[PLATFORM_COLUMN]) == ["ILLUMINA", "ULTIMA"]
     assert list(sra_df[INSTRUMENT_MODEL_COLUMN]) == [
         "Illumina NovaSeq 6000",
-        "Ultima Genomics UG 100",
+        "UG 100",
     ]
     assert "sequence_file_sets_sequencing_platform" not in sra_df.columns
+
+
+def test_instrument_model_map_is_independent_of_geo_map(monkeypatch):
+    """SRA_FILE rewrites instrument_model from its own map, not the GEO one."""
+    from db2_flattener.flatten import flattener as flattener_module
+
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A"], ["lab:LIB_B"]],
+            "droplet_based_libraries_@id": [
+                "/droplet_based_libraries/a/",
+                "/droplet_based_libraries/b/",
+            ],
+            "sequence_file_sets_sequencing_platform": [
+                "Ultima Genomics UG 100",
+                "Illumina NovaSeq 6000",
+            ],
+        }
+    )
+
+    monkeypatch.setattr(flattener_module, "GEO_INSTRUMENT_MODEL_MAP", {})
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+    assert list(sra_df[INSTRUMENT_MODEL_COLUMN]) == ["UG 100", "Illumina NovaSeq 6000"]
+
+    monkeypatch.setattr(flattener_module, "SRA_FILE_INSTRUMENT_MODEL_MAP", {})
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+    assert list(sra_df[INSTRUMENT_MODEL_COLUMN]) == [
+        "Ultima Genomics UG 100",
+        "Illumina NovaSeq 6000",
+    ]
+
+
+@pytest.mark.parametrize(
+    "platforms,expected",
+    [
+        # two MAIN rows for one library collapse to a list
+        (
+            ["Illumina NovaSeq 6000", "Ultima Genomics UG 100"],
+            ["Illumina NovaSeq 6000", "UG 100"],
+        ),
+        # one MAIN row whose cell was joined with '; '
+        (
+            ["Illumina NovaSeq 6000; Ultima Genomics UG 100"],
+            "Illumina NovaSeq 6000; UG 100",
+        ),
+        (["Ultima Genomics UG 100; Ultima Genomics UG 100"], "UG 100; UG 100"),
+        # two Ultima rows dedupe to one value
+        (["Ultima Genomics UG 100", "Ultima Genomics UG 100"], "UG 100"),
+        # nothing to rewrite
+        (
+            ["Illumina NovaSeq 6000", "Illumina NovaSeq X"],
+            ["Illumina NovaSeq 6000", "Illumina NovaSeq X"],
+        ),
+    ],
+)
+def test_instrument_model_mapped_when_one_library_spans_several_platforms(platforms, expected):
+    n = len(platforms)
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"] * n,
+            "droplet_based_libraries_aliases": [["lab:LIB_A"]] * n,
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/a/"] * n,
+            "sequence_file_sets_sequencing_platform": platforms,
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
+    assert len(sra_df) == 1
+    assert sra_df.loc[0, INSTRUMENT_MODEL_COLUMN] == expected
+    assert "Ultima Genomics UG 100" not in str(sra_df.loc[0, INSTRUMENT_MODEL_COLUMN])
 
 
 def test_platform_is_blank_when_sequencing_platform_is_unmapped():

@@ -416,3 +416,35 @@ def test_create_samples_dataframe_omits_donor_ethnicity_without_tissue():
     )
 
     assert "donor_ethnicity" not in result.columns
+
+
+def test_create_samples_dataframe_condition_term_defaults_to_na_for_tissue():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame(
+        {
+            "tissues_sample_name": ["t1", "t2", "t3", None],
+            "cell_lines_sample_name": [None, None, None, "c1"],
+            "tissues_@id": ["/tissues/t1/", "/tissues/t2/", "/tissues/t3/", None],
+            "experimental_conditions_controlled_terms_term_name": [
+                ["lipopolysaccharide", "interleukin-2"],
+                None,
+                [],
+                None,
+            ],
+        }
+    )
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    terms = result["experimental_condition_term"].tolist()
+    assert terms[:3] == ["lipopolysaccharide; interleukin-2", "na", "na"]
+    assert pd.isna(terms[3])
+
+
+def test_create_samples_dataframe_condition_term_absent_stays_absent():
+    flattener = make_flattener()
+    sample_df = pd.DataFrame({"tissues_sample_name": ["t1"], "tissues_@id": ["/tissues/t1/"]})
+
+    result = flattener.create_samples_dataframe(sample_df)
+
+    assert "experimental_condition_term" not in result.columns
