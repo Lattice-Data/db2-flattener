@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- SRA `sra_file_set{N}.tsv` now splits GEX libraries into one row per
+  SequenceFileSet (sequencing run), the way CRISPR Guide Capture libraries
+  already were: each row carries that run's filenames and file size, and a
+  library with several runs gets `library_ID`s suffixed `.1`, `.2`, … (ordered
+  by SequenceFileSet `@id`; a single run keeps the plain `library_ID`).
+  Previously a GEX library was one row listing every file across all its runs.
+  `sra_sequence_fileset_set{N}.tsv` follows, pairing each suffixed GEX
+  `library_ID` with its one SequenceFileSet uuid. Only CRISPR rows get
+  `--ignoreNames`. Other libraries (e.g. Antibody Capture, Multiplexing
+  Capture) are unchanged. Within a `sample_name`, rows keep library order, with
+  each split library's runs together.
 - New `db2-flattener-download` command (`src/db2_flattener/download/`, also
   `python -m db2_flattener.download`): given a MatrixFileSet `--uuid`, downloads
   each RawMatrixFile from its `s3_uri` into `--out-directory`, saved as its

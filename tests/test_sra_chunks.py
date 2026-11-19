@@ -150,13 +150,14 @@ def test_crispr_row_carries_sequence_file_set_file_size():
     assert list(sra_df["file_size"]) == [999]
 
 
-def test_non_crispr_sums_sequence_file_set_file_sizes():
+def test_whole_library_sums_sequence_file_set_file_sizes():
+    """Neither GEX nor CRISPR: one row, file_size summed over its SequenceFileSets."""
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
-            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
-            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_ADT"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/adt/"],
+            "droplet_based_libraries_feature_types": [["Antibody Capture"]],
             "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
         }
     )
@@ -164,13 +165,13 @@ def test_non_crispr_sums_sequence_file_set_file_sizes():
         [
             {
                 "sequence_file_set_@id": "/sequence_file_sets/a/",
-                "library_@id": "/droplet_based_libraries/gex/",
+                "library_@id": "/droplet_based_libraries/adt/",
                 "filename": "R1.fastq.gz",
                 "file_size": 100,
             },
             {
                 "sequence_file_set_@id": "/sequence_file_sets/b/",
-                "library_@id": "/droplet_based_libraries/gex/",
+                "library_@id": "/droplet_based_libraries/adt/",
                 "filename": "R2.fastq.gz",
                 "file_size": 50,
             },
@@ -182,14 +183,14 @@ def test_non_crispr_sums_sequence_file_set_file_sizes():
     assert list(sra_df["file_size"]) == [150]
 
 
-def test_non_crispr_counts_equal_sequence_file_set_sizes():
+def test_whole_library_counts_equal_sequence_file_set_sizes():
     """Equal set totals must both count (MAIN _join_unique would have undercounted)."""
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
-            "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
-            "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
-            "droplet_based_libraries_feature_types": [["Gene Expression"]],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_ADT"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/adt/"],
+            "droplet_based_libraries_feature_types": [["Antibody Capture"]],
             "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
         }
     )
@@ -197,13 +198,13 @@ def test_non_crispr_counts_equal_sequence_file_set_sizes():
         [
             {
                 "sequence_file_set_@id": "/sequence_file_sets/a/",
-                "library_@id": "/droplet_based_libraries/gex/",
+                "library_@id": "/droplet_based_libraries/adt/",
                 "filename": "R1.fastq.gz",
                 "file_size": 100,
             },
             {
                 "sequence_file_set_@id": "/sequence_file_sets/b/",
-                "library_@id": "/droplet_based_libraries/gex/",
+                "library_@id": "/droplet_based_libraries/adt/",
                 "filename": "R2.fastq.gz",
                 "file_size": 100,
             },
@@ -224,6 +225,13 @@ GEX_MAIN = {
     "droplet_based_libraries_aliases": [["lab:LIB_A_GEX"]],
     "droplet_based_libraries_@id": ["/droplet_based_libraries/gex/"],
     "droplet_based_libraries_feature_types": [["Gene Expression"]],
+    "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
+}
+ADT_MAIN = {
+    "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+    "droplet_based_libraries_aliases": [["lab:LIB_A_ADT"]],
+    "droplet_based_libraries_@id": ["/droplet_based_libraries/adt/"],
+    "droplet_based_libraries_feature_types": [["Antibody Capture"]],
     "sequence_files_sra_file_names": ["R1.fastq.gz; R2.fastq.gz"],
 }
 CRI_MAIN = {
@@ -249,16 +257,29 @@ def _sets(library_atid, *uuids):
     )
 
 
-def test_non_crispr_library_lists_every_sequence_file_set_uuid():
+def test_whole_library_lists_every_sequence_file_set_uuid():
     sra_df = make_flattener().create_sra_files_dataframe(
-        pd.DataFrame(GEX_MAIN),
-        sequence_file_set_df=_sets("/droplet_based_libraries/gex/", "uuid-b", "uuid-a"),
+        pd.DataFrame(ADT_MAIN),
+        sequence_file_set_df=_sets("/droplet_based_libraries/adt/", "uuid-b", "uuid-a"),
     )
     assert list(sra_df["_sequence_file_set_uuids"]) == [["uuid-a", "uuid-b"]]
 
     rows = make_flattener()._sra_sequence_file_set_rows(sra_df)
     assert list(rows.columns) == ["library_ID", "sequence_file_set_uuid"]
-    assert rows.values.tolist() == [["LIB_A_GEX", "uuid-a"], ["LIB_A_GEX", "uuid-b"]]
+    assert rows.values.tolist() == [["LIB_A_ADT", "uuid-a"], ["LIB_A_ADT", "uuid-b"]]
+
+
+def test_gex_suffixed_libraries_each_get_their_own_uuid():
+    sra_df = make_flattener().create_sra_files_dataframe(
+        pd.DataFrame(GEX_MAIN),
+        sequence_file_set_df=_sets("/droplet_based_libraries/gex/", "uuid-b", "uuid-a"),
+    )
+    assert list(sra_df["library_ID"]) == ["LIB_A_GEX.1", "LIB_A_GEX.2"]
+    assert list(sra_df["filename"]) == ["uuid-a_R1.fastq.gz", "uuid-b_R1.fastq.gz"]
+    assert list(sra_df["file_size"]) == [10, 10]
+
+    rows = make_flattener()._sra_sequence_file_set_rows(sra_df)
+    assert rows.values.tolist() == [["LIB_A_GEX.1", "uuid-a"], ["LIB_A_GEX.2", "uuid-b"]]
 
 
 def test_crispr_suffixed_libraries_each_get_their_own_uuid():
@@ -418,11 +439,15 @@ def test_sequence_fileset_sheet_from_gathered_data_to_tsv(tmp_path):
     assert sorted(fileset.values.tolist()) == [
         ["LIB_A_CRI.1", "cri-set-a"],
         ["LIB_A_CRI.2", "cri-set-b"],
-        ["LIB_A_GEX", "gex-set-a"],
-        ["LIB_A_GEX", "gex-set-b"],
+        ["LIB_A_GEX.1", "gex-set-a"],
+        ["LIB_A_GEX.2", "gex-set-b"],
     ]
     files = pd.read_csv(sra_dir / "sra_file_set1.tsv", sep="\t")
     assert set(fileset["library_ID"]) == set(files["library_ID"])
+    # One row per sequencing run, GEX before CRISPR, each with its own files
+    assert list(files["library_ID"]) == ["LIB_A_GEX.1", "LIB_A_GEX.2", "LIB_A_CRI.1", "LIB_A_CRI.2"]
+    assert list(files["filename"]) == ["g1.fastq.gz", "g3.fastq.gz", "c1.fastq.gz", "c2.fastq.gz"]
+    assert files.loc[0, "filename2"] == "g2.fastq.gz"
     assert not (sra_dir / "sra_sequence_fileset_set2.tsv").exists()
 
 

@@ -92,8 +92,8 @@ SLOT_ISSUE_KINDS = {
     ),
     "no_back_link": (
         "SequenceFileSet slot file(s) are in derived_from but do not list that set in "
-        "sequence_file_sets, so the library's MAIN and non-CRISPR SRA filenames leave "
-        "them out"
+        "sequence_file_sets, so the library's MAIN filenames, and SRA filenames of "
+        "libraries that are neither GEX nor CRISPR, leave them out"
     ),
     "not_in_slots": (
         "SequenceFile(s) list a SequenceFileSet in sequence_file_sets that has no slot "
@@ -1774,8 +1774,9 @@ class DB2Flattener:
         sample_name is the same CRO_group_identifier as SRA_BIOSAMPLE. Unlike that
         sheet, every library in the group gets its own row, including non-GEX.
         Duplicate MAIN rows (same library on more than one raw matrix file)
-        collapse to one. CRISPR libraries expand to one row per SequenceFileSet
-        when sequence_file_set_df is provided; non-CRISPR keep MAIN filenames.
+        collapse to one. GEX and CRISPR libraries expand to one row per
+        SequenceFileSet (sequencing run) when sequence_file_set_df is provided;
+        other libraries keep MAIN filenames.
 
         library_ids is the _library_ids Series for this same main_df, shared with
         SRA_BIOSAMPLE so the two sheets do not each rebuild it; left unset it is
@@ -1937,6 +1938,11 @@ class DB2Flattener:
                 )
         else:
             sra_df["_is_crispr"] = False
+        if "_feature_types" in sra_df.columns:
+            is_gex = sra_df["_feature_types"].map(self._sra_feature_has_gex)
+        else:
+            is_gex = pd.Series(False, index=sra_df.index)
+        sra_df["_split_by_set"] = sra_df["_is_crispr"].astype(bool) | is_gex.astype(bool)
 
         drop_cols = [
             c
@@ -1973,6 +1979,7 @@ class DB2Flattener:
                 "genetic_modifications_strategy",
                 "_library_atid",
                 "_is_crispr",
+                "_split_by_set",
             )
             if c in sra_df.columns
         ]
@@ -1985,14 +1992,14 @@ class DB2Flattener:
             filename_source=filename_source,
             filename_basename=filename_basename,
         )
-        sort_cols = [c for c in ("sample_name", "sequence_file_set_@id") if c in sra_df.columns]
-        if sort_cols:
-            sra_df = sra_df.sort_values(sort_cols, kind="mergesort")
+        if "sample_name" in sra_df.columns:
+            sra_df = sra_df.sort_values("sample_name", kind="mergesort")
         helper_cols = [
             c
             for c in (
                 "_library_atid",
                 "_is_crispr",
+                "_split_by_set",
                 "library_@id",
                 "sequence_file_set_@id",
                 "sequence_file_set_uuid",
@@ -2042,6 +2049,11 @@ class DB2Flattener:
     def _sra_feature_has_crispr(ft) -> bool:
         """True when feature_types include CRISPR Guide Capture."""
         return any("CRISPR Guide Capture" in str(item) for item in to_items(ft))
+
+    @staticmethod
+    def _sra_feature_has_gex(ft) -> bool:
+        """True when feature_types include Gene Expression."""
+        return any("Gene Expression" in str(item) for item in to_items(ft))
 
     @staticmethod
     def _library_id_from_group(group, feature_types, multiplexing_methods=None):
@@ -2175,87 +2187,92 @@ class DB2Flattener:
         """
         Attach filenames, file_size and _sequence_file_set_uuids for SRA rows.
 
-        Non-CRISPR: MAIN filenames; file_size is the sum of matching SequenceFileSet
-        totals (same SequenceFile object sums as CRISPR), one row per library.
-        CRISPR: expand to one row per SequenceFileSet when matches exist; keep one
-        row with no filenames when none do.
+        GEX and CRISPR (_split_by_set): expand to one row per SequenceFileSet
+        (sequencing run) when matches exist, with that set's filenames and
+        file_size; keep one row with no filenames when none do.
+        Others: MAIN filenames; file_size is the sum of matching SequenceFileSet
+        totals, one row per library.
         """
         if sra_df.empty:
             return sra_df
 
-        is_crispr = (
-            sra_df["_is_crispr"].fillna(False).astype(bool)
-            if "_is_crispr" in sra_df.columns
+        # Libraries keep their incoming order; a split library's runs stay together
+        sra_df = sra_df.assign(_library_order=range(len(sra_df)))
+        flag_col = "_split_by_set" if "_split_by_set" in sra_df.columns else "_is_crispr"
+        split = (
+            sra_df[flag_col].fillna(False).astype(bool)
+            if flag_col in sra_df.columns
             else pd.Series(False, index=sra_df.index)
         )
-        non_crispr = sra_df.loc[~is_crispr].copy()
-        crispr = sra_df.loc[is_crispr].copy()
+        whole = sra_df.loc[~split].copy()
+        per_set = sra_df.loc[split].copy()
 
-        if not non_crispr.empty:
-            if filename_source and filename_source in non_crispr.columns:
-                non_crispr = cls._add_sra_filenames(
-                    non_crispr, filename_source, basename=filename_basename
-                )
-            non_crispr["file_size"] = cls._sra_file_size_from_sequence_file_sets(
-                non_crispr, sequence_file_set_df
+        if not whole.empty:
+            if filename_source and filename_source in whole.columns:
+                whole = cls._add_sra_filenames(whole, filename_source, basename=filename_basename)
+            whole["file_size"] = cls._sra_file_size_from_sequence_file_sets(
+                whole, sequence_file_set_df
             )
-            non_crispr["_sequence_file_set_uuids"] = cls._sequence_file_set_uuids_by_library(
-                non_crispr, sequence_file_set_df
+            whole["_sequence_file_set_uuids"] = cls._sequence_file_set_uuids_by_library(
+                whole, sequence_file_set_df
             )
 
-        if not crispr.empty:
-            if filename_source and filename_source in crispr.columns:
-                crispr = crispr.drop(columns=[filename_source])
+        if not per_set.empty:
+            if filename_source and filename_source in per_set.columns:
+                per_set = per_set.drop(columns=[filename_source])
             if (
                 sequence_file_set_df is not None
                 and not sequence_file_set_df.empty
-                and "_library_atid" in crispr.columns
+                and "_library_atid" in per_set.columns
                 and "library_@id" in sequence_file_set_df.columns
             ):
-                crispr = crispr.merge(
+                per_set = per_set.merge(
                     sequence_file_set_df,
                     left_on="_library_atid",
                     right_on="library_@id",
                     how="left",
                 )
-                crispr = cls._suffix_crispr_library_ids(crispr)
-            if "file_size" not in crispr.columns:
-                crispr["file_size"] = 0
+                per_set = cls._suffix_split_library_ids(per_set)
+            if "file_size" not in per_set.columns:
+                per_set["file_size"] = 0
             else:
-                crispr["file_size"] = crispr["file_size"].map(cls._coerce_file_size)
-            if "sequence_file_set_uuid" in crispr.columns:
-                crispr["_sequence_file_set_uuids"] = crispr["sequence_file_set_uuid"].map(
+                per_set["file_size"] = per_set["file_size"].map(cls._coerce_file_size)
+            if "sequence_file_set_uuid" in per_set.columns:
+                per_set["_sequence_file_set_uuids"] = per_set["sequence_file_set_uuid"].map(
                     lambda v: [] if is_empty(v) else [v]
                 )
-                crispr = crispr.drop(columns=["sequence_file_set_uuid"])
+                per_set = per_set.drop(columns=["sequence_file_set_uuid"])
             else:
-                crispr["_sequence_file_set_uuids"] = [[] for _ in range(len(crispr))]
+                per_set["_sequence_file_set_uuids"] = [[] for _ in range(len(per_set))]
 
-        parts = [part for part in (non_crispr, crispr) if not part.empty]
+        parts = [part for part in (whole, per_set) if not part.empty]
         if not parts:
-            return sra_df
-        return pd.concat(parts, ignore_index=True, sort=False)
+            return sra_df.drop(columns=["_library_order"])
+        out = pd.concat(parts, ignore_index=True, sort=False)
+        sort_cols = [c for c in ("_library_order", "sequence_file_set_@id") if c in out.columns]
+        out = out.sort_values(sort_cols, kind="mergesort", na_position="first")
+        return out.drop(columns=["_library_order"]).reset_index(drop=True)
 
     @staticmethod
-    def _suffix_crispr_library_ids(crispr: pd.DataFrame) -> pd.DataFrame:
-        """Append .1, .2, … to library_ID when a CRISPR library has multiple SequenceFileSets.
+    def _suffix_split_library_ids(rows: pd.DataFrame) -> pd.DataFrame:
+        """Append .1, .2, … to library_ID when a GEX/CRISPR library has several SequenceFileSets.
 
         A library with only one matched SequenceFileSet keeps the unsuffixed library_ID.
         """
-        if crispr.empty or "library_ID" not in crispr.columns:
-            return crispr
-        if "sequence_file_set_@id" not in crispr.columns:
-            return crispr
+        if rows.empty or "library_ID" not in rows.columns:
+            return rows
+        if "sequence_file_set_@id" not in rows.columns:
+            return rows
 
-        crispr = crispr.copy()
-        group_col = "_library_atid" if "_library_atid" in crispr.columns else None
+        rows = rows.copy()
+        group_col = "_library_atid" if "_library_atid" in rows.columns else None
         sort_cols = [c for c in (group_col, "sequence_file_set_@id") if c]
-        crispr = crispr.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+        rows = rows.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
 
-        matched = crispr["sequence_file_set_@id"].map(lambda v: not is_empty(v))
+        matched = rows["sequence_file_set_@id"].map(lambda v: not is_empty(v))
         if not matched.any():
-            return crispr
-        matched_rows = crispr.loc[matched]
+            return rows
+        matched_rows = rows.loc[matched]
         if group_col:
             group_sizes = matched_rows.groupby(group_col, sort=False)[group_col].transform("size")
             suffixes = matched_rows.groupby(group_col, sort=False).cumcount().add(1)
@@ -2265,12 +2282,12 @@ class DB2Flattener:
             multi = pd.Series(len(matched_rows) > 1, index=matched_rows.index)
         suffix_idx = multi[multi].index
         if suffix_idx.empty:
-            return crispr
+            return rows
         base = matched_rows.loc[suffix_idx, "library_ID"].map(
             lambda v: "" if is_empty(v) else str(v)
         )
-        crispr.loc[suffix_idx, "library_ID"] = base + "." + suffixes.loc[suffix_idx].astype(str)
-        return crispr
+        rows.loc[suffix_idx, "library_ID"] = base + "." + suffixes.loc[suffix_idx].astype(str)
+        return rows
 
     # Anything not listed sorts alphabetically after these
     SEX_POOL_ORDER = ("male", "female")
@@ -2364,7 +2381,7 @@ class DB2Flattener:
         """
         Warn about each library_ID that more than one library @id ends up with.
 
-        Takes the ids before _suffix_crispr_library_ids: its .1, .2 separate one
+        Takes the ids before _suffix_split_library_ids: its .1, .2 separate one
         library's SequenceFileSets, not different libraries.
         """
 
