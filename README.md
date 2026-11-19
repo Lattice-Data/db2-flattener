@@ -78,7 +78,9 @@ mutually exclusive overrides:
 
 Separately from audits, the run always stops (exit 1) if any gathered object
 has `status: deleted`. It prints one row per object (`type | uuid | aliases`)
-and no `--force-*` flag overrides it.
+and no `--force-*` flag overrides it. The run likewise stops if two RawMatrixFiles
+share a `geo_file_name` (compared case-insensitively), listing each file's `@id`
+and `s3_uri`.
 
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
@@ -95,6 +97,7 @@ Layout:
   GEO/
     geo_metadata.csv                     # includes genetic_modification_alias when present
     demultiplexing_samples.csv           # omitted when empty; same alias column when present
+    md5_checksums.tsv                    # tab-separated; file name, file checksum: RawMatrixFile geo_file_name and md5sum; omitted when no files
     {gm_alias}_guide_metadata.csv        # copy of each BIOHUB guide template
   SRA/
     sra_biosample_setN.tsv               # paired with sra_file_setN; ≤4.8 TB per set
