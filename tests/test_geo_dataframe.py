@@ -904,8 +904,12 @@ def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
     main_df = pd.DataFrame(
         [
             gex_row(experimental_conditions_summary="zeta"),
-            gex_row(raw_matrix_files_geo_file_name="libA-2.h5", experimental_conditions_summary="alpha"),
-            gex_row(raw_matrix_files_geo_file_name="libA-3.h5", experimental_conditions_summary="zeta"),
+            gex_row(
+                raw_matrix_files_geo_file_name="libA-2.h5", experimental_conditions_summary="alpha"
+            ),
+            gex_row(
+                raw_matrix_files_geo_file_name="libA-3.h5", experimental_conditions_summary="zeta"
+            ),
         ]
     ).dropna(axis=1, how="all")
 
@@ -920,7 +924,9 @@ def test_create_geo_dataframe_title_dedupes_within_joined_summaries():
     main_df = pd.DataFrame(
         [
             gex_row(experimental_conditions_summary="a; b"),
-            gex_row(raw_matrix_files_geo_file_name="libA-2.h5", experimental_conditions_summary="a"),
+            gex_row(
+                raw_matrix_files_geo_file_name="libA-2.h5", experimental_conditions_summary="a"
+            ),
         ]
     ).dropna(axis=1, how="all")
 

@@ -3806,4 +3806,3 @@ class DB2Flattener:
         if is_empty(uuid):
             raise ValueError(f"{obj.get('@id')!r} has no uuid")
         return uuid
-
