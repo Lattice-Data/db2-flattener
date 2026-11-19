@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Refuse flatten (exit 1) when two or more RawMatrixFiles share a
+  `geo_file_name`, compared case-insensitively (`GSM1.h5` and `gsm1.h5` collide).
+  Each shared name prints an `====== ERROR ======` block listing the files'
+  `@id` and `s3_uri`, before any output is written. Blank names are not
+  counted, and no `--force-*` flag overrides it.
+
 - New tab-separated `GEO/md5_checksums.tsv`: one row per RawMatrixFile of the
   MatrixFileSet,
   with the GEO submission template columns `file name` (the calculated

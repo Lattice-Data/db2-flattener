@@ -78,7 +78,9 @@ mutually exclusive overrides:
 
 Separately from audits, the run always stops (exit 1) if any gathered object
 has `status: deleted`. It prints one row per object (`type | uuid | aliases`)
-and no `--force-*` flag overrides it.
+and no `--force-*` flag overrides it. The run likewise stops if two RawMatrixFiles
+share a `geo_file_name` (compared case-insensitively), listing each file's `@id`
+and `s3_uri`.
 
 ```bash
 python flatten.py -u <matrix-file-set-uuid> -m db2_demo -s s3://bucket/path/to/order/
