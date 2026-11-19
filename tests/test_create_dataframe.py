@@ -551,26 +551,53 @@ def test_warns_listing_every_raw_matrix_file_without_geo_file_name(capsys):
     out = capsys.readouterr().out
     assert f"====WARNING==== 2 {GEO_NAME_WARNING}" in out
     block = out[out.index(GEO_NAME_WARNING) :].splitlines()
+    assert block[0].endswith('their "processed data file" cells are left empty:')
     assert block[1:3] == [
-        "  /raw_matrix_files/r2/ (lab:rmf2)",
-        "  /raw_matrix_files/r3/ (lab:rmf3)",
+        "  /raw_matrix_files/r2/ (lab:rmf2): GEO and SAMPLES sheets",
+        "  /raw_matrix_files/r3/ (lab:rmf3): GEO and SAMPLES sheets",
     ]
     assert "/raw_matrix_files/r1/" not in "\n".join(block[:3])
     assert len(main_df) == 3
 
 
 def test_warns_once_per_file_shared_by_several_libraries(capsys):
+    """Any one GEX library puts the file on GEO, whichever library comes first."""
     f = make_flattener()
     sample = _tissue()
     rmf = _rmf()
     gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
     cri = _lib("/droplet_based_libraries/cri/", ["CRISPR Guide Capture"], alias="lab:cri")
 
-    f.create_dataframe(_complete_data([(gex, [rmf], [sample]), (cri, [rmf], [sample])]))
+    f.create_dataframe(_complete_data([(cri, [rmf], [sample]), (gex, [rmf], [sample])]))
 
     out = capsys.readouterr().out
     assert f"====WARNING==== 1 {GEO_NAME_WARNING}" in out
-    assert out.count("  /raw_matrix_files/r1/ (lab:rmf1)") == 1
+    assert out.count("  /raw_matrix_files/r1/") == 1
+    assert "  /raw_matrix_files/r1/ (lab:rmf1): GEO and SAMPLES sheets" in out.splitlines()
+
+
+def test_warning_marks_files_without_a_geo_library_as_samples_only(capsys):
+    """A CRISPR-only file never reaches the GEO sheet, only SAMPLES."""
+    f = make_flattener()
+    sample = _tissue()
+    gex_file = _rmf(rmf_id="/raw_matrix_files/r2/", alias="lab:gex_matrix")
+    crispr_file = _rmf(rmf_id="/raw_matrix_files/r3/", alias="lab:crispr_matrix")
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+    cri = _lib("/droplet_based_libraries/cri/", ["CRISPR Guide Capture"], alias="lab:cri")
+
+    main_df, _ = f.create_dataframe(
+        _complete_data([(gex, [gex_file], [sample]), (cri, [crispr_file], [sample])])
+    )
+
+    out = capsys.readouterr().out
+    block = out[out.index(GEO_NAME_WARNING) :].splitlines()
+    assert block[1:3] == [
+        "  /raw_matrix_files/r2/ (lab:gex_matrix): GEO and SAMPLES sheets",
+        "  /raw_matrix_files/r3/ (lab:crispr_matrix): SAMPLES sheet only",
+    ]
+    # The label agrees with what create_geo_dataframe actually keeps
+    on_geo = main_df[main_df.apply(f._row_is_geo_library, axis=1).astype(bool)]
+    assert set(on_geo["raw_matrix_file_uuid"]) == {"uuid-r2"}
 
 
 def test_no_geo_file_name_warning_when_every_file_is_named(capsys):

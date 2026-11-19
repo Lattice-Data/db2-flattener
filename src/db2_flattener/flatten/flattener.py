@@ -350,15 +350,21 @@ class DB2Flattener:
 
     @staticmethod
     def _warn_missing_geo_file_names(missing):
-        """List every RawMatrixFile without a geo_file_name, sorted by @id."""
+        """
+        List every RawMatrixFile without a geo_file_name, sorted by @id, with the
+        sheets whose processed data file cells it leaves empty: GEO only when one
+        of its libraries is kept on the GEO sheet (GEX/ATAC), SAMPLES always.
+        """
         if not missing:
             return
         lines = [
             f"====WARNING==== {len(missing)} RawMatrixFile(s) have no geo_file_name; "
-            'their "processed data file" cells on the GEO and SAMPLES sheets are left empty:'
+            'their "processed data file" cells are left empty:'
         ]
-        for atid, alias in sorted(missing.items(), key=lambda item: str(item[0])):
-            lines.append(f"  {atid}" + (f" ({alias})" if alias else ""))
+        for atid, info in sorted(missing.items(), key=lambda item: str(item[0])):
+            alias = f" ({info['alias']})" if info["alias"] else ""
+            sheets = "GEO and SAMPLES sheets" if info["reaches_geo"] else "SAMPLES sheet only"
+            lines.append(f"  {atid}{alias}: {sheets}")
         print("\n".join(lines))
 
     def create_dataframe(self, complete_data):
@@ -449,8 +455,8 @@ class DB2Flattener:
         unmapped_samples = set()
         # {sample uuid: {"@id", "sample_name", "cro_orders"}}
         sample_info = {}
-        # {raw matrix file @id: alias} for files whose processed data file
-        # cells on the GEO and SAMPLES sheets would be left empty
+        # {raw matrix file @id: {"alias", "reaches_geo"}} for files whose
+        # processed data file cells would be left empty
         missing_geo_file_names = {}
 
         # Create one row per (raw matrix file, library)
@@ -502,9 +508,11 @@ class DB2Flattener:
             if is_empty(geo_file_name) or (
                 isinstance(geo_file_name, str) and not geo_file_name.strip()
             ):
-                missing_geo_file_names[representative_raw_file.get("@id")] = shared[
-                    "raw_matrix_file_alias"
-                ]
+                missing_geo_file_names[representative_raw_file.get("@id")] = {
+                    "alias": shared["raw_matrix_file_alias"],
+                    # Set below if any of the file's library rows is kept on GEO
+                    "reaches_geo": False,
+                }
 
             # Recorded here, where the samples are still separate values, rather
             # than by splitting raw_file_samples back apart on '; ' afterwards
@@ -556,6 +564,10 @@ class DB2Flattener:
                             self._join_unique(values) if values else None
                         )
                 rows.append(row)
+                missing = missing_geo_file_names.get(representative_raw_file.get("@id"))
+                # Same test create_geo_dataframe uses to keep a row on the GEO sheet
+                if missing is not None and self._row_is_geo_library(row):
+                    missing["reaches_geo"] = True
 
                 # A sample's CRO orders are those of the file sets on its files
                 orders = self._cro_order_parts(row.get("sequence_file_sets_CRO_order"))
