@@ -333,6 +333,19 @@ class DB2Flattener:
                     [(info["@id"], info["cro_orders"]) for info in shared],
                 )
 
+    @staticmethod
+    def _warn_missing_geo_file_names(missing):
+        """List every RawMatrixFile without a geo_file_name, sorted by @id."""
+        if not missing:
+            return
+        lines = [
+            f"====WARNING==== {len(missing)} RawMatrixFile(s) have no geo_file_name; "
+            'their "processed data file" cells on the GEO and SAMPLES sheets are left empty:'
+        ]
+        for atid, alias in sorted(missing.items(), key=lambda item: str(item[0])):
+            lines.append(f"  {atid}" + (f" ({alias})" if alias else ""))
+        print("\n".join(lines))
+
     def create_dataframe(self, complete_data):
         """Create main library/raw-file DataFrame and sample DataFrame keyed by raw matrix file"""
         libraries_data = complete_data["libraries"]
@@ -421,6 +434,9 @@ class DB2Flattener:
         unmapped_samples = set()
         # {sample uuid: {"@id", "sample_name", "cro_orders"}}
         sample_info = {}
+        # {raw matrix file @id: alias} for files whose processed data file
+        # cells on the GEO and SAMPLES sheets would be left empty
+        missing_geo_file_names = {}
 
         # Create one row per (raw matrix file, library)
         for file_data in raw_file_to_libraries.values():
@@ -467,6 +483,13 @@ class DB2Flattener:
                 "software_version",
             ):
                 shared[f"raw_matrix_files_{field}"] = representative_raw_file.get(field)
+            geo_file_name = shared["raw_matrix_files_geo_file_name"]
+            if is_empty(geo_file_name) or (
+                isinstance(geo_file_name, str) and not geo_file_name.strip()
+            ):
+                missing_geo_file_names[representative_raw_file.get("@id")] = shared[
+                    "raw_matrix_file_alias"
+                ]
 
             # Recorded here, where the samples are still separate values, rather
             # than by splitting raw_file_samples back apart on '; ' afterwards
@@ -536,6 +559,7 @@ class DB2Flattener:
                 f"are left out of the sample_name : barcode map: {sorted(unmapped_samples)}"
             )
         self._warn_shared_sample_names(sample_info)
+        self._warn_missing_geo_file_names(missing_geo_file_names)
 
         main_df = pd.DataFrame(rows)
 

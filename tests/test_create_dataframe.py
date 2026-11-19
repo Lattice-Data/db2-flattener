@@ -533,6 +533,56 @@ def test_create_dataframe_nulls_omitted_raw_matrix_file_fields():
         assert pd.isna(main_df.iloc[0][column])
 
 
+GEO_NAME_WARNING = "RawMatrixFile(s) have no geo_file_name"
+
+
+def test_warns_listing_every_raw_matrix_file_without_geo_file_name(capsys):
+    f = make_flattener()
+    sample = _tissue()
+    named = _rmf(geo_file_name="GSM1_matrix.h5")
+    unnamed = _rmf(rmf_id="/raw_matrix_files/r2/", alias="lab:rmf2")
+    blank = _rmf(rmf_id="/raw_matrix_files/r3/", alias="lab:rmf3", geo_file_name="  ")
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    main_df, _ = f.create_dataframe(
+        _complete_data([(gex, [named], [sample]), (gex, [blank, unnamed], [sample])])
+    )
+
+    out = capsys.readouterr().out
+    assert f"====WARNING==== 2 {GEO_NAME_WARNING}" in out
+    block = out[out.index(GEO_NAME_WARNING) :].splitlines()
+    assert block[1:3] == [
+        "  /raw_matrix_files/r2/ (lab:rmf2)",
+        "  /raw_matrix_files/r3/ (lab:rmf3)",
+    ]
+    assert "/raw_matrix_files/r1/" not in "\n".join(block[:3])
+    assert len(main_df) == 3
+
+
+def test_warns_once_per_file_shared_by_several_libraries(capsys):
+    f = make_flattener()
+    sample = _tissue()
+    rmf = _rmf()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"], alias="lab:gex")
+    cri = _lib("/droplet_based_libraries/cri/", ["CRISPR Guide Capture"], alias="lab:cri")
+
+    f.create_dataframe(_complete_data([(gex, [rmf], [sample]), (cri, [rmf], [sample])]))
+
+    out = capsys.readouterr().out
+    assert f"====WARNING==== 1 {GEO_NAME_WARNING}" in out
+    assert out.count("  /raw_matrix_files/r1/ (lab:rmf1)") == 1
+
+
+def test_no_geo_file_name_warning_when_every_file_is_named(capsys):
+    f = make_flattener()
+    sample = _tissue()
+    gex = _lib("/droplet_based_libraries/gex/", ["Gene Expression"])
+
+    f.create_dataframe(_complete_data([(gex, [_rmf(geo_file_name="GSM1.h5")], [sample])]))
+
+    assert GEO_NAME_WARNING not in capsys.readouterr().out
+
+
 def test_create_dataframe_shares_raw_matrix_file_fields_across_libraries():
     f = make_flattener()
     sample = _tissue()

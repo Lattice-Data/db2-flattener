@@ -6,7 +6,8 @@
   RawMatrixFile's `geo_file_name` instead of its alias. The main and sample
   dataframes gain a `raw_matrix_files_geo_file_name` column (`raw_matrix_file_alias`
   is still there); a file with no `geo_file_name` leaves its `processed data file`
-  cell empty (TOOLS-380).
+  cell empty, and the run prints a `====WARNING====` block listing every such
+  RawMatrixFile by `@id` (and alias) (TOOLS-380).
 - `raw_matrix_file_alias` in MAIN.csv now keeps the lab prefix (`lab:rmf1`, not
   `rmf1`); multiple aliases are joined with `; `. `_get_clean_alias` is removed
   (TOOLS-380).
