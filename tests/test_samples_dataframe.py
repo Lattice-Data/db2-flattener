@@ -19,7 +19,8 @@ def make_flattener():
 
 
 def test_prop_map_samples_names():
-    assert PROP_MAP_SAMPLES["raw_matrix_file_alias"] == "processed data file"
+    assert PROP_MAP_SAMPLES["raw_matrix_files_geo_file_name"] == "processed data file"
+    assert "raw_matrix_file_alias" not in PROP_MAP_SAMPLES
     assert "sample_alias" not in PROP_MAP_SAMPLES
     for sample_type in ("tissues", "cell_lines", "organoids", "primary_cell_cultures"):
         assert PROP_MAP_SAMPLES[f"{sample_type}_sample_name"] == "pre_pooled_sample"
@@ -62,6 +63,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     sample_df = pd.DataFrame(
         {
             "raw_matrix_file_alias": ["rmf1"],
+            "raw_matrix_files_geo_file_name": ["GSM1_matrix.h5"],
             "sample_alias": ["s1"],
             "tissues_sample_name": ["Sample One"],
             "human_donors_cxg_donor_id": ["H1"],
@@ -88,7 +90,8 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
 
     result = flattener.create_samples_dataframe(sample_df)
 
-    assert list(result["processed data file"]) == ["rmf1"]
+    assert list(result["processed data file"]) == ["GSM1_matrix.h5"]
+    assert "raw_matrix_file_alias" not in result.columns
     assert list(result["pre_pooled_sample"]) == ["Sample One"]
     assert "tissues_sample_name" not in result.columns
     assert list(result["donor_id"]) == ["H1"]

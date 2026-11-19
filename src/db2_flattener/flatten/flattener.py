@@ -430,7 +430,6 @@ class DB2Flattener:
             # File-level fields are the same on every library copy of this raw file.
             representative_raw_file = library_entries[0]["raw_file"]
             sample_uuids = []
-            sample_aliases = []
             sample_names = []
             for sample_ref in representative_raw_file.get("samples", []):
                 sample_obj = next((s for s in samples if s.get("@id") == sample_ref), None)
@@ -444,14 +443,15 @@ class DB2Flattener:
                             "cro_orders": set(),
                         },
                     )
-                    sample_aliases.append(sample_obj.get("aliases"))
                     sample_names.append(sample_obj.get("sample_name"))
                     if is_empty(sample_obj.get("sample_name")):
                         unnamed_samples.add(sample_obj.get("@id"))
 
             shared = {
                 "raw_matrix_file_uuid": self._object_uuid(representative_raw_file),
-                "raw_matrix_file_alias": self._get_clean_alias(representative_raw_file),
+                "raw_matrix_file_alias": self._join_unique(
+                    representative_raw_file.get("aliases") or []
+                ),
                 "raw_file_samples": self._join_unique(sample_names),
                 # Counted for 'pooled' in place of raw_file_samples, which collapses
                 # samples sharing a sample_name and drops unnamed ones
@@ -462,6 +462,7 @@ class DB2Flattener:
                 "is_multiplexed",
                 "file_format",
                 "file_size",
+                "geo_file_name",
                 "software",
                 "software_version",
             ):
@@ -473,10 +474,10 @@ class DB2Flattener:
                 {
                     "raw_matrix_file_uuid": shared["raw_matrix_file_uuid"],
                     "raw_matrix_file_alias": shared["raw_matrix_file_alias"],
+                    "raw_matrix_files_geo_file_name": shared["raw_matrix_files_geo_file_name"],
                     "sample_uuid": uuid,
-                    "sample_alias": alias,
                 }
-                for uuid, alias in zip(sample_uuids, sample_aliases, strict=True)
+                for uuid in sample_uuids
             )
 
             for entry in library_entries:
@@ -549,7 +550,7 @@ class DB2Flattener:
             per_sample_df.index.name = "sample_uuid"
             per_sample_df = per_sample_df.reset_index()
 
-            # sample_alias holds lists, which drop_duplicates() cannot hash
+            # One row per (raw matrix file, sample), whichever library recorded it
             pairs_df = pd.DataFrame(file_sample_pairs).drop_duplicates(
                 subset=["raw_matrix_file_uuid", "sample_uuid"]
             )
@@ -558,14 +559,19 @@ class DB2Flattener:
             # summary would otherwise vanish from a file pooling several samples
             sample_df = self._default_tissue_condition_summary(sample_df)
 
-            # MAIN already has the file alias from shared, and carries each sample
-            # type's _uuid column, so neither is rolled up again
+            # MAIN already has the file alias and geo_file_name from shared, and
+            # carries each sample type's _uuid column, so none is rolled up again
+            not_rolled_up = (
+                "raw_matrix_file_uuid",
+                "raw_matrix_file_alias",
+                "raw_matrix_files_geo_file_name",
+                "sample_uuid",
+            )
             rolled_up = sample_df.groupby("raw_matrix_file_uuid", as_index=False).agg(
                 {
                     column: self._combine_sample_values
                     for column in sample_df.columns
-                    if column
-                    not in ("raw_matrix_file_uuid", "raw_matrix_file_alias", "sample_uuid")
+                    if column not in not_rolled_up
                 }
             )
             main_df = main_df.merge(rolled_up, on="raw_matrix_file_uuid", how="left")
@@ -3686,36 +3692,3 @@ class DB2Flattener:
             raise ValueError(f"{obj.get('@id')!r} has no uuid")
         return uuid
 
-    def _get_clean_alias(self, obj_or_list):
-        """Extract alias from an object or list of objects, cleaning the result"""
-        if not obj_or_list:
-            return
-
-        aliases = []
-
-        # Handle both single objects and lists
-        if isinstance(obj_or_list, list):
-            # List of objects
-            for obj in obj_or_list:
-                if isinstance(obj, dict):
-                    obj_aliases = obj.get("aliases", [])
-                    if obj_aliases:
-                        aliases.extend(obj_aliases)
-        else:
-            # Single object
-            if isinstance(obj_or_list, dict):
-                obj_aliases = obj_or_list.get("aliases", [])
-                if obj_aliases:
-                    aliases.extend(obj_aliases)
-
-        # If no aliases found, return
-        if not aliases:
-            return
-
-        # Join unique aliases and clean
-        result = self._join_unique(aliases)
-
-        # Clean the result (remove prefix ending with ':')
-        if ":" in result:
-            return result.split(":", 1)[1]  # Take everything after the first ':'
-        return result

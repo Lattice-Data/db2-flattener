@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- The GEO and SAMPLES sheets' `processed data file` columns now hold each
+  RawMatrixFile's `geo_file_name` instead of its alias. The main and sample
+  dataframes gain a `raw_matrix_files_geo_file_name` column (`raw_matrix_file_alias`
+  is still there); a file with no `geo_file_name` leaves its `processed data file`
+  cell empty (TOOLS-380).
+- `raw_matrix_file_alias` in MAIN.csv now keeps the lab prefix (`lab:rmf1`, not
+  `rmf1`); multiple aliases are joined with `; `. `_get_clean_alias` is removed
+  (TOOLS-380).
+- The `sample_alias` column is removed from the sample dataframe and MAIN.csv.
+  It duplicated the per-type `tissues_aliases`, `cell_lines_aliases`, etc.
+  columns, which still carry the same values (TOOLS-380).
 - New `db2-flattener-download` command (`src/db2_flattener/download/`, also
   `python -m db2_flattener.download`): given a MatrixFileSet `--uuid`, downloads
   each RawMatrixFile from its `s3_uri` into `--out-directory`, saved as its

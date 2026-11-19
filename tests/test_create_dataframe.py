@@ -78,6 +78,7 @@ def _rmf(rmf_id="/raw_matrix_files/r1/", alias="lab:rmf1", sample_id="/tissues/s
         "is_multiplexed",
         "file_format",
         "file_size",
+        "geo_file_name",
         "software",
         "software_version",
         "sequence_files",
@@ -152,7 +153,7 @@ def test_create_dataframe_one_row_per_rmf_library():
         "/droplet_based_libraries/gex/",
         "/droplet_based_libraries/cri/",
     }
-    assert set(main_df["raw_matrix_file_alias"]) == {"rmf1"}
+    assert set(main_df["raw_matrix_file_alias"]) == {"lab:rmf1"}
     ftypes = set()
     for ft in main_df["droplet_based_libraries_feature_types"]:
         ftypes.update(ft if isinstance(ft, list) else [ft])
@@ -467,6 +468,7 @@ RAW_MATRIX_FILE_COLUMNS = (
     "raw_matrix_files_is_multiplexed",
     "raw_matrix_files_file_format",
     "raw_matrix_files_file_size",
+    "raw_matrix_files_geo_file_name",
     "raw_matrix_files_software",
     "raw_matrix_files_software_version",
 )
@@ -480,6 +482,7 @@ def test_create_dataframe_copies_raw_matrix_file_fields():
         is_multiplexed=False,
         file_format="hdf5",
         file_size=4096,
+        geo_file_name="GSM1_matrix.h5",
         software="cellranger",
         software_version="7.1.0",
     )
@@ -504,7 +507,7 @@ def test_create_dataframe_copies_raw_matrix_file_fields():
     )
 
     by_alias = main_df.set_index("raw_matrix_file_alias")
-    false_row = by_alias.loc["rmf1"]
+    false_row = by_alias.loc["lab:rmf1"]
     # Truthiness, not `is`: pandas may store these as numpy scalars. The string
     # "False" from _join_unique() would be truthy, so this still catches that.
     assert not false_row["raw_matrix_files_is_multiplexed"]
@@ -512,9 +515,10 @@ def test_create_dataframe_copies_raw_matrix_file_fields():
     assert false_row["raw_matrix_files_file_format"] == "hdf5"
     assert false_row["raw_matrix_files_file_size"] == 4096
     assert not isinstance(false_row["raw_matrix_files_file_size"], (str, float))
+    assert false_row["raw_matrix_files_geo_file_name"] == "GSM1_matrix.h5"
     assert false_row["raw_matrix_files_software"] == "cellranger"
     assert false_row["raw_matrix_files_software_version"] == "7.1.0"
-    assert by_alias.loc["rmf2", "raw_matrix_files_is_multiplexed"]
+    assert by_alias.loc["lab:rmf2", "raw_matrix_files_is_multiplexed"]
 
 
 def test_create_dataframe_nulls_omitted_raw_matrix_file_fields():
@@ -536,6 +540,7 @@ def test_create_dataframe_shares_raw_matrix_file_fields_across_libraries():
         is_multiplexed=True,
         file_format="hdf5",
         file_size=4096,
+        geo_file_name="GSM1_matrix.h5",
         software="cellranger",
         software_version="7.1.0",
     )
@@ -1055,8 +1060,8 @@ def test_multiplexed_file_gives_samples_a_row_each():
     _, sample_df = _mx_run(MX_TWO)
 
     assert len(sample_df) == 2
-    assert list(sample_df["sample_alias"]) == [["lab:H1"], ["lab:H2"]]
-    assert list(sample_df["raw_matrix_file_alias"]) == ["rmf1", "rmf1"]
+    assert list(sample_df["tissues_aliases"]) == [["lab:H1"], ["lab:H2"]]
+    assert list(sample_df["raw_matrix_file_alias"]) == ["lab:rmf1", "lab:rmf1"]
     assert list(sample_df["tissues_suspension_type"]) == ["cell", "nucleus"]
 
 
@@ -1111,7 +1116,7 @@ def test_raw_files_sharing_alias_stay_separate_by_uuid():
     )
 
     by_file = main_df.set_index("raw_matrix_file_uuid")
-    assert list(main_df["raw_matrix_file_alias"]) == ["rmf", "rmf"]
+    assert list(main_df["raw_matrix_file_alias"]) == ["lab:rmf", "lab:rmf"]
     assert by_file.loc["uuid-r1", "tissues_suspension_type"] == "cell"
     assert by_file.loc["uuid-r2", "tissues_suspension_type"] == "nucleus"
     assert list(sample_df["raw_matrix_file_uuid"]) == ["uuid-r1", "uuid-r2"]
@@ -1131,14 +1136,18 @@ def test_main_has_one_raw_matrix_file_alias_column():
     assert list(main_df["raw_matrix_file_uuid"]) == ["uuid-r1"]
     assert list(main_df.columns).count("raw_matrix_file_alias") == 1
     assert not any(col.startswith("raw_matrix_file_alias_") for col in main_df.columns)
+    assert list(main_df.columns).count("raw_matrix_files_geo_file_name") == 1
+    assert not any(col.startswith("raw_matrix_files_geo_file_name_") for col in main_df.columns)
 
 
 def test_raw_file_samples_uses_sample_name_not_alias():
     main_df, sample_df = _mx_run(MX_TWO)
 
     assert main_df.loc[0, "raw_file_samples"] == "Heart 1; Heart 2"
-    assert list(sample_df["sample_alias"]) == [["lab:H1"], ["lab:H2"]]
+    assert list(sample_df["tissues_aliases"]) == [["lab:H1"], ["lab:H2"]]
     assert list(sample_df["tissues_sample_name"]) == ["Heart 1", "Heart 2"]
+    assert "sample_alias" not in sample_df.columns
+    assert "sample_alias" not in main_df.columns
 
 
 def test_library_embedded_samples_get_sample_name():
@@ -1233,7 +1242,7 @@ def test_named_library_samples_do_not_warn_about_the_barcode_map(capsys):
 def test_multiplexed_file_joins_differing_sample_values_in_main():
     main_df, _ = _mx_run(MX_TWO)
 
-    assert main_df.loc[0, "sample_alias"] == "lab:H1; lab:H2"
+    assert main_df.loc[0, "tissues_aliases"] == "lab:H1; lab:H2"
     assert main_df.loc[0, "tissues_suspension_type"] == "cell; nucleus"
     assert main_df.loc[0, "tissues_selection_kits"] == "EasySep A; EasySep B"
 
@@ -1356,15 +1365,15 @@ def test_single_sample_file_is_not_pooled():
 
 
 def test_sample_with_several_aliases_keeps_them_all_raw():
-    """sample_alias is a list here, so de-duplicating the pairs must not hash it."""
+    """tissues_aliases is a list here, so building the sample rows must not hash it."""
     tissues = [
         {**MX_TWO[0], "aliases": ["lab:H1", "other-lab:heart-1"]},
         MX_TWO[1],
     ]
     main_df, sample_df = _mx_run(tissues)
 
-    assert list(sample_df["sample_alias"]) == [["lab:H1", "other-lab:heart-1"], ["lab:H2"]]
-    assert main_df.loc[0, "sample_alias"] == "lab:H1; lab:H2; other-lab:heart-1"
+    assert list(sample_df["tissues_aliases"]) == [["lab:H1", "other-lab:heart-1"], ["lab:H2"]]
+    assert main_df.loc[0, "tissues_aliases"] == "lab:H1; lab:H2; other-lab:heart-1"
 
 
 def test_multiplexed_file_does_not_repeat_a_shared_value():
@@ -1451,6 +1460,7 @@ def test_multiplexed_biohub_uses_sample_name():
         "@id": "/raw_matrix_files/r1/",
         "uuid": "uuid-r1",
         "aliases": ["lab:rmf1"],
+        "geo_file_name": "GSM1_matrix.h5",
         "samples": [sample["@id"] for sample in pooled],
         "is_multiplexed": True,
         "sequence_file_sets": [{"is_pilot_order": True}],
@@ -1463,6 +1473,7 @@ def test_multiplexed_biohub_uses_sample_name():
         "@id": "/raw_matrix_files/r2/",
         "uuid": "uuid-r2",
         "aliases": ["lab:rmf2"],
+        "geo_file_name": "GSM2_matrix.h5",
         "samples": [sample["@id"] for sample in separate],
         "is_multiplexed": False,
         "sequence_file_sets": [{"is_pilot_order": False}],
@@ -1491,7 +1502,7 @@ def test_multiplexed_biohub_uses_sample_name():
     samples_sheet = f.create_samples_dataframe(sample_df)
     pd.testing.assert_frame_equal(sample_df, biohub_samples)
     pooled_samples = samples_sheet.loc[
-        samples_sheet["processed data file"] == "rmf1", "pre_pooled_sample"
+        samples_sheet["processed data file"] == "GSM1_matrix.h5", "pre_pooled_sample"
     ]
     assert list(pooled_samples) == ["H1 name", "H2 name"]
 

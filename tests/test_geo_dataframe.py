@@ -24,7 +24,7 @@ def gex_row(**overrides):
         "droplet_based_libraries_feature_types": "Gene Expression",
         "droplet_based_libraries_library_construction_technology_term_name": "10x 3' v3",
         "sequence_file_sets_run_cardinality": "paired-end",
-        "raw_matrix_file_alias": "libA.h5",
+        "raw_matrix_files_geo_file_name": "libA.h5",
         "raw_file_samples": "sample1",
         "tissues_sample_terms_term_name": "liver",
         "tissues_enriched_cell_types_term_name": "hepatocyte",
@@ -282,8 +282,8 @@ def test_create_geo_dataframe_expands_raw_file_to_rightmost_columns():
     flattener = make_flattener()
     main_df = pd.DataFrame(
         [
-            gex_row(raw_matrix_file_alias="file1.h5"),
-            gex_row(raw_matrix_file_alias="file2.h5"),
+            gex_row(raw_matrix_files_geo_file_name="file1.h5"),
+            gex_row(raw_matrix_files_geo_file_name="file2.h5"),
         ]
     ).dropna(axis=1, how="all")
 
@@ -815,7 +815,7 @@ def test_create_geo_dataframe_title_maps_differing_strategies_in_library():
                 tissues_suspension_type="cell",
             ),
             gex_row(
-                raw_matrix_file_alias="libA-2.h5",
+                raw_matrix_files_geo_file_name="libA-2.h5",
                 raw_file_samples="sample2",
                 genetic_modifications_strategy="activation screen",
                 tissues_suspension_type="cell",
@@ -886,7 +886,7 @@ def test_create_geo_dataframe_title_pooled_across_a_librarys_files():
                 tissues_suspension_type="cell",
             ),
             gex_row(
-                raw_matrix_file_alias="libA-2.h5",
+                raw_matrix_files_geo_file_name="libA-2.h5",
                 raw_file_samples="sample2",
                 raw_file_sample_uuids="uuid-s2",
                 tissues_suspension_type="cell",
@@ -904,8 +904,8 @@ def test_create_geo_dataframe_title_joins_distinct_summaries_in_library():
     main_df = pd.DataFrame(
         [
             gex_row(experimental_conditions_summary="zeta"),
-            gex_row(raw_matrix_file_alias="libA-2.h5", experimental_conditions_summary="alpha"),
-            gex_row(raw_matrix_file_alias="libA-3.h5", experimental_conditions_summary="zeta"),
+            gex_row(raw_matrix_files_geo_file_name="libA-2.h5", experimental_conditions_summary="alpha"),
+            gex_row(raw_matrix_files_geo_file_name="libA-3.h5", experimental_conditions_summary="zeta"),
         ]
     ).dropna(axis=1, how="all")
 
@@ -920,7 +920,7 @@ def test_create_geo_dataframe_title_dedupes_within_joined_summaries():
     main_df = pd.DataFrame(
         [
             gex_row(experimental_conditions_summary="a; b"),
-            gex_row(raw_matrix_file_alias="libA-2.h5", experimental_conditions_summary="a"),
+            gex_row(raw_matrix_files_geo_file_name="libA-2.h5", experimental_conditions_summary="a"),
         ]
     ).dropna(axis=1, how="all")
 
@@ -937,7 +937,7 @@ def test_create_geo_dataframe_title_per_library():
             gex_row(experimental_conditions_summary="stimulated"),
             gex_row(
                 droplet_based_libraries_CRO_group_identifier="libB",
-                raw_matrix_file_alias="libB.h5",
+                raw_matrix_files_geo_file_name="libB.h5",
                 experimental_conditions_summary=None,
                 tissues_suspension_type="cell",
             ),
@@ -985,7 +985,7 @@ def test_create_geo_dataframe_titles_stay_unique_for_a_shared_summary():
             ),
             gex_row(
                 droplet_based_libraries_CRO_group_identifier="libB",
-                raw_matrix_file_alias="libB.h5",
+                raw_matrix_files_geo_file_name="libB.h5",
                 experimental_conditions_summary="LPS for 4 hours",
                 tissues_suspension_type="cell",
             ),
@@ -1031,13 +1031,13 @@ def test_create_geo_dataframe_plate_dbxrefs_from_gex_library_only():
                 "plate_based_libraries_CRO_group_identifier": "plateA",
                 "plate_based_libraries_feature_types": "Gene Expression",
                 "plate_based_libraries_dbxrefs": ["SRA:SRX1"],
-                "raw_matrix_file_alias": "plateA.h5",
+                "raw_matrix_files_geo_file_name": "plateA.h5",
             },
             {
                 "plate_based_libraries_CRO_group_identifier": "plateA",
                 "plate_based_libraries_feature_types": "ATAC",
                 "plate_based_libraries_dbxrefs": ["SRA:SRX2"],
-                "raw_matrix_file_alias": "plateA_atac.h5",
+                "raw_matrix_files_geo_file_name": "plateA_atac.h5",
             },
         ]
     )
