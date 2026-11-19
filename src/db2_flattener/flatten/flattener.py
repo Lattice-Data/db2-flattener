@@ -266,6 +266,7 @@ class DB2Flattener:
             md5_df = sanitize_tabular_dataframe(md5_df)
             md5_df.to_csv(md5_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
             print(f"✅ MD5 checksums TSV file created: {md5_output}")
+            self._warn_md5_files_missing_from_geo(complete_data, main_df)
 
         # SRA sheets: chunk by sample_name so each set stays under 4.8 TB of files.
         # Both sheets key off the same library ids, and building them warns about
@@ -351,20 +352,67 @@ class DB2Flattener:
     @staticmethod
     def _warn_missing_geo_file_names(missing):
         """
-        List every RawMatrixFile without a geo_file_name, sorted by @id, with the
-        sheets whose processed data file cells it leaves empty: GEO only when one
-        of its libraries is kept on the GEO sheet (GEX/ATAC), SAMPLES always.
+        List every RawMatrixFile without a geo_file_name, sorted by @id.
+
+        The one report of a missing name: create_md5_checksums_dataframe leaves
+        the md5_checksums.tsv cell blank without warning again. Which of these
+        files miss the GEO sheet altogether is reported by
+        _warn_md5_files_missing_from_geo.
         """
         if not missing:
             return
         lines = [
             f"====WARNING==== {len(missing)} RawMatrixFile(s) have no geo_file_name; "
-            'their "processed data file" cells are left empty:'
+            'their "processed data file" (GEO, SAMPLES) and "file name" (md5_checksums.tsv) '
+            "cells are left empty:"
         ]
-        for atid, info in sorted(missing.items(), key=lambda item: str(item[0])):
-            alias = f" ({info['alias']})" if info["alias"] else ""
-            sheets = "GEO and SAMPLES sheets" if info["reaches_geo"] else "SAMPLES sheet only"
-            lines.append(f"  {atid}{alias}: {sheets}")
+        for atid, alias in sorted(missing.items(), key=lambda item: str(item[0])):
+            lines.append(f"  {atid}" + (f" ({alias})" if alias else ""))
+        print("\n".join(lines))
+
+    def _geo_library_mask(self, main_df) -> pd.Series:
+        """True for the main_df rows create_geo_dataframe keeps (GEX/ATAC libraries)."""
+        if main_df.empty:
+            return pd.Series(False, index=main_df.index, dtype=bool)
+        return main_df.apply(self._row_is_geo_library, axis=1).astype(bool)
+
+    def _warn_md5_files_missing_from_geo(self, complete_data, main_df) -> None:
+        """
+        List the RawMatrixFiles md5_checksums.tsv lists but the GEO sheet does not.
+
+        md5_checksums.tsv has every RawMatrixFile of the MatrixFileSet, while the
+        GEO sheet only has files on a GEX/ATAC library row, so the two disagree
+        for a file with no such library (e.g. CRISPR-only) or with no library at
+        all. Compared by uuid, so files without a geo_file_name are caught too.
+        """
+        raw_matrix_files = (complete_data.get("resolved_objects") or {}).get("RawMatrixFile") or {}
+        if not raw_matrix_files:
+            return
+        uuid_col = "raw_matrix_file_uuid"
+        on_main = set()
+        on_geo = set()
+        if uuid_col in main_df.columns:
+            on_main = set(main_df[uuid_col].dropna())
+            on_geo = set(main_df.loc[self._geo_library_mask(main_df), uuid_col].dropna())
+
+        missing = []
+        for raw_id, rmf in raw_matrix_files.items():
+            uuid = self._object_uuid(rmf)
+            if uuid in on_geo:
+                continue
+            reason = "no GEX/ATAC library" if uuid in on_main else "not on any library"
+            missing.append((str(raw_id), self._join_unique(rmf.get("aliases") or []), rmf, reason))
+        if not missing:
+            return
+
+        lines = [
+            f"====WARNING==== {len(missing)} RawMatrixFile(s) are in md5_checksums.tsv "
+            "but not on the GEO sheet:"
+        ]
+        for raw_id, alias, rmf, reason in sorted(missing, key=lambda item: item[0]):
+            name = rmf.get("geo_file_name")
+            name = "no geo_file_name" if is_empty(name) else f"file name {name}"
+            lines.append(f"  {raw_id}" + (f" ({alias})" if alias else "") + f": {name}; {reason}")
         print("\n".join(lines))
 
     def create_dataframe(self, complete_data):
@@ -455,8 +503,8 @@ class DB2Flattener:
         unmapped_samples = set()
         # {sample uuid: {"@id", "sample_name", "cro_orders"}}
         sample_info = {}
-        # {raw matrix file @id: {"alias", "reaches_geo"}} for files whose
-        # processed data file cells would be left empty
+        # {raw matrix file @id: alias} for files whose processed data file
+        # cells would be left empty
         missing_geo_file_names = {}
 
         # Create one row per (raw matrix file, library)
@@ -508,11 +556,9 @@ class DB2Flattener:
             if is_empty(geo_file_name) or (
                 isinstance(geo_file_name, str) and not geo_file_name.strip()
             ):
-                missing_geo_file_names[representative_raw_file.get("@id")] = {
-                    "alias": shared["raw_matrix_file_alias"],
-                    # Set below if any of the file's library rows is kept on GEO
-                    "reaches_geo": False,
-                }
+                missing_geo_file_names[representative_raw_file.get("@id")] = shared[
+                    "raw_matrix_file_alias"
+                ]
 
             # Recorded here, where the samples are still separate values, rather
             # than by splitting raw_file_samples back apart on '; ' afterwards
@@ -564,10 +610,6 @@ class DB2Flattener:
                             self._join_unique(values) if values else None
                         )
                 rows.append(row)
-                missing = missing_geo_file_names.get(representative_raw_file.get("@id"))
-                # Same test create_geo_dataframe uses to keep a row on the GEO sheet
-                if missing is not None and self._row_is_geo_library(row):
-                    missing["reaches_geo"] = True
 
                 # A sample's CRO orders are those of the file sets on its files
                 orders = self._cro_order_parts(row.get("sequence_file_sets_CRO_order"))
@@ -776,20 +818,19 @@ class DB2Flattener:
         One row per RawMatrixFile of the MatrixFileSet: its geo_file_name and md5sum.
 
         Columns follow the GEO submission template ('file name', 'file checksum').
-        A file missing either value keeps its row with that cell blank, and a
-        warning names the file. Rows are sorted by file name (blank names last),
-        then by @id. Empty frame when the MatrixFileSet has no RawMatrixFiles.
+        A file missing either value keeps its row with that cell blank. A missing
+        md5sum is warned about here; a missing geo_file_name is not, since
+        create_dataframe's warning already lists those files. Rows are sorted by
+        file name (blank names last), then by @id. Empty frame when the
+        MatrixFileSet has no RawMatrixFiles.
         """
         raw_matrix_files = (complete_data.get("resolved_objects") or {}).get("RawMatrixFile") or {}
         rows = []
         for raw_id, rmf in raw_matrix_files.items():
             file_name = rmf.get("geo_file_name")
             checksum = rmf.get("md5sum")
-            for label, value in (("geo_file_name", file_name), ("md5sum", checksum)):
-                if is_empty(value):
-                    print(
-                        f"====== WARNING ====== RawMatrixFile {raw_id} has no {label}; left blank"
-                    )
+            if is_empty(checksum):
+                print(f"====== WARNING ====== RawMatrixFile {raw_id} has no md5sum; left blank")
             rows.append(
                 {
                     GEO_MD5_FILE_NAME_COL: "" if is_empty(file_name) else str(file_name),
@@ -808,8 +849,7 @@ class DB2Flattener:
 
         Expects _term_name columns (not raw dict columns).
         """
-        geo_mask = main_df.apply(self._row_is_geo_library, axis=1)
-        geo_source = main_df[geo_mask].copy()
+        geo_source = main_df[self._geo_library_mask(main_df)].copy()
         print(f"GEO: filtered to {len(geo_source)} GEX/ATAC rows out of {len(main_df)} MAIN rows")
 
         # *SRA Experiment or Run (and *BioSample, read out of it below) are required
