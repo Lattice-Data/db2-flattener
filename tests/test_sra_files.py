@@ -91,7 +91,7 @@ def test_paired_libraries_each_get_a_row():
     assert list(sra_df["sample_name"]) == ["LIB_A", "LIB_A"]
     assert list(sra_df[LIBRARY_ID_COLUMN]) == ["LIB_A_GEX", "LIB_A_CRI"]
     assert list(sra_df[DESIGN_DESCRIPTION_COLUMN]) == ["", ""]
-    assert list(sra_df[OPTIONS_COLUMN]) == ["", "--ignoreNames"]
+    assert list(sra_df[OPTIONS_COLUMN]) == ["--ignoreNames", "--ignoreNames"]
     assert list(sra_df[LIBRARY_STRATEGY_COLUMN]) == ["RNA-Seq", "OTHER"]
     assert list(sra_df[LIBRARY_SOURCE_COLUMN]) == [
         "TRANSCRIPTOMIC SINGLE CELL",
@@ -841,7 +841,7 @@ def test_title_dedupes_within_joined_summaries():
     assert list(sra_df[TITLE_COLUMN]) == ["LIB_A RNA-Seq; a; b"]
 
 
-def test_design_description_is_blank_and_gex_only_omits_options():
+def test_design_description_is_blank_and_gex_gets_ignore_names():
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
@@ -854,10 +854,25 @@ def test_design_description_is_blank_and_gex_only_omits_options():
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
     assert list(sra_df[DESIGN_DESCRIPTION_COLUMN]) == [""]
+    assert list(sra_df[OPTIONS_COLUMN]) == ["--ignoreNames"]
+
+
+def test_options_omitted_without_gex_or_crispr_libraries():
+    main_df = pd.DataFrame(
+        {
+            "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
+            "droplet_based_libraries_aliases": [["lab:LIB_A_ADT"]],
+            "droplet_based_libraries_@id": ["/droplet_based_libraries/adt/"],
+            "droplet_based_libraries_feature_types": [["Antibody Capture"]],
+        }
+    )
+
+    sra_df = make_flattener().create_sra_files_dataframe(main_df)
+
     assert OPTIONS_COLUMN not in sra_df.columns
 
 
-def test_options_marks_crispr_libraries_when_present():
+def test_options_marks_gex_and_crispr_libraries():
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A", "LIB_B"],
@@ -878,7 +893,7 @@ def test_options_marks_crispr_libraries_when_present():
 
     sra_df = make_flattener().create_sra_files_dataframe(main_df)
 
-    assert list(sra_df[OPTIONS_COLUMN]) == ["", "--ignoreNames"]
+    assert list(sra_df[OPTIONS_COLUMN]) == ["--ignoreNames", "--ignoreNames"]
 
 
 def test_geo_like_columns_use_main_sources_and_tissue_name():
@@ -1482,7 +1497,7 @@ def test_crispr_with_one_sequence_file_set_keeps_one_row():
 
 
 def test_gex_expands_one_row_per_sequence_file_set():
-    """GEX libraries split per sequencing run like CRISPR, without --ignoreNames."""
+    """GEX libraries split per sequencing run like CRISPR, with --ignoreNames."""
     main_df = pd.DataFrame(
         {
             "droplet_based_libraries_CRO_group_identifier": ["LIB_A"],
@@ -1517,7 +1532,7 @@ def test_gex_expands_one_row_per_sequence_file_set():
     assert sra_df.loc[0, "filename2"] == "setA_R2.fastq.gz"
     assert pd.isna(sra_df.loc[1, "filename2"])
     assert "main_R1.fastq.gz" not in list(sra_df["filename"])
-    assert OPTIONS_COLUMN not in sra_df.columns
+    assert list(sra_df[OPTIONS_COLUMN]) == ["--ignoreNames", "--ignoreNames"]
 
 
 def test_gex_with_one_sequence_file_set_keeps_unsuffixed_library_id():
@@ -1600,4 +1615,10 @@ def test_gex_and_crispr_split_while_other_libraries_keep_one_row():
         "cri1.fastq.gz",
         "cri2.fastq.gz",
     ]
-    assert list(sra_df[OPTIONS_COLUMN]) == ["", "", "", "--ignoreNames", "--ignoreNames"]
+    assert list(sra_df[OPTIONS_COLUMN]) == [
+        "--ignoreNames",
+        "--ignoreNames",
+        "",
+        "--ignoreNames",
+        "--ignoreNames",
+    ]

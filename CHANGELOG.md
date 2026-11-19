@@ -9,8 +9,8 @@
   by SequenceFileSet `@id`; a single run keeps the plain `library_ID`).
   Previously a GEX library was one row listing every file across all its runs.
   `sra_sequence_fileset_set{N}.tsv` follows, pairing each suffixed GEX
-  `library_ID` with its one SequenceFileSet uuid. Only CRISPR rows get
-  `--ignoreNames`. Other libraries (e.g. Antibody Capture, Multiplexing
+  `library_ID` with its one SequenceFileSet uuid. GEX rows now get
+  `--ignoreNames` in `options`, like CRISPR rows. Other libraries (e.g. Antibody Capture, Multiplexing
   Capture) are unchanged. Within a `sample_name`, rows keep library order, with
   each split library's runs together.
 - New `db2-flattener-download` command (`src/db2_flattener/download/`, also

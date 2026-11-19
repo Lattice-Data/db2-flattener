@@ -1932,17 +1932,16 @@ class DB2Flattener:
         sra_df["design_description"] = ""
         if "_feature_types" in sra_df.columns:
             sra_df["_is_crispr"] = sra_df["_feature_types"].map(self._sra_feature_has_crispr)
-            if bool(sra_df["_is_crispr"].any()):
-                sra_df["options"] = sra_df["_is_crispr"].map(
-                    lambda is_crispr: "--ignoreNames" if is_crispr else ""
-                )
-        else:
-            sra_df["_is_crispr"] = False
-        if "_feature_types" in sra_df.columns:
             is_gex = sra_df["_feature_types"].map(self._sra_feature_has_gex)
         else:
+            sra_df["_is_crispr"] = False
             is_gex = pd.Series(False, index=sra_df.index)
         sra_df["_split_by_set"] = sra_df["_is_crispr"].astype(bool) | is_gex.astype(bool)
+        # GEX and CRISPR rows are per sequencing run, so both get --ignoreNames
+        if bool(sra_df["_split_by_set"].any()):
+            sra_df["options"] = sra_df["_split_by_set"].map(
+                lambda split: "--ignoreNames" if split else ""
+            )
 
         drop_cols = [
             c
