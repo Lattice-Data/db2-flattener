@@ -551,10 +551,10 @@ def test_warns_listing_every_raw_matrix_file_without_geo_file_name(capsys):
     out = capsys.readouterr().out
     assert f"====WARNING==== 2 {GEO_NAME_WARNING}" in out
     block = out[out.index(GEO_NAME_WARNING) :].splitlines()
-    assert block[0].endswith(
-        'their "processed data file" (GEO, SAMPLES) and "file name" (md5_checksums.tsv) '
-        "cells are left empty:"
-    )
+    assert (
+        f"====WARNING==== 2 {GEO_NAME_WARNING}; "
+        'their "processed data file" and md5_checksums.tsv "file name" cells are left empty:'
+    ) in out.splitlines()
     assert block[1:3] == [
         "  /raw_matrix_files/r2/ (lab:rmf2)",
         "  /raw_matrix_files/r3/ (lab:rmf3)",

@@ -363,8 +363,7 @@ class DB2Flattener:
             return
         lines = [
             f"====WARNING==== {len(missing)} RawMatrixFile(s) have no geo_file_name; "
-            'their "processed data file" (GEO, SAMPLES) and "file name" (md5_checksums.tsv) '
-            "cells are left empty:"
+            'their "processed data file" and md5_checksums.tsv "file name" cells are left empty:'
         ]
         for atid, alias in sorted(missing.items(), key=lambda item: str(item[0])):
             lines.append(f"  {atid}" + (f" ({alias})" if alias else ""))
