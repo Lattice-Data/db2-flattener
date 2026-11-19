@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- New tab-separated `GEO/md5_checksums.tsv`: one row per RawMatrixFile of the
+  MatrixFileSet,
+  with the GEO submission template columns `file name` (the calculated
+  `geo_file_name`) and `file checksum` (`md5sum`), sorted by file name. A file
+  missing either value keeps its row with that cell blank and a
+  `====== WARNING ======` line naming it. Omitted when there are no
+  RawMatrixFiles. RawMatrixFile fetches now always request `geo_file_name` and
+  `md5sum`, whatever the schema snapshot lists.
+
 - New `db2-flattener-download` command (`src/db2_flattener/download/`, also
   `python -m db2_flattener.download`): given a MatrixFileSet `--uuid`, downloads
   each RawMatrixFile from its `s3_uri` into `--out-directory`, saved as its

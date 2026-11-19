@@ -48,6 +48,16 @@ EXCLUDED_FIELDS = {"creation_timestamp", "submitted_by"}
 # the status, uuid (from @id) and aliases of any gathered object.
 REQUIRED_FETCH_FIELDS = ("@id", "status", "aliases")
 
+# Fields also always requested for one object type, whatever the schema snapshot
+# lists. geo_file_name is a calculated field, so it is not in the snapshot.
+REQUIRED_FETCH_FIELDS_BY_TYPE = {
+    "RawMatrixFile": ("geo_file_name", "md5sum"),
+}
+
+# GEO submission template headers for GEO/md5_checksums.tsv
+GEO_MD5_FILE_NAME_COL = "file name"
+GEO_MD5_CHECKSUM_COL = "file checksum"
+
 # URL length limit for chunking (includes base URL overhead)
 MAX_URL_LENGTH = 3800
 # Base URL overhead for chunking calculations (base URL + field params + safety margin)

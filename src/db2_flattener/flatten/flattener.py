@@ -19,6 +19,8 @@ from db2_flattener.schema.constants import (
     GEO_LIBRARY_STRATEGY_MAP,
     GEO_LIBRARY_STRATEGY_PLATE_FEATURE_COL,
     GEO_LIBRARY_STRATEGY_SOURCE_COLS,
+    GEO_MD5_CHECKSUM_COL,
+    GEO_MD5_FILE_NAME_COL,
     GEO_RUN_CARDINALITY_MAP,
     GEO_SUSPENSION_TYPE_COLS,
     GEO_TITLE_MAX_LENGTH,
@@ -251,6 +253,15 @@ class DB2Flattener:
         print(f"Saving geo DataFrame to {geo_output}...")
         geo_df.to_csv(geo_output, index=False)
         print(f"✅ GEO CSV file created: {geo_output}")
+
+        # GEO MD5 checksums: geo_file_name and md5sum of each RawMatrixFile
+        md5_df = self.create_md5_checksums_dataframe(complete_data)
+        if not md5_df.empty:
+            md5_output = geo_dir / "md5_checksums.tsv"
+            print(f"Saving MD5 checksums to {md5_output}...")
+            md5_df = sanitize_tabular_dataframe(md5_df)
+            md5_df.to_csv(md5_output, index=False, sep="\t", quoting=csv.QUOTE_NONE)
+            print(f"✅ MD5 checksums TSV file created: {md5_output}")
 
         # SRA sheets: chunk by sample_name so each set stays under 4.8 TB of files.
         # Both sheets key off the same library ids, and building them warns about
@@ -713,6 +724,37 @@ class DB2Flattener:
         ):
             return False
         return True  # if no GEX/ATAC found, keep all
+
+    def create_md5_checksums_dataframe(self, complete_data) -> pd.DataFrame:
+        """
+        One row per RawMatrixFile of the MatrixFileSet: its geo_file_name and md5sum.
+
+        Columns follow the GEO submission template ('file name', 'file checksum').
+        A file missing either value keeps its row with that cell blank, and a
+        warning names the file. Rows are sorted by file name (blank names last),
+        then by @id. Empty frame when the MatrixFileSet has no RawMatrixFiles.
+        """
+        raw_matrix_files = (complete_data.get("resolved_objects") or {}).get("RawMatrixFile") or {}
+        rows = []
+        for raw_id, rmf in raw_matrix_files.items():
+            file_name = rmf.get("geo_file_name")
+            checksum = rmf.get("md5sum")
+            for label, value in (("geo_file_name", file_name), ("md5sum", checksum)):
+                if is_empty(value):
+                    print(
+                        f"====== WARNING ====== RawMatrixFile {raw_id} has no {label}; left blank"
+                    )
+            rows.append(
+                {
+                    GEO_MD5_FILE_NAME_COL: "" if is_empty(file_name) else str(file_name),
+                    GEO_MD5_CHECKSUM_COL: "" if is_empty(checksum) else str(checksum),
+                    "_id": raw_id,
+                }
+            )
+        md5_df = pd.DataFrame(rows, columns=[GEO_MD5_FILE_NAME_COL, GEO_MD5_CHECKSUM_COL, "_id"])
+        md5_df["_blank_name"] = md5_df[GEO_MD5_FILE_NAME_COL].eq("")
+        md5_df = md5_df.sort_values(["_blank_name", GEO_MD5_FILE_NAME_COL, "_id"], kind="mergesort")
+        return md5_df[[GEO_MD5_FILE_NAME_COL, GEO_MD5_CHECKSUM_COL]].reset_index(drop=True)
 
     def create_geo_dataframe(self, main_df) -> pd.DataFrame:
         """

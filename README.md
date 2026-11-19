@@ -95,6 +95,7 @@ Layout:
   GEO/
     geo_metadata.csv                     # includes genetic_modification_alias when present
     demultiplexing_samples.csv           # omitted when empty; same alias column when present
+    md5_checksums.tsv                    # tab-separated; file name, file checksum: RawMatrixFile geo_file_name and md5sum; omitted when no files
     {gm_alias}_guide_metadata.csv        # copy of each BIOHUB guide template
   SRA/
     sra_biosample_setN.tsv               # paired with sra_file_setN; ≤4.8 TB per set
