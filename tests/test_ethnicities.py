@@ -129,6 +129,12 @@ def test_geo_two_donors_one_with_none_adds_the_gap():
     assert geo_cell((BOTH, D1), (None, D2)) == ["pooled: Asian, European, not provided"]
 
 
+def test_geo_a_tissue_row_with_no_human_donor_is_an_unknown_donor_so_it_pools():
+    """The gap row must not make one donor's ethnicities read 'a; b; not provided'."""
+    assert geo_cell((BOTH, D1), (None, None)) == ["pooled: Asian, European, not provided"]
+    assert geo_cell((["European"], D1), (None, None)) == ["pooled: European, not provided"]
+
+
 def test_geo_one_donor_with_a_single_ethnicity_is_bare():
     assert geo_cell((["European"], D1)) == ["European"]
 
@@ -159,6 +165,11 @@ def test_sra_two_donors_pool():
 def test_sra_two_donors_one_with_none_adds_the_gap():
     terms = [BOTH, None, BOTH, None]
     assert sra_cell([D1, D2, D1, D2], terms) == "pooled: Asian, European, not provided"
+
+
+def test_sra_a_tissue_row_with_no_human_donor_is_an_unknown_donor_so_it_pools():
+    terms = [BOTH, None, BOTH, None]
+    assert sra_cell([D1, None, D1, None], terms) == "pooled: Asian, European, not provided"
 
 
 def test_sra_donors_joined_in_one_cell_count_as_two():

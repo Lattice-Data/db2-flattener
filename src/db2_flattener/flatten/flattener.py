@@ -2640,6 +2640,8 @@ class DB2Flattener:
         return df
 
     HUMAN_DONOR_ID_COL = "human_donors_@id"
+    # Stands in for the donor of a tissue row that has no human donor id
+    UNKNOWN_DONOR = "<unknown donor>"
 
     @staticmethod
     def _donor_ids(val) -> set[str]:
@@ -2691,7 +2693,13 @@ class DB2Flattener:
                 library_key, include, main_df[self.HUMAN_DONOR_ID_COL], strict=True
             ):
                 if keep and isinstance(library, str):
-                    donors_by_library.setdefault(library, set()).update(self._donor_ids(cell))
+                    # A row with no human donor id is a subject whose donor is
+                    # unknown, so it counts as another donor: it adds the
+                    # 'not provided' gap to the cell, and the result must not
+                    # read as one donor's own ethnicities.
+                    donors_by_library.setdefault(library, set()).update(
+                        self._donor_ids(cell) or {self.UNKNOWN_DONOR}
+                    )
         return {
             library: self._format_ethnicity(
                 values, len(donors_by_library[library]) if library in donors_by_library else None
