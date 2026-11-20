@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 from test_audit_policy import _complete_data_for_write, _stub_downstream_writers, make_flattener
 
@@ -53,7 +54,7 @@ def test_rows_are_geo_file_name_and_md5sum_sorted_by_name(capsys):
     assert WARNING not in capsys.readouterr().out
 
 
-def test_missing_geo_file_name_is_blank_with_a_warning_and_sorts_last(capsys):
+def test_missing_geo_file_name_is_blank_without_a_second_warning_and_sorts_last(capsys):
     f = make_flattener()
     df = f.create_md5_checksums_dataframe(
         data_with(rmf("u1", None, "aaa"), rmf("u2", "b.h5ad", "bbb"))
@@ -63,9 +64,8 @@ def test_missing_geo_file_name_is_blank_with_a_warning_and_sorts_last(capsys):
         {"file name": "b.h5ad", "file checksum": "bbb"},
         {"file name": "", "file checksum": "aaa"},
     ]
-    out = capsys.readouterr().out
-    assert f"{WARNING} RawMatrixFile /raw_matrix_files/u1/ has no geo_file_name; left blank" in out
-    assert "u2" not in out
+    # create_dataframe's missing-geo_file_name warning is the one report
+    assert "geo_file_name" not in capsys.readouterr().out
 
 
 def test_missing_md5sum_is_blank_with_a_warning(capsys):
@@ -79,14 +79,95 @@ def test_missing_md5sum_is_blank_with_a_warning(capsys):
     )
 
 
-def test_both_missing_warns_twice_and_keeps_the_row(capsys):
+def test_both_missing_warns_only_for_md5sum_and_keeps_the_row(capsys):
     f = make_flattener()
     df = f.create_md5_checksums_dataframe(data_with(rmf("u1", "", None)))
 
     assert len(df) == 1
     out = capsys.readouterr().out
-    assert "has no geo_file_name" in out
+    assert "has no geo_file_name" not in out
     assert "has no md5sum" in out
+
+
+# md5_checksums.tsv files that are not on the GEO sheet
+
+NOT_ON_GEO = "RawMatrixFile(s) are in md5_checksums.tsv but not on the GEO sheet"
+
+
+def main_rows(*rows):
+    """main_df rows: (raw matrix file uuid, droplet library feature types)."""
+    return pd.DataFrame(
+        [
+            {
+                "raw_matrix_file_uuid": uuid,
+                "droplet_based_libraries_@id": f"/droplet_based_libraries/{uuid}/",
+                "droplet_based_libraries_feature_types": feature_types,
+            }
+            for uuid, feature_types in rows
+        ]
+    )
+
+
+def test_lists_md5_files_missing_from_geo_with_reason(capsys):
+    f = make_flattener()
+    data = data_with(
+        rmf("gex", "GSM_gex.h5", "a", aliases=["lab:gex_matrix"]),
+        rmf("crispr", "GSM_crispr.h5", "b", aliases=["lab:crispr_matrix"]),
+        rmf("loose", None, "c"),
+    )
+    main_df = main_rows(("gex", ["Gene Expression"]), ("crispr", ["CRISPR Guide Capture"]))
+
+    f._warn_md5_files_missing_from_geo(data, main_df)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines == [
+        f"====WARNING==== 2 {NOT_ON_GEO}:",
+        "  /raw_matrix_files/crispr/ (lab:crispr_matrix): file name GSM_crispr.h5; "
+        "no GEX/ATAC library",
+        "  /raw_matrix_files/loose/: no geo_file_name; not on any library",
+    ]
+
+
+def test_file_on_a_gex_and_a_crispr_library_is_on_geo(capsys):
+    f = make_flattener()
+    data = data_with(rmf("multi", "GSM_multi.h5", "a"))
+    main_df = main_rows(("multi", ["CRISPR Guide Capture"]), ("multi", ["Gene Expression"]))
+
+    f._warn_md5_files_missing_from_geo(data, main_df)
+
+    assert NOT_ON_GEO not in capsys.readouterr().out
+
+
+def test_no_md5_gap_warning_without_raw_matrix_files(capsys):
+    make_flattener()._warn_md5_files_missing_from_geo(data_with(), main_rows())
+
+    assert capsys.readouterr().out == ""
+
+
+def test_flatten_reports_a_missing_name_once_and_the_geo_gap(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    complete_data = _complete_data_for_write(tissue_audit=None, sequence_audit=None)
+    # The library's raw matrix file (uuid-r1, GEX) has no geo_file_name; a second
+    # file of the MatrixFileSet is on no library at all.
+    complete_data["resolved_objects"]["RawMatrixFile"] = {
+        "/raw_matrix_files/r1/": rmf("uuid-r1", None, "abc123", **{"@id": "/raw_matrix_files/r1/"}),
+        "/raw_matrix_files/r9/": rmf(
+            "uuid-r9", "GSM9.h5", "def456", **{"@id": "/raw_matrix_files/r9/"}
+        ),
+    }
+    f = make_flattener()
+    f.gatherer = SimpleNamespace(gather_complete_library_data=lambda uuid: complete_data)
+    f._validate_genetic_modification_aliases = lambda data: None
+    _stub_downstream_writers(f)
+
+    f.flatten_matrix_file_set("abc12345-uuid", audit_mode="all_ok")
+
+    out = capsys.readouterr().out
+    assert out.count("/raw_matrix_files/r1/") == 1
+    assert "RawMatrixFile(s) have no geo_file_name" in out
+    assert "has no geo_file_name; left blank" not in out
+    assert f"====WARNING==== 1 {NOT_ON_GEO}:" in out
+    assert "  /raw_matrix_files/r9/: file name GSM9.h5; not on any library" in out.splitlines()
 
 
 @pytest.mark.parametrize(

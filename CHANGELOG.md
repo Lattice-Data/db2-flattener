@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- The GEO and SAMPLES sheets' `processed data file` columns now hold each
+  RawMatrixFile's `geo_file_name` instead of its alias. The main and sample
+  dataframes gain a `raw_matrix_files_geo_file_name` column (`raw_matrix_file_alias`
+  is still there); a file with no `geo_file_name` leaves its `processed data file`
+  cell empty, and the run prints a `====WARNING====` block listing every such
+  RawMatrixFile by `@id` (and alias). That block is the one report of a missing
+  `geo_file_name`: `md5_checksums.tsv` still leaves the `file name` cell blank
+  but no longer prints its own `has no geo_file_name` line (it still warns on a
+  missing `md5sum`) (TOOLS-380).
+- After writing `md5_checksums.tsv`, the run prints a `====WARNING====` block
+  listing every RawMatrixFile that is in `md5_checksums.tsv` but not on the GEO
+  sheet, compared by uuid, with its file name (or `no geo_file_name`) and why:
+  `no GEX/ATAC library` (e.g. CRISPR-only, so on SAMPLES but not GEO) or
+  `not on any library` (TOOLS-380).
+- `raw_matrix_file_alias` in MAIN.csv now keeps the lab prefix (`lab:rmf1`, not
+  `rmf1`); multiple aliases are joined with `; `. `_get_clean_alias` is removed
+  (TOOLS-380).
+- The `sample_alias` column is removed from the sample dataframe and MAIN.csv.
+  It duplicated the per-type `tissues_aliases`, `cell_lines_aliases`, etc.
+  columns, which still carry the same values (TOOLS-380).
 - Refuse flatten (exit 1) when two or more RawMatrixFiles share a
   `geo_file_name`, compared case-insensitively (`GSM1.h5` and `gsm1.h5` collide).
   Each shared name prints an `====== ERROR ======` block listing the files'

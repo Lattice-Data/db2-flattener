@@ -120,7 +120,7 @@ PROP_MAP_GEO = {
     "organoids_sample_terms_term_name": "**tissue",
     "primary_cell_cultures_enriched_cell_types_term_name": "**cell type",
     "raw_file_samples": "samples",
-    "raw_matrix_file_alias": "processed data file",
+    "raw_matrix_files_geo_file_name": "processed data file",
     "sequence_file_sets_sequencing_platform": "*instrument model",
     "tissues_developmental_stages_term_name": "donor_dev_stage",
     "tissues_enriched_cell_types_term_name": "**cell type",
@@ -174,7 +174,7 @@ PROP_MAP_BIOHUB = {
 }
 
 PROP_MAP_SAMPLES = {
-    "raw_matrix_file_alias": "processed data file",
+    "raw_matrix_files_geo_file_name": "processed data file",
     "tissues_sample_name": "pre_pooled_sample",
     "cell_lines_sample_name": "pre_pooled_sample",
     "organoids_sample_name": "pre_pooled_sample",
