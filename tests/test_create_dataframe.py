@@ -642,7 +642,7 @@ def test_biohub_tissue_type_from_tissues_cell_lines_or_both():
             "cell_lines_preservation_method": [None, "frozen", None],
             "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3"],
             "human_donors_sex": ["female", "male", "female"],
-            "human_donors_ethnicity_term_id": [
+            "human_donors_ethnicities_term_id": [
                 "HANCESTRO:0005",
                 "HANCESTRO:0008",
                 "HANCESTRO:0005",
@@ -874,7 +874,7 @@ def test_biohub_empty_development_stage_defaults_to_unknown():
             "tissues_developmental_stages_term_id": ["", None, pd.NA, "HsapDv:0000087", None],
             "human_donors_cxg_donor_id": ["donor1", "donor2", "donor3", "donor4", "donor5"],
             "human_donors_sex": ["female", "female", "female", "female", "male"],
-            "human_donors_ethnicity_term_id": [
+            "human_donors_ethnicities_term_id": [
                 "HANCESTRO:0005",
                 "HANCESTRO:0005",
                 "HANCESTRO:0005",
@@ -976,7 +976,7 @@ def test_biohub_sex_ontology_term_id_mapping():
                 "female; hermaphrodite",
                 "unspecified",
             ],
-            "human_donors_ethnicity_term_id": [
+            "human_donors_ethnicities_term_id": [
                 "HANCESTRO:0005",
                 "HANCESTRO:0005",
                 "HANCESTRO:0005",

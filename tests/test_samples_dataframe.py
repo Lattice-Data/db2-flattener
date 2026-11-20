@@ -30,7 +30,7 @@ def test_prop_map_samples_names():
     assert PROP_MAP_SAMPLES["non_human_donors_sex"] == "donor_sex"
     assert PROP_MAP_SAMPLES["human_donors_taxa_term_name"] == "organism"
     assert PROP_MAP_SAMPLES["non_human_donors_taxa_term_name"] == "organism"
-    assert "human_donors_ethnicity_term_name" not in PROP_MAP_SAMPLES
+    assert "human_donors_ethnicities_term_name" not in PROP_MAP_SAMPLES
     assert PROP_MAP_SAMPLES["cell_lines_intended_cell_types_term_name"] == "**cell type"
     assert PROP_MAP_SAMPLES["cell_lines_sample_terms_term_name"] == "**cell_line"
     assert PROP_MAP_SAMPLES["tissues_sample_terms_term_name"] == "tissue"
@@ -69,7 +69,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
             "human_donors_cxg_donor_id": ["H1"],
             "human_donors_sex": ["female"],
             "human_donors_taxa_term_name": ["Homo sapiens"],
-            "human_donors_ethnicity_term_name": ["European"],
+            "human_donors_ethnicities_term_name": ["European"],
             "cell_lines_intended_cell_types_term_name": ["hepatocyte"],
             "cell_lines_sample_terms_term_name": ["HeLa"],
             "tissues_sample_terms_term_name": ["liver"],
@@ -98,7 +98,7 @@ def test_create_samples_dataframe_renames_and_drops_unmapped():
     assert list(result["donor_sex"]) == ["female"]
     assert list(result["organism"]) == ["Homo sapiens"]
     assert list(result["donor_ethnicity"]) == ["European"]
-    assert "human_donors_ethnicity_term_name" not in result.columns
+    assert "human_donors_ethnicities_term_name" not in result.columns
     assert "tissues_@id" not in result.columns
     assert list(result["**cell type"]) == ["hepatocyte"]
     assert "enriched_cell_type" not in result.columns
@@ -371,7 +371,7 @@ def test_create_samples_dataframe_donor_ethnicity_sra_pooling():
             {
                 "sample_alias": ["s1", "s2", "s3"],
                 "tissues_@id": ["/tissues/t1/", "/tissues/t2/", "/tissues/t3/"],
-                "human_donors_ethnicity_term_name": [
+                "human_donors_ethnicities_term_name": [
                     "European",
                     "Asian; European",
                     None,
@@ -397,7 +397,7 @@ def test_create_samples_dataframe_donor_ethnicity_skips_non_tissue():
                 "cell_lines_@id": [None, "/cell_lines/c1/", None, None],
                 "organoids_@id": [None, None, "/organoids/o1/", None],
                 "primary_cell_cultures_@id": [None, None, None, "/primary_cell_cultures/p1/"],
-                "human_donors_ethnicity_term_name": ["European"] * 4,
+                "human_donors_ethnicities_term_name": ["European"] * 4,
             }
         )
     )
@@ -413,7 +413,7 @@ def test_create_samples_dataframe_omits_donor_ethnicity_without_tissue():
             {
                 "sample_alias": ["line"],
                 "cell_lines_@id": ["/cell_lines/c1/"],
-                "human_donors_ethnicity_term_name": ["European"],
+                "human_donors_ethnicities_term_name": ["European"],
             }
         )
     )

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- `HumanDonor.ethnicity` is replaced by the list-valued `HumanDonor.ethnicities`;
+  the flattener reads `human_donors_ethnicities_term_id` / `_term_name` and no
+  longer reads `ethnicity`. Before this, ethnicity silently dropped off GEO, SRA
+  biosample and SAMPLES, and BIOHUB defaulted every human to `unknown`.
+  - BIOHUB `self_reported_ethnicity_ontology_term_id`: several ids are sorted and
+    joined with ` || `; an empty list on a human donor is `unknown` (`na` for
+    non-human).
+  - GEO `donor_ethnicity`, SRA biosample `ethnicity` and SAMPLES
+    `donor_ethnicity`: when the library's samples reference more than one
+    distinct human donor, several terms read `pooled: a, b` (as before); with
+    exactly one donor they read `a; b`. Without `human_donors_@id` the donor
+    count is unknown and the pooled form is used.
+
 - The GEO and SAMPLES sheets' `processed data file` columns now hold each
   RawMatrixFile's `geo_file_name` instead of its alias. The main and sample
   dataframes gain a `raw_matrix_files_geo_file_name` column (`raw_matrix_file_alias`

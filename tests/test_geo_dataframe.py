@@ -106,7 +106,7 @@ def test_create_geo_dataframe_donor_ethnicity_for_tissue():
             gex_row(
                 **{
                     "tissues_@id": "/tissues/t1/",
-                    "human_donors_ethnicity_term_name": "European",
+                    "human_donors_ethnicities_term_name": "European",
                 }
             )
         ]
@@ -124,13 +124,13 @@ def test_create_geo_dataframe_donor_ethnicity_pools_and_gaps():
             gex_row(
                 **{
                     "tissues_@id": "/tissues/t1/",
-                    "human_donors_ethnicity_term_name": "European",
+                    "human_donors_ethnicities_term_name": "European",
                 }
             ),
             gex_row(
                 **{
                     "tissues_@id": "/tissues/t2/",
-                    "human_donors_ethnicity_term_name": None,
+                    "human_donors_ethnicities_term_name": None,
                 }
             ),
         ]
@@ -148,7 +148,7 @@ def test_create_geo_dataframe_omits_donor_ethnicity_for_cell_line():
             gex_row(
                 **{
                     "cell_lines_@id": "/cell_lines/c1/",
-                    "human_donors_ethnicity_term_name": "European",
+                    "human_donors_ethnicities_term_name": "European",
                 }
             )
         ]
