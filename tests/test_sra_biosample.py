@@ -853,7 +853,7 @@ def test_geo_loc_name_ignores_non_sample_objects():
 
 def test_a_donor_without_an_ethnicity_adds_the_gap():
     main_df = donor_main_df(
-        human_donors_ethnicity_term_name=[None, "European American", None, "European American"]
+        human_donors_ethnicities_term_name=[None, "European American", None, "European American"]
     )
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
@@ -869,7 +869,7 @@ def test_no_ethnicity_column_omits_the_ethnicity_column():
 
 def test_ethnicity_is_human_only():
     """The field is on HumanDonor, so a non-human run has no such column."""
-    main_df = donor_main_df(non_human_donors_ethnicity_term_name=["Asian"] * 4)
+    main_df = donor_main_df(non_human_donors_ethnicities_term_name=["Asian"] * 4)
 
     sra_df = make_flattener().create_sra_biosample_dataframe(main_df)
 
@@ -882,7 +882,7 @@ def test_ethnicity_is_human_only():
 )
 def test_ethnicity_omitted_for_non_tissue_sample_types(id_col):
     main_df = donor_main_df(
-        human_donors_ethnicity_term_name=["European"] * 4,
+        human_donors_ethnicities_term_name=["European"] * 4,
         **{
             "tissues_@id": [None] * 4,
             id_col: [f"/{id_col.split('_@id')[0]}/x1/"] * 4,

@@ -33,7 +33,7 @@ CONFIGS = Configs(
         "diseases": {"type": "array", "elements": "string"},
         "sample_terms": {"type": "array", "elements": "string"},
         "donors": {"type": "array", "elements": "string"},
-        "ethnicity": {"type": "string"},
+        "ethnicities": {"type": "array", "elements": "string"},
     },
     OBJECT_CONFIG={
         "droplet_based_libraries": {
@@ -52,8 +52,8 @@ CONFIGS = Configs(
         },
         "human_donors": {
             "api_type": "HumanDonor",
-            "fields": ["@id", "ethnicity"],
-            "references": {"ethnicity": "controlled_terms"},
+            "fields": ["@id", "ethnicities"],
+            "references": {"ethnicities": "controlled_terms"},
         },
         "controlled_terms": {
             "api_type": "ControlledTerm",
@@ -85,7 +85,7 @@ def recorded_requests(monkeypatch):
     def fake_get_report(obj_type, filter_url, field_lst, connection):
         calls.append({"type": obj_type, "filter": filter_url, "fields": field_lst})
         if obj_type == "HumanDonor":
-            return [{"@id": "/human_donors/d1/", "ethnicity": EUROPEAN["@id"]}]
+            return [{"@id": "/human_donors/d1/", "ethnicities": [EUROPEAN["@id"]]}]
         if obj_type == "ControlledTerm":
             return [t for t in RESOLVED_TERMS.values() if f"@id={t['@id']}" in filter_url]
         return []
@@ -291,14 +291,14 @@ def test_reference_on_a_related_object_resolves():
     Path through _flatten_resolved_references: the term lives on the donor, not
     on the sample, and must not be flattened to a string by _join_unique.
     """
-    donor = {"@id": "/human_donors/d1/", "ethnicity": EUROPEAN["@id"]}
+    donor = {"@id": "/human_donors/d1/", "ethnicities": [EUROPEAN["@id"]]}
     row = _main_row(
         _tissue(donors=["/human_donors/d1/"]),
         extra_lib_data={"human_donors": [donor]},
     )
 
-    assert row["human_donors_ethnicity_term_id"] == "HANCESTRO:0005"
-    assert row["human_donors_ethnicity_term_name"] == "European"
+    assert row["human_donors_ethnicities_term_id"] == "HANCESTRO:0005"
+    assert row["human_donors_ethnicities_term_name"] == "European"
 
 
 # --- missing values ---

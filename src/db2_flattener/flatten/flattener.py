@@ -690,7 +690,7 @@ class DB2Flattener:
         columns_to_keep = [k for k in PROP_MAP_SAMPLES if k in sample_df.columns]
         columns_to_keep.extend(
             c
-            for c in ("human_donors_ethnicity_term_name", "tissues_@id")
+            for c in ("human_donors_ethnicities_term_name", "human_donors_@id", "tissues_@id")
             if c in sample_df.columns and c not in columns_to_keep
         )
         columns_to_keep.extend(
@@ -881,15 +881,10 @@ class DB2Flattener:
 
         ethnicity = {}
         if "*library name" in geo_df.columns:
-            ethnicity = self._sample_field_by_library(
+            ethnicity = self._ethnicity_by_library(
                 geo_source,
                 geo_df["*library name"],
-                "ethnicity_term_name",
-                prefixes=("human_donors",),
-                optional=True,
-                split_joined=True,
-                formatter=self._format_pooled_values,
-                include=self._tissue_row_mask(geo_source),
+                self._tissue_row_mask(geo_source),
             )
 
         group_col = "*library name"
@@ -1315,15 +1310,10 @@ class DB2Flattener:
             split_joined=True,
             formatter=self._format_pooled_sex,
         )
-        ethnicity = self._sample_field_by_library(
+        ethnicity = self._ethnicity_by_library(
             main_df,
             sra_df["sample_name"],
-            "ethnicity_term_name",
-            prefixes=("human_donors",),
-            optional=True,
-            split_joined=True,
-            formatter=self._format_pooled_values,
-            include=self._tissue_row_mask(main_df),
+            self._tissue_row_mask(main_df),
         )
         age = self._sample_field_by_library(
             main_df,
@@ -2649,19 +2639,92 @@ class DB2Flattener:
         df.loc[missing, col] = "na"
         return df
 
+    HUMAN_DONOR_ID_COL = "human_donors_@id"
+
+    @staticmethod
+    def _donor_ids(val) -> set[str]:
+        """Distinct donor @ids in one MAIN cell: a '; '-joined string or a list."""
+        return {
+            part.strip() for item in to_items(val) for part in str(item).split("; ") if part.strip()
+        }
+
+    @classmethod
+    def _format_ethnicity(cls, values, donor_count) -> str | None:
+        """
+        One cell for the ethnicities of a library's (or sample's) human donors.
+
+        Several terms from exactly one donor are that donor's own, so they read
+        'a; b'. With more than one donor, or an unknown count, the terms are the
+        merged set across donors and keep the 'pooled: a, b' form.
+        """
+        entries = [value for value in values if value]
+        if not entries:
+            return None
+        if donor_count == 1:
+            return "; ".join(entries)
+        return cls._format_pooled_values(entries)
+
+    def _ethnicity_by_library(self, main_df, library_key, include) -> dict:
+        """
+        Per-library ethnicity cell from HumanDonor.ethnicities, tissue rows only.
+
+        The donor count is the number of distinct human donors across the
+        library's included rows, read from human_donors_@id. Without that column
+        the count is unknown and the pooled form is used.
+        """
+        terms = self._sample_field_by_library(
+            main_df,
+            library_key,
+            "ethnicities_term_name",
+            prefixes=("human_donors",),
+            optional=True,
+            split_joined=True,
+            formatter=list,
+            include=include,
+        )
+        if not terms:
+            return {}
+
+        donors_by_library: dict[str, set[str]] = {}
+        if self.HUMAN_DONOR_ID_COL in main_df.columns:
+            for library, keep, cell in zip(
+                library_key, include, main_df[self.HUMAN_DONOR_ID_COL], strict=True
+            ):
+                if keep and isinstance(library, str):
+                    donors_by_library.setdefault(library, set()).update(self._donor_ids(cell))
+        return {
+            library: self._format_ethnicity(
+                values, len(donors_by_library[library]) if library in donors_by_library else None
+            )
+            for library, values in terms.items()
+        }
+
     def _add_samples_donor_ethnicity(self, sample_df) -> pd.DataFrame:
         """SRA-style pooled ethnicity for tissue rows only; drop source columns."""
-        source = "human_donors_ethnicity_term_name"
+        source = "human_donors_ethnicities_term_name"
+        donor_col = self.HUMAN_DONOR_ID_COL
         tissue = self._tissue_row_mask(sample_df)
-        drop = [c for c in (source, "tissues_@id") if c in sample_df.columns]
+        drop = [c for c in (source, donor_col, "tissues_@id") if c in sample_df.columns]
         if source not in sample_df.columns:
             return sample_df.drop(columns=drop) if drop else sample_df
 
-        def _cell(val):
-            texts = self._field_texts((val,), None, True, None)
-            return self._format_pooled_values(sorted(texts)) if texts else None
+        if donor_col in sample_df.columns:
+            donor_counts = [len(self._donor_ids(cell)) for cell in sample_df[donor_col]]
+        else:
+            donor_counts = [None] * len(sample_df)
 
-        values = sample_df[source].map(_cell).where(tissue)
+        def _cell(val, donors):
+            texts = self._field_texts((val,), None, True, None)
+            return self._format_ethnicity(sorted(texts), donors) if texts else None
+
+        values = pd.Series(
+            [
+                _cell(val, donors)
+                for val, donors in zip(sample_df[source], donor_counts, strict=True)
+            ],
+            index=sample_df.index,
+            dtype=object,
+        ).where(tissue)
         sample_df = sample_df.drop(columns=drop)
         if not values.notna().any():
             return sample_df
@@ -3265,6 +3328,13 @@ class DB2Flattener:
                 biohub_df["organism_ontology_term_id"] == "NCBITaxon:9606", "unknown", "na"
             )
         else:
+            # HumanDonor.ethnicities is a list, so a donor with none arrives as an
+            # empty list or tuple rather than a null: treat those as missing too
+            biohub_df["self_reported_ethnicity_ontology_term_id"] = biohub_df[
+                "self_reported_ethnicity_ontology_term_id"
+            ].apply(
+                lambda v: pd.NA if (isinstance(v, (list, tuple)) and not v) or is_empty(v) else v
+            )
             biohub_df.loc[
                 biohub_df["self_reported_ethnicity_ontology_term_id"].isna()
                 & (biohub_df["organism_ontology_term_id"] == "NCBITaxon:9606"),
