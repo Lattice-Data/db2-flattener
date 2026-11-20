@@ -23,10 +23,10 @@ From the repository root:
 pip install -e ".[dev]"
 ```
 
-Pin a release (requires the `v1.0.1` tag on GitHub):
+Pin a release (requires the `v2.0.0` tag on GitHub):
 
 ```bash
-pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v1.0.1"
+pip install "db2-flattener @ git+https://github.com/Lattice-Data/db2-flattener.git@v2.0.0"
 ```
 
 Check the running code with `db2-flattener --version`.

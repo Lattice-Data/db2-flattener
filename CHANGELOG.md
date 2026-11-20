@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 2.0.0
+
+### Breaking changes
+
+- Requires the database schema with the list-valued `HumanDonor.ethnicities`.
+  Versions 1.x run against it silently drop ethnicity from GEO, SRA biosample
+  and SAMPLES, and report every human as `unknown` on BIOHUB.
+- SRA outputs are tab-separated: `sra_file_set{N}.tsv` and
+  `sra_biosample_set{N}.tsv` replace the `.csv` files.
+- MAIN.csv: `sample_alias` is removed, and `raw_matrix_file_alias` keeps the lab
+  prefix.
+- Ethnicity cells use a new format (`pooled: a, b` across donors, `a; b` for one
+  donor).
+- Flatten now refuses (exit 1) orders it used to accept: multiome or ATAC
+  libraries, RawMatrixFiles sharing a `geo_file_name`, and gathered objects with
+  `status: deleted`.
+- `DB2Flattener.flatten_matrix_file_set` takes `biohub_versions` /
+  `biohub_version`, and several `flatten/biohub_version.py` helpers are
+  replaced.
+
+### Changes
+
 - `HumanDonor.ethnicity` is replaced by the list-valued `HumanDonor.ethnicities`;
   the flattener reads `human_donors_ethnicities_term_id` / `_term_name` and no
   longer reads `ethnicity`. Before this, ethnicity silently dropped off GEO, SRA
