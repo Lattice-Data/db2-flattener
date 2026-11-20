@@ -690,7 +690,12 @@ class DB2Flattener:
         columns_to_keep = [k for k in PROP_MAP_SAMPLES if k in sample_df.columns]
         columns_to_keep.extend(
             c
-            for c in ("human_donors_ethnicities_term_name", "human_donors_@id", "tissues_@id")
+            for c in (
+                "human_donors_ethnicities_term_name",
+                "human_donors_@id",
+                self.DONORS_WITHOUT_ETHNICITIES_COL,
+                "tissues_@id",
+            )
             if c in sample_df.columns and c not in columns_to_keep
         )
         columns_to_keep.extend(
@@ -2642,6 +2647,11 @@ class DB2Flattener:
     HUMAN_DONOR_ID_COL = "human_donors_@id"
     # Stands in for the donor of a tissue row that has no human donor id
     UNKNOWN_DONOR = "<unknown donor>"
+    # MAIN column listing the human donors (by @id) that have no ethnicities
+    DONORS_WITHOUT_ETHNICITIES_COL = "human_donors_without_ethnicities"
+    # Cell value for a donor whose ethnicity is unknown, as on the other
+    # GEO / SRA biosample cells
+    ETHNICITY_GAP = "not provided"
 
     @staticmethod
     def _donor_ids(val) -> set[str]:
@@ -2700,19 +2710,34 @@ class DB2Flattener:
                     donors_by_library.setdefault(library, set()).update(
                         self._donor_ids(cell) or {self.UNKNOWN_DONOR}
                     )
-        return {
-            library: self._format_ethnicity(
-                values, len(donors_by_library[library]) if library in donors_by_library else None
-            )
-            for library, values in terms.items()
-        }
+
+        # Donors with no ethnicities add nothing to the terms, so say so: a
+        # known donor pooled with an unknown one must not read as one ethnicity
+        unknown_by_library: dict[str, set[str]] = {}
+        if self.DONORS_WITHOUT_ETHNICITIES_COL in main_df.columns:
+            for library, keep, cell in zip(
+                library_key, include, main_df[self.DONORS_WITHOUT_ETHNICITIES_COL], strict=True
+            ):
+                if keep and isinstance(library, str):
+                    unknown_by_library.setdefault(library, set()).update(self._donor_ids(cell))
+
+        cells = {}
+        for library, values in terms.items():
+            if unknown_by_library.get(library) and self.ETHNICITY_GAP not in values:
+                values = [*values, self.ETHNICITY_GAP]
+            donors = len(donors_by_library[library]) if library in donors_by_library else None
+            cells[library] = self._format_ethnicity(values, donors)
+        return cells
 
     def _add_samples_donor_ethnicity(self, sample_df) -> pd.DataFrame:
         """SRA-style pooled ethnicity for tissue rows only; drop source columns."""
         source = "human_donors_ethnicities_term_name"
         donor_col = self.HUMAN_DONOR_ID_COL
+        unknown_col = self.DONORS_WITHOUT_ETHNICITIES_COL
         tissue = self._tissue_row_mask(sample_df)
-        drop = [c for c in (source, donor_col, "tissues_@id") if c in sample_df.columns]
+        drop = [
+            c for c in (source, donor_col, unknown_col, "tissues_@id") if c in sample_df.columns
+        ]
         if source not in sample_df.columns:
             return sample_df.drop(columns=drop) if drop else sample_df
 
@@ -2720,15 +2745,23 @@ class DB2Flattener:
             donor_counts = [len(self._donor_ids(cell)) for cell in sample_df[donor_col]]
         else:
             donor_counts = [None] * len(sample_df)
+        if unknown_col in sample_df.columns:
+            has_unknown = [bool(self._donor_ids(cell)) for cell in sample_df[unknown_col]]
+        else:
+            has_unknown = [False] * len(sample_df)
 
-        def _cell(val, donors):
-            texts = self._field_texts((val,), None, True, None)
-            return self._format_ethnicity(sorted(texts), donors) if texts else None
+        def _cell(val, donors, unknown):
+            texts = sorted(self._field_texts((val,), None, True, None))
+            if texts and unknown and self.ETHNICITY_GAP not in texts:
+                texts.append(self.ETHNICITY_GAP)
+            return self._format_ethnicity(texts, donors) if texts else None
 
         values = pd.Series(
             [
-                _cell(val, donors)
-                for val, donors in zip(sample_df[source], donor_counts, strict=True)
+                _cell(val, donors, unknown)
+                for val, donors, unknown in zip(
+                    sample_df[source], donor_counts, has_unknown, strict=True
+                )
             ],
             index=sample_df.index,
             dtype=object,
@@ -2736,7 +2769,7 @@ class DB2Flattener:
         sample_df = sample_df.drop(columns=drop)
         if not values.notna().any():
             return sample_df
-        values = values.mask(tissue & values.isna(), "not provided")
+        values = values.mask(tissue & values.isna(), self.ETHNICITY_GAP)
         sample_df["donor_ethnicity"] = values
         return sample_df
 
@@ -3510,6 +3543,19 @@ class DB2Flattener:
 
                 else:
                     sample_metadata[sample_key][col] = self._join_unique(values) if values else None
+
+            # A donor with no ethnicities adds nothing to the merged terms above,
+            # so a sample pooling a known and an unknown donor would read as one
+            # ethnicity. Record which donors are unknown, so GEO, SRA biosample and
+            # SAMPLES can say so. Only when 'ethnicities' is a fetched field:
+            # otherwise every donor would look unknown.
+            if url_prefix == "human_donors" and "ethnicities" in obj_config.get("fields", []):
+                unknown = [
+                    obj.get("@id") for obj in resolved_objs if is_empty(obj.get("ethnicities"))
+                ]
+                sample_metadata[sample_key][self.DONORS_WITHOUT_ETHNICITIES_COL] = (
+                    self._join_unique(unknown) if unknown else None
+                )
 
     def _resolve_controlled_term(self, term_ref, resolved_controlled_terms):
         """
